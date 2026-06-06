@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>학습 프레임워크 · 컴활1급</title>
+
+  <!-- ── CDN: 폰트 (UI규격 §9, _인터페이스계약 §16 허용) ── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- ── CDN: KaTeX(수식) + marked(마크다운) — back.detail / cloze 렌더 ── -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<!--
+  body[data-route]          : 활성 ROUTE enum (UI규격 §1.1 검증 훅)
+  body[data-viewport-mode]  : mobile|tablet|desktop (§8)
+-->
+<body data-route="quiz" data-viewport-mode="desktop">
+
+<div id="read-bar"></div>
+
+<div class="app-shell">
+
+  <!-- ══════════════════════════════════════════════
+       사이드바 (REF) — 접이식 area/subarea 네비 + 전체 진도바
+       데이터구동: MANIFEST[subject].areas / .decks 로 #nav 생성
+  ══════════════════════════════════════════════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <div class="brand-glyph" id="brand-glyph">컴</div>
+        <div>
+          <div class="brand-name" id="brand-name">컴활1급 학습</div>
+          <div class="brand-sub" id="brand-sub">Leitner · 인출연습 · 자가테스트</div>
+        </div>
+      </div>
+      <div class="overall">
+        <div class="overall-top"><span>전체 정복률</span><span class="overall-pct" id="ov-pct">0%</span></div>
+        <div class="bar"><i id="ov-bar"></i></div>
+      </div>
+    </div>
+    <nav class="nav" id="nav" aria-label="단원 네비게이션"></nav>
+  </aside>
+  <div class="drawer-scrim" id="scrim"></div>
+
+  <!-- ══════════════════════════════════════════════
+       메인 콘텐츠
+  ══════════════════════════════════════════════ -->
+  <main class="main-content" id="main-content" role="main">
+
+    <!-- 툴바 (REF) — sticky 검색 + 필터칩 + route 전환 -->
+    <div class="toolbar">
+      <button class="menu-btn" id="menu-btn" aria-label="메뉴">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="app-header__logo">컴활1급 학습</span>
+      <div class="search-wrap">
+        <svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="search" type="text" placeholder="개념·함수 검색 (예: VLOOKUP, 피벗)" autocomplete="off" />
+      </div>
+      <div class="chips" id="freq-chips" aria-label="빈출 레벨 필터">
+        <button class="chip active" data-lv="all">전체</button>
+        <button class="chip lv3" data-lv="3"><span class="dot">★★★</span>최빈출</button>
+        <button class="chip lv2" data-lv="2"><span class="dot">★★</span>빈출</button>
+        <button class="chip lv1" data-lv="1"><span class="dot">★</span>심화</button>
+      </div>
+      <nav class="app-header__nav" role="navigation" aria-label="주 메뉴">
+        <button type="button" class="nav-btn" data-route-trigger="quiz" aria-label="퀴즈 화면">퀴즈</button>
+        <button type="button" class="nav-btn" data-route-trigger="dashboard" aria-label="대시보드">대시보드</button>
+        <button type="button" class="nav-btn" data-route-trigger="concept" aria-label="개념서 뷰">개념서</button>
+        <button type="button" class="nav-btn" data-route-trigger="settings" aria-label="설정">설정</button>
+      </nav>
+    </div>
+
+    <!-- ──────────────────────────────────────────
+         QUIZ 화면 (§4) — 카드중심 재설계
+    ────────────────────────────────────────── -->
+    <section data-screen="quiz" aria-label="카드 퀴즈 세션">
+      <div class="quiz-wrap" id="quiz-active" role="region" aria-label="퀴즈 카드">
+
+        <!-- 세션 진행 (§4.1) -->
+        <div data-quiz="progress" class="quiz-progress" aria-label="세션 진행">
+          <span id="progress-current" aria-live="polite">0 / 0</span>
+          <div class="progress-bar-track" role="progressbar"
+               aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progress-track-el">
+            <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- 카드 무대 -->
+        <div class="card-container" id="card-container">
+          <div data-quiz="card-front" class="card-front" id="card-front" role="region" aria-label="카드 앞면">
+            <span class="card-type-badge" id="card-type-badge"></span>
+            <p class="card-front__prompt" id="card-front-prompt"></p>
+            <a href="#" data-quiz="concept-link" class="concept-link" id="concept-link-btn" hidden
+               aria-label="연결 개념서 섹션 보기">📖 개념서 보기</a>
+          </div>
+
+          <div data-quiz="card-back" class="card-back" id="card-back" hidden role="region" aria-label="카드 뒷면">
+            <div class="card-back__detail prose" id="card-back-detail"></div>
+            <div class="card-back__note" id="card-back-note"></div>
+          </div>
+        </div>
+
+        <!-- 입력 영역 (§4.2) — 활성 grade_mode 블록만 표시 -->
+        <div data-quiz="answer-input" data-grade-mode="exact" class="answer-area" id="input-exact" hidden>
+          <label class="answer-label" for="input-exact-field">정답 입력</label>
+          <input type="text" id="input-exact-field" autocomplete="off" autocorrect="off"
+                 autocapitalize="off" spellcheck="false" placeholder="정답을 입력하세요" aria-label="정답 입력 (exact)" />
+        </div>
+
+        <div data-quiz="answer-input" data-grade-mode="keyword" class="answer-area" id="input-keyword" data-input-fallback="full" hidden>
+          <label class="answer-label" for="input-keyword-field">키워드 입력 (쉼표 또는 줄바꿈으로 구분)</label>
+          <textarea id="input-keyword-field" rows="3" placeholder="핵심 키워드를 입력하세요" aria-label="키워드 입력 (keyword)"></textarea>
+        </div>
+
+        <div data-quiz="answer-input" data-grade-mode="cloze" class="answer-area" id="input-cloze" hidden>
+          <span class="answer-label">빈칸 채우기</span>
+          <!-- 빈칸 input은 와이어링이 answer_spec.blanks 기준 동적 생성 (data-blank-index, 0-base) -->
+          <div class="cloze-text-wrap" id="cloze-render-area" aria-label="빈칸 채우기 영역"></div>
+        </div>
+
+        <div data-quiz="self-grade" class="self-grade" id="input-self" hidden role="group" aria-label="자가 채점 O X">
+          <button type="button" class="btn-verdict" data-self-verdict="o" aria-label="정답 (O)">
+            <span aria-hidden="true">○</span><span class="btn-verdict__label">맞았어요</span>
+          </button>
+          <button type="button" class="btn-verdict" data-self-verdict="x" aria-label="오답 (X)">
+            <span aria-hidden="true">✕</span><span class="btn-verdict__label">틀렸어요</span>
+          </button>
+        </div>
+
+        <!-- 정답 확인 (유일 primary CTA, §4.1) -->
+        <button type="button" data-quiz="reveal" class="btn-reveal" id="btn-reveal" aria-label="정답 확인">정답 확인</button>
+
+        <!-- 피드백 -->
+        <div id="feedback-area" class="answer-area" hidden aria-live="polite">
+          <div id="verdict-display" class="feedback-row"></div>
+          <div id="feedback-detail" class="text-muted"></div>
+        </div>
+
+        <!-- 다음 / 넘기기 -->
+        <div class="answer-area" id="nav-area" hidden style="display:flex;flex-direction:column;gap:var(--space-2);">
+          <button type="button" class="btn-next" id="btn-next" aria-label="다음 카드">다음 카드 →</button>
+          <button type="button" class="btn-skip" id="btn-skip-card" aria-label="이 카드 넘기기">넘기기</button>
+        </div>
+      </div><!-- /#quiz-active -->
+
+      <!-- 빈상태 #1 EMPTY_NO_DECK (§1.3) -->
+      <div id="empty-no-deck" class="empty-state" hidden aria-live="polite">
+        <div class="empty-state__icon" aria-hidden="true">📂</div>
+        <h2 class="empty-state__title">학습할 덱이 없습니다</h2>
+        <p class="empty-state__desc">덱(.js) 파일을 생성한 후 다시 시작하세요.<br />설정에서 경로를 확인할 수 있습니다.</p>
+        <button type="button" class="btn-settings-action" data-route-trigger="settings" aria-label="설정으로 이동">설정으로 이동</button>
+      </div>
+
+      <!-- 빈상태 #3 EMPTY_ALL_FUTURE (§1.3, §1.4) -->
+      <div id="empty-all-future" class="empty-state" hidden aria-live="polite">
+        <div class="empty-state__icon" aria-hidden="true">🎉</div>
+        <h2 class="empty-state__title">오늘 due 없음</h2>
+        <p class="empty-state__desc">오늘 복습할 카드가 없습니다.<br />전체 복습을 원하면 아래 버튼을 누르세요.</p>
+        <button type="button" class="btn-force-review" data-action="force-review-all" aria-label="전체 복습 강제 소환">전체복습 시작</button>
+      </div>
+
+      <!-- 스토리지 오류 (E_STORAGE_SCHEMA) -->
+      <div id="storage-error-area" class="storage-error-banner" hidden aria-live="assertive">
+        <strong>진도 데이터 오류</strong>
+        <span id="storage-error-msg">로컬 저장소에 문제가 발생했습니다.</span>
+        <button type="button" class="btn-settings-action" data-route-trigger="settings" style="align-self:flex-start;">설정에서 백업/내보내기</button>
+      </div>
+    </section><!-- /quiz -->
+
+    <!-- ──────────────────────────────────────────
+         DASHBOARD 화면 (§6) — REF 위젯 톤, 4위젯 순서 고정
+    ────────────────────────────────────────── -->
+    <section data-screen="dashboard" hidden aria-label="진단 대시보드">
+      <div class="dashboard-wrap">
+        <div class="dashboard-header">
+          <h1 class="dashboard-title">진단 대시보드</h1>
+          <p class="dash-sub">인출연습 기반 학습 진단 · 영역별 정복도</p>
+        </div>
+        <div class="widget-grid">
+
+          <article data-widget="retrieval" aria-label="인출성취율 위젯">
+            <h2 class="widget-header">인출성취율</h2>
+            <p data-proxy-label class="text-muted" style="font-size:var(--fs-xs)">인출성취율(proxy) — cold 첫시도 정답률</p>
+            <div class="widget-body">
+              <div id="retrieval-list" class="retrieval-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+
+          <article data-widget="weakness" aria-label="약점진단 위젯">
+            <h2 class="widget-header">약점 단원 TOP 5</h2>
+            <div class="widget-body">
+              <div id="weakness-list" class="weakness-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+
+          <article data-widget="pass-path" aria-label="합격경로 진단 위젯">
+            <h2 class="widget-header">목표 대비 진도</h2>
+            <div class="widget-body">
+              <div id="pass-path-list" class="pass-path-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+
+          <article data-widget="progress-bar" aria-label="완주 진도바 위젯">
+            <h2 class="widget-header">Leitner 박스 분포</h2>
+            <div class="widget-body">
+              <div id="completion-list" class="completion-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+            <div class="stack-bar__legend" aria-label="박스 색상 범례">
+              <span class="legend-item"><span class="legend-dot box1" aria-hidden="true"></span>Box 1</span>
+              <span class="legend-item"><span class="legend-dot box2" aria-hidden="true"></span>Box 2</span>
+              <span class="legend-item"><span class="legend-dot box3" aria-hidden="true"></span>Box 3 (정복)</span>
+            </div>
+          </article>
+
+        </div>
+      </div>
+    </section><!-- /dashboard -->
+
+    <!-- ──────────────────────────────────────────
+         CONCEPT 화면 (§5) — REF 읽기 레이아웃
+    ────────────────────────────────────────── -->
+    <section data-screen="concept" hidden aria-label="개념서 뷰">
+      <div class="concept-wrap">
+        <button type="button" data-concept="back-to-quiz" class="concept-back-btn" aria-label="퀴즈로 돌아가기">← 퀴즈로 돌아가기</button>
+        <div data-concept="body" id="concept-body" role="region" aria-label="개념서 본문">
+          <p class="text-muted">개념서 섹션을 선택하면 내용이 표시됩니다.</p>
+        </div>
+      </div>
+    </section><!-- /concept -->
+
+    <!-- ──────────────────────────────────────────
+         SETTINGS 화면 (§9.2)
+    ────────────────────────────────────────── -->
+    <section data-screen="settings" hidden aria-label="설정">
+      <div class="settings-wrap">
+        <div class="settings-section">
+          <h2 class="settings-section__title">진도 내보내기 / 백업</h2>
+          <p class="text-muted">학습 진도·오답 데이터를 JSON 파일로 내보냅니다.</p>
+          <button type="button" data-settings="export" class="btn-settings-action" aria-label="진도 데이터 내보내기">내보내기 (JSON)</button>
+          <div id="export-result" aria-live="polite" class="text-muted"></div>
+        </div>
+        <div class="settings-section">
+          <h2 class="settings-section__title">테마</h2>
+          <div data-settings="theme" aria-label="테마 전환 (준비 중)">종이톤(Gowun Batang) 단일 테마 — 추가 팔레트 준비 중</div>
+        </div>
+        <div id="settings-error-area" hidden aria-live="assertive" class="storage-error-banner">
+          <strong>저장소 오류</strong><span id="settings-error-msg"></span>
+        </div>
+      </div>
+    </section><!-- /settings -->
+
+  </main>
+</div><!-- /.app-shell -->
+
+<!-- ============================================================
+     생성물 script 로드 순서 (SoT §16): synonyms → manifest → decks → app.js
+     전역 등록: window.SYNONYMS / window.MANIFEST / window.DECKS
+     file:// 더블클릭 OK, fetch 금지
+============================================================ -->
+<script src="../../과목/컴활1급/생성물/synonyms.js"></script>
+<script src="../../과목/컴활1급/생성물/manifest.js"></script>
+<script src="../../과목/컴활1급/생성물/decks/ss_unit1.js"></script>
+
+<!-- app.js: 엔진 코어 + 노출 API (편집 금지) -->
+<script src="app.js"></script>
+
+<!-- ============================================================
+     인라인 와이어링 (표시계약 구현)
+     - 노출 API만 호출: window.APP.* / window.__CLF__.* (UI규격 §11)
+     - app.js 로직·DOM훅(노출 API) 보존, 데이터구동(DECKS/MANIFEST/SYNONYMS)
+============================================================ -->
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var qsa = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  var SUBJECT = 'comp1';
+  var TYPE_LABEL = { func: '함수', proc: '절차', recall_seq: '순서', cloze: '빈칸', judge: '판단' };
+
+  /* ── 뷰포트 모드 (§8) ── */
+  function detectViewport() {
+    var w = window.innerWidth;
+    document.body.setAttribute('data-viewport-mode', w < 600 ? 'mobile' : w < 1024 ? 'tablet' : 'desktop');
+  }
+  detectViewport();
+  window.addEventListener('resize', detectViewport);
+
+  /* ── 라우팅 (§1.1) ── */
+  var ROUTES = ['quiz', 'dashboard', 'concept', 'settings'];
+  function setRoute(route) {
+    if (ROUTES.indexOf(route) === -1) { console.warn('[E_ROUTE_UNKNOWN]', route); route = 'quiz'; }
+    document.body.setAttribute('data-route', route);
+    qsa('[data-screen]').forEach(function (sec) {
+      var on = sec.getAttribute('data-screen') === route;
+      if (on) sec.removeAttribute('hidden'); else sec.setAttribute('hidden', '');
+    });
+    qsa('[data-route-trigger]').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-route-trigger') === route);
+    });
+    if (route === 'dashboard') renderDashboard();
+    if (route === 'concept') renderConcept();
+    window.scrollTo(0, 0);
+  }
+  qsa('[data-route-trigger]').forEach(function (b) {
+    b.addEventListener('click', function () { setRoute(b.getAttribute('data-route-trigger')); });
+  });
+
+  /* ── 사이드바 드로어 (모바일) ── */
+  var sidebar = $('sidebar'), scrim = $('scrim');
+  function closeDrawer() { sidebar.classList.remove('open'); scrim.classList.remove('show'); }
+  if ($('menu-btn')) $('menu-btn').addEventListener('click', function () {
+    sidebar.classList.toggle('open'); scrim.classList.toggle('show');
+  });
+  scrim.addEventListener('click', closeDrawer);
+
+  /* ── markdown + KaTeX 렌더 헬퍼 ── */
+  function renderMarkdown(el, mdText) {
+    if (!mdText) { el.innerHTML = ''; return; }
+    var html;
+    try { html = (window.marked ? window.marked.parse(mdText) : mdText.replace(/</g, '&lt;')); }
+    catch (e) { html = mdText.replace(/</g, '&lt;'); }
+    el.innerHTML = html;
+    // 테이블 래핑 (REF 스크롤)
+    qsa('table', el).forEach(function (t) {
+      if (t.parentElement && t.parentElement.classList.contains('table-wrap')) return;
+      var w = document.createElement('div'); w.className = 'table-wrap';
+      t.parentNode.insertBefore(w, t); w.appendChild(t);
+    });
+    try {
+      if (window.renderMathInElement) window.renderMathInElement(el, {
+        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false },
+                     { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }],
+        throwOnError: false
+      });
+    } catch (e) {}
+  }
+
+  /* ── 빈출레벨 (weight → 3/2/1) ── */
+  function levelOf(card) {
+    var w = (card.tags && typeof card.tags.weight === 'number') ? card.tags.weight : 5;
+    return w >= 8 ? 3 : w >= 5 ? 2 : 1;
+  }
+
+  /* ── 사이드바 네비 빌드 (데이터구동: MANIFEST.areas + .decks) ── */
+  function buildNav(manifest) {
+    var nav = $('nav'); nav.innerHTML = '';
+    var areas = (manifest && manifest.areas) || [];
+    var decks = (manifest && manifest.decks) || [];
+    areas.forEach(function (a, i) {
+      var areaDecks = decks.filter(function (d) { return d.area === a.area && d.subarea === a.subarea; });
+      if (areaDecks.length === 0) return;
+      var grp = document.createElement('div'); grp.className = 'nav-group' + (i === 0 ? ' open' : '');
+      var head = document.createElement('button'); head.className = 'nav-grp-head'; head.type = 'button';
+      head.innerHTML = '<span class="grp-no">' + (i + 1) + '</span>' +
+        '<span class="grp-name">' + (a.label || a.subarea) + '</span>' +
+        '<span class="grp-pct">' + areaDecks.length + '덱</span>' +
+        '<svg class="grp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>';
+      head.addEventListener('click', function () { grp.classList.toggle('open'); });
+      var items = document.createElement('div'); items.className = 'nav-items';
+      areaDecks.forEach(function (d) {
+        var link = document.createElement('a'); link.className = 'nav-link'; link.href = '#';
+        link.innerHTML = '<span class="nl-id">' + (d.card_count || '') + '</span><span>' + (d.title || d.deck_id) + '</span>';
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          qsa('.nav-link').forEach(function (l) { l.classList.remove('active'); });
+          link.classList.add('active'); closeDrawer();
+          setRoute('concept');
+        });
+        items.appendChild(link);
+      });
+      grp.appendChild(head); grp.appendChild(items); nav.appendChild(grp);
+    });
+  }
+
+  /* ── 브랜드/히어로 메타 ── */
+  function applyMeta(manifest) {
+    if (!manifest) return;
+    if (manifest.subject_label) {
+      $('brand-name').textContent = manifest.subject_label;
+      $('brand-glyph').textContent = manifest.subject_label.charAt(0);
+    }
+  }
+
+  /* ════════════════════════════════════════════════
+     세션 상태 (와이어링 보유 — app.js 콜백/노출 API 소비)
+  ════════════════════════════════════════════════ */
+  var APP_STATE = { session: null, progressStore: null, deck: null, synonyms: undefined, current: null, total: 0, done: 0 };
+
+  function updateProgressUI() {
+    $('progress-current').textContent = APP_STATE.done + ' / ' + APP_STATE.total;
+    var pct = APP_STATE.total ? Math.round(APP_STATE.done / APP_STATE.total * 100) : 0;
+    $('progress-fill').style.width = pct + '%';
+    $('progress-track-el').setAttribute('aria-valuenow', String(pct));
+  }
+
+  function showEmpty(which) {
+    $('quiz-active').style.display = 'none';
+    $('empty-no-deck').setAttribute('hidden', '');
+    $('empty-all-future').setAttribute('hidden', '');
+    if (which) $(which).removeAttribute('hidden');
+  }
+  function showQuizActive() {
+    $('quiz-active').style.display = '';
+    $('empty-no-deck').setAttribute('hidden', '');
+    $('empty-all-future').setAttribute('hidden', '');
+  }
+
+  /* ── grade_mode별 입력 블록 표시 ── */
+  function showInputFor(card) {
+    ['exact', 'keyword', 'cloze'].forEach(function (m) {
+      var el = document.querySelector('[data-quiz="answer-input"][data-grade-mode="' + m + '"]');
+      if (el) el.setAttribute('hidden', '');
+    });
+    $('input-self').setAttribute('hidden', '');
+    var mode = card.grade_mode;
+    if (mode === 'self') { $('input-self').removeAttribute('hidden'); $('btn-reveal').textContent = '정답 보기'; }
+    else {
+      $('btn-reveal').textContent = '정답 확인';
+      var el = document.querySelector('[data-quiz="answer-input"][data-grade-mode="' + mode + '"]');
+      if (el) {
+        el.removeAttribute('hidden');
+        if (mode === 'exact') { var f = $('input-exact-field'); f.value = ''; }
+        if (mode === 'keyword') { $('input-keyword-field').value = ''; }
+        if (mode === 'cloze') renderClozeInputs(card);
+      } else {
+        // E_GRADE_MODE: 알 수 없는 모드 → self 폴백 표시
+        console.warn('[E_GRADE_MODE]', mode);
+        $('input-self').removeAttribute('hidden');
+      }
+    }
+  }
+
+  /* ── cloze 빈칸 input 동적 생성 (answer_spec.blanks, 0-base) ── */
+  function renderClozeInputs(card) {
+    var area = $('cloze-render-area'); area.innerHTML = '';
+    var spec = card.answer_spec || {};
+    var blanks = spec.blanks || [];
+    var text = (card.front && card.front.text) || '';
+    var parts = text.split(/\{\{\d+\}\}/);
+    var n = 0;
+    parts.forEach(function (seg, i) {
+      area.appendChild(document.createTextNode(seg));
+      if (i < parts.length - 1 && n < blanks.length) {
+        var inp = document.createElement('input');
+        inp.type = 'text'; inp.setAttribute('data-blank-index', String(n));
+        inp.setAttribute('aria-label', '빈칸 ' + (n + 1));
+        area.appendChild(inp); n++;
+      }
+    });
+    // 마커가 본문에 없을 경우(개수만): 순차 input 생성 폴백
+    if (n === 0 && blanks.length) {
+      area.appendChild(document.createTextNode(text + ' '));
+      for (var b = 0; b < blanks.length; b++) {
+        var inp2 = document.createElement('input'); inp2.type = 'text';
+        inp2.setAttribute('data-blank-index', String(b)); inp2.setAttribute('aria-label', '빈칸 ' + (b + 1));
+        area.appendChild(inp2);
+        if (b < blanks.length - 1) area.appendChild(document.createTextNode('  '));
+      }
+    }
+  }
+
+  /* ── 앞면 프롬프트 텍스트 (type별 front 키) ── */
+  function frontText(card) {
+    var f = card.front || {};
+    if (card.type === 'cloze') return ''; // cloze는 입력영역에서 렌더
+    return f.prompt || f.scenario || f.text || (Array.isArray(f.options) ? f.options.join(' / ') : '') || '(문항)';
+  }
+
+  /* ════════════════════════════════════════════════
+     카드 렌더 (onCard 콜백 + 다음카드 공통)
+  ════════════════════════════════════════════════ */
+  function renderCard(card) {
+    APP_STATE.current = card;
+    if (!card) { return; }
+    showQuizActive();
+
+    var lv = levelOf(card);
+    var badge = $('card-type-badge');
+    badge.textContent = TYPE_LABEL[card.type] || card.type;
+    badge.setAttribute('data-level', String(lv));
+
+    $('card-front-prompt').textContent = frontText(card);
+
+    // 개념서 링크 (links.concept_ref 존재 시)
+    var cl = $('concept-link-btn');
+    if (card.links && card.links.concept_ref) {
+      cl.removeAttribute('hidden');
+      cl.onclick = function (e) { e.preventDefault(); APP_STATE.conceptTarget = card.links.concept_ref; setRoute('concept'); };
+    } else { cl.setAttribute('hidden', ''); }
+
+    // 뒷면/피드백/네비 초기화
+    $('card-back').setAttribute('hidden', '');
+    $('feedback-area').setAttribute('hidden', '');
+    $('feedback-area').className = 'answer-area';
+    $('nav-area').setAttribute('hidden', '');
+    $('btn-reveal').removeAttribute('hidden');
+
+    showInputFor(card);
+    updateProgressUI();
+  }
+
+  /* ── 입력 수집 → userAnswer ── */
+  function collectAnswer(card) {
+    var mode = card.grade_mode;
+    if (mode === 'exact') return $('input-exact-field').value;
+    if (mode === 'keyword') return $('input-keyword-field').value;
+    if (mode === 'cloze') return qsa('#cloze-render-area input[data-blank-index]')
+      .sort(function (a, b) { return +a.getAttribute('data-blank-index') - +b.getAttribute('data-blank-index'); })
+      .map(function (i) { return i.value; });
+    return null;
+  }
+
+  /* ── 뒷면 + 피드백 표시 ── */
+  function revealBack(card, verdict, scoreResult) {
+    renderMarkdown($('card-back-detail'), (card.back && card.back.detail) || '');
+    $('card-back-note').textContent = (card.back && card.back.note) || '';
+    $('card-back').removeAttribute('hidden');
+
+    var fb = $('feedback-area');
+    fb.removeAttribute('hidden');
+    fb.className = 'answer-area ' + (verdict === 'correct' ? 'correct' : 'incorrect');
+    $('verdict-display').textContent = verdict === 'correct' ? '✓ 정답입니다' : '✕ 다시 확인하세요';
+    var detail = '';
+    if (scoreResult && scoreResult.feedback && scoreResult.feedback.highlightMissed && scoreResult.feedback.highlightMissed.length) {
+      detail = '놓친 부분: ' + scoreResult.feedback.highlightMissed.join(', ');
+    }
+    $('feedback-detail').textContent = detail;
+
+    $('btn-reveal').setAttribute('hidden', '');
+    $('nav-area').removeAttribute('hidden');
+  }
+
+  /* ── verdict 확정 → 엔진 처리 + 진도 저장 (노출 API) ── */
+  function commitAttempt(card, verdict) {
+    try {
+      window.APP.processAttempt(card.card_id, verdict, APP_STATE.session, APP_STATE.progressStore, Date.now(), APP_STATE.leitnerCfg);
+      window.APP.saveProgress(APP_STATE.progressStore);
+    } catch (e) {
+      if (e && e.name === 'StorageQuotaError') showStorageError(e.message);
+      else console.error('[attempt]', e);
+    }
+    if (verdict === 'correct') { APP_STATE.done = Math.min(APP_STATE.total, APP_STATE.done + 1); updateProgressUI(); }
+  }
+
+  /* ── 정답 확인 버튼 ── */
+  $('btn-reveal').addEventListener('click', function () {
+    var card = APP_STATE.current; if (!card) return;
+    if (card.grade_mode === 'self') {
+      // self: 뒷면만 공개, O·X 입력으로 verdict 확정
+      renderMarkdown($('card-back-detail'), (card.back && card.back.detail) || '');
+      $('card-back-note').textContent = (card.back && card.back.note) || '';
+      $('card-back').removeAttribute('hidden');
+      $('btn-reveal').setAttribute('hidden', '');
+      return;
+    }
+    var userAnswer = collectAnswer(card);
+    var result;
+    try {
+      result = window.APP.score({ mode: card.grade_mode, userAnswer: userAnswer, answerSpec: card.answer_spec || {}, synonyms: APP_STATE.synonyms });
+    } catch (e) { console.warn('[score]', e); result = { verdict: 'incorrect', feedback: { highlightMissed: [] } }; }
+    var verdict = result.verdict;
+    revealBack(card, verdict, result);
+    commitAttempt(card, verdict);
+  });
+
+  /* ── self O·X (UI 변환 o→correct / x→incorrect) ── */
+  qsa('[data-self-verdict]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var card = APP_STATE.current; if (!card) return;
+      var v = btn.getAttribute('data-self-verdict') === 'o' ? 'correct' : 'incorrect';
+      revealBack(card, v, null);
+      commitAttempt(card, v);
+    });
+  });
+
+  /* ── 다음 / 넘기기 ── */
+  function advance() {
+    var next;
+    try {
+      next = window.APP.getNextCard(APP_STATE.session, APP_STATE.deck.cards, APP_STATE.progressStore, Date.now());
+    } catch (e) { console.error('[getNextCard]', e); next = null; }
+    if (next) renderCard(next);
+    else showEmpty('empty-all-future');
+  }
+  $('btn-next').addEventListener('click', advance);
+  $('btn-skip-card').addEventListener('click', function () {
+    var card = APP_STATE.current; if (!card) return;
+    commitAttempt(card, 'skip');
+    advance();
+  });
+
+  /* ── 전체복습 강제소환 (§1.4) ── */
+  qsa('[data-action="force-review-all"]').forEach(function (b) {
+    b.addEventListener('click', function () { boot({ dDayMode: true }); });
+  });
+
+  function showStorageError(msg) {
+    var el = $('storage-error-area'); $('storage-error-msg').textContent = msg || '로컬 저장소 오류';
+    el.removeAttribute('hidden');
+  }
+
+  /* ════════════════════════════════════════════════
+     대시보드 렌더 (getDashboardData, 노출 API)
+  ════════════════════════════════════════════════ */
+  function clamp01(x) { return Math.max(0, Math.min(1, typeof x === 'number' ? x : 0)); }
+  function pct(x) { return Math.round(clamp01(x) * 100); }
+  function areaLabel(a, sub) {
+    var m = window.MANIFEST && window.MANIFEST[SUBJECT];
+    if (m && m.areas) { var hit = m.areas.filter(function (z) { return z.area === a && z.subarea === sub; })[0]; if (hit) return hit.label; }
+    return a + ' · ' + sub;
+  }
+
+  function renderDashboard() {
+    if (!APP_STATE.deck || !APP_STATE.progressStore) return;
+    var data;
+    try { data = window.APP.getDashboardData(APP_STATE.deck, APP_STATE.progressStore, Date.now()); }
+    catch (e) { console.error('[getDashboardData]', e); return; }
+
+    // 1. retrieval
+    var rl = $('retrieval-list'); rl.innerHTML = '';
+    if (!data.by_area.length) rl.innerHTML = '<p class="widget-empty">데이터 부족</p>';
+    data.by_area.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'area-row';
+      if (r.retrieval_rate == null) {
+        row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(r.area, r.subarea) + '</b></span><span class="area-row__val" style="color:var(--ink3)">데이터 부족</span>';
+      } else {
+        row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(r.area, r.subarea) + '</b></span>' +
+          '<span class="area-gauge"><i style="width:' + pct(r.retrieval_rate) + '%"></i></span>' +
+          '<span class="area-row__val">' + pct(r.retrieval_rate) + '%</span>';
+      }
+      rl.appendChild(row);
+    });
+
+    // 2. weakness (TOP 5, 엔진 정렬순)
+    var wl = $('weakness-list'); wl.innerHTML = '';
+    if (!data.weakness.length) wl.innerHTML = '<p class="widget-empty">아직 오답 데이터가 없습니다</p>';
+    data.weakness.slice(0, 5).forEach(function (w) {
+      var row = document.createElement('div'); row.className = 'area-row';
+      row.innerHTML = '<span class="area-row__label"><b>' + w.unit + '</b><br><span style="font-size:var(--fs-xs);color:var(--ink3)">' + areaLabel(w.area, w.subarea) + '</span></span>' +
+        '<span class="area-gauge hot"><i style="width:' + pct(w.wrong_rate) + '%"></i></span>' +
+        '<span class="area-row__val" style="color:var(--hot)">' + pct(w.wrong_rate) + '%</span>';
+      wl.appendChild(row);
+    });
+
+    // 3. pass-path (status enum 렌더만)
+    var pl = $('pass-path-list'); pl.innerHTML = '';
+    if (!data.pass_path.length) pl.innerHTML = '<p class="widget-empty">데이터 부족</p>';
+    data.pass_path.forEach(function (p) {
+      var row = document.createElement('div'); row.className = 'area-row';
+      var gaugeCls = p.status === 'danger' ? 'area-gauge hot' : p.status === 'watch' ? 'area-gauge warn' : 'area-gauge';
+      row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(p.area, p.subarea) + '</b> <span style="font-size:var(--fs-xs);color:var(--ink3)">목표 ' + p.target + '</span></span>' +
+        '<span class="' + gaugeCls + '"><i style="width:' + pct(p.progress) + '%"></i></span>' +
+        '<span class="status-chip ' + p.status + '">' + p.status + '</span>';
+      pl.appendChild(row);
+    });
+
+    // 4. completion (스택바)
+    var cl = $('completion-list'); cl.innerHTML = '';
+    if (!data.completion.length) cl.innerHTML = '<p class="widget-empty">데이터 부족</p>';
+    data.completion.forEach(function (c) {
+      var bd = c.box_dist || { box1: 0, box2: 0, box3: 0 };
+      var tot = (bd.box1 || 0) + (bd.box2 || 0) + (bd.box3 || 0);
+      var w1 = tot ? bd.box1 / tot * 100 : 0, w2 = tot ? bd.box2 / tot * 100 : 0, w3 = tot ? bd.box3 / tot * 100 : 0;
+      var wrap = document.createElement('div');
+      wrap.innerHTML = '<div class="completion-row__head"><span class="lbl">' + areaLabel(c.area, c.subarea) + '</span><span class="val">정복 ' + pct(c.mastery_rate) + '%</span></div>' +
+        '<div class="stack-bar"><span class="box1" style="width:' + w1 + '%"></span><span class="box2" style="width:' + w2 + '%"></span><span class="box3" style="width:' + w3 + '%"></span></div>';
+      cl.appendChild(wrap);
+    });
+
+    // 사이드바 전체 진도 = completion mastery 평균
+    if (data.completion.length) {
+      var avg = data.completion.reduce(function (s, c) { return s + clamp01(c.mastery_rate); }, 0) / data.completion.length;
+      $('ov-bar').style.width = pct(avg) + '%'; $('ov-pct').textContent = pct(avg) + '%';
+    }
+  }
+
+  /* ════════════════════════════════════════════════
+     개념서 렌더 (§5) — 데이터구동 폴백: 카드 back.detail을 섹션카드로
+  ════════════════════════════════════════════════ */
+  function renderConcept() {
+    var body = $('concept-body');
+    if (!APP_STATE.deck || !APP_STATE.deck.cards || !APP_STATE.deck.cards.length) {
+      body.innerHTML = '<p class="text-muted">개념서 미연결 — 표시할 내용이 없습니다.</p>'; return;
+    }
+    body.innerHTML = '';
+    APP_STATE.deck.cards.filter(function (c) { return c.enabled !== false; }).forEach(function (card) {
+      var lv = levelOf(card);
+      var sec = document.createElement('div'); sec.className = 'section-card';
+      sec.id = 'concept-' + card.card_id;
+      var freqCls = 'l' + lv, stars = lv === 3 ? '★★★' : lv === 2 ? '★★' : '★';
+      var refId = (card.links && card.links.concept_ref) || card.card_id;
+      var title = frontText(card) || card.card_id;
+      var head = document.createElement('div'); head.className = 'sec-head';
+      head.innerHTML = '<span class="sec-id">' + refId + '</span>' +
+        '<span class="sec-title">' + title + '</span>' +
+        '<span class="freq ' + freqCls + '"><span class="s">' + stars + '</span></span>' +
+        '<svg class="sec-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>';
+      head.addEventListener('click', function () { sec.classList.toggle('open'); });
+      var bodyEl = document.createElement('div'); bodyEl.className = 'sec-body';
+      var prose = document.createElement('div'); prose.className = 'prose';
+      renderMarkdown(prose, (card.back && card.back.detail) || '(상세 없음)');
+      bodyEl.appendChild(prose);
+      sec.appendChild(head); sec.appendChild(bodyEl);
+      body.appendChild(sec);
+    });
+    // 딥링크 타깃 열기
+    if (APP_STATE.conceptTarget) {
+      var match = APP_STATE.deck.cards.filter(function (c) { return c.links && c.links.concept_ref === APP_STATE.conceptTarget; })[0];
+      var open = match ? $('concept-' + match.card_id) : null;
+      if (open) { open.classList.add('open'); open.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      APP_STATE.conceptTarget = null;
+    }
+  }
+  $('[data-concept="back-to-quiz"]') && document.querySelector('[data-concept="back-to-quiz"]')
+    .addEventListener('click', function () { setRoute('quiz'); });
+
+  /* ── 읽기 진행바 (#read-bar) ── */
+  window.addEventListener('scroll', function () {
+    if (document.body.getAttribute('data-route') !== 'concept') return;
+    var h = document.documentElement;
+    var sc = (h.scrollTop) / ((h.scrollHeight - h.clientHeight) || 1);
+    $('read-bar').style.width = Math.max(0, Math.min(1, sc)) * 100 + '%';
+  });
+
+  /* ── 검색 + 필터칩 (개념서 섹션 필터, 데이터구동) ── */
+  var activeLv = 'all', searchQ = '';
+  function applyConceptFilter() {
+    qsa('.section-card', $('concept-body')).forEach(function (sec) {
+      var card = APP_STATE.deck.cards.filter(function (c) { return 'concept-' + c.card_id === sec.id; })[0];
+      var lvOk = activeLv === 'all' || (card && String(levelOf(card)) === activeLv);
+      var txt = sec.textContent.toLowerCase();
+      var qOk = !searchQ || txt.indexOf(searchQ) !== -1;
+      sec.style.display = (lvOk && qOk) ? '' : 'none';
+    });
+  }
+  qsa('#freq-chips .chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      qsa('#freq-chips .chip').forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active'); activeLv = chip.getAttribute('data-lv');
+      if (document.body.getAttribute('data-route') === 'concept') applyConceptFilter();
+    });
+  });
+  $('search').addEventListener('input', function (e) {
+    searchQ = e.target.value.toLowerCase().trim();
+    if (document.body.getAttribute('data-route') !== 'concept') setRoute('concept');
+    applyConceptFilter();
+  });
+
+  /* ── settings export ── */
+  document.querySelector('[data-settings="export"]') && document.querySelector('[data-settings="export"]')
+    .addEventListener('click', function () {
+      try {
+        var json = JSON.stringify(APP_STATE.progressStore || {}, null, 2);
+        var blob = new Blob([json], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.download = 'clf-progress-' + SUBJECT + '.json';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        $('export-result').textContent = '내보내기 완료.';
+      } catch (e) { $('export-result').textContent = '내보내기 실패: ' + e.message; }
+    });
+
+  /* ════════════════════════════════════════════════
+     부트 — window.APP.init() (SoT §16) + 콜백 와이어링
+  ════════════════════════════════════════════════ */
+  function boot(extraOpts) {
+    var manifest = (window.MANIFEST && window.MANIFEST[SUBJECT]) || null;
+    applyMeta(manifest); buildNav(manifest);
+
+    var opts = {
+      subject: SUBJECT,
+      dDayMode: !!(extraOpts && extraOpts.dDayMode),
+      onCard: function (card, session, progressStore, synonyms) {
+        APP_STATE.session = session; APP_STATE.progressStore = progressStore; APP_STATE.synonyms = synonyms;
+        // total = 큐 + 현재 카드 추정
+        APP_STATE.total = (session.queue ? session.queue.length : 0) + (session.requeue ? session.requeue.length : 0) + 1;
+        APP_STATE.done = 0;
+        renderCard(card);
+      },
+      onEmpty: function () {
+        // deck 유무로 빈상태 분기 (§1.3)
+        var hasDeck = manifest && manifest.decks && manifest.decks.length;
+        showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
+      },
+      onError: function (err) {
+        console.error('[APP.init]', err);
+        if (err && (err.name === 'SchemaVersionError' || err.name === 'StorageQuotaError')) showStorageError(err.message);
+        else showEmpty('empty-no-deck');
+      }
+    };
+
+    var result = window.APP.init(opts);
+    if (result) {
+      APP_STATE.session = result.session; APP_STATE.progressStore = result.progressStore;
+      APP_STATE.deck = result.deck; APP_STATE.synonyms = result.synonyms;
+      if (result.isEmpty) {
+        var hasDeck = manifest && manifest.decks && manifest.decks.length;
+        showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
+      }
+    }
+    setRoute('quiz');
+  }
+
+  window.addEventListener('DOMContentLoaded', function () {
+    if (typeof window.APP === 'undefined' || typeof window.APP.init !== 'function') {
+      console.warn('[학습앱] app.js 로드 실패.');
+      var b = document.createElement('div'); b.className = 'error-banner';
+      b.style.margin = 'var(--space-6)';
+      b.textContent = 'app.js를 불러오지 못했습니다. 파일 구조를 확인하세요.';
+      if ($('main-content')) $('main-content').prepend(b);
+      return;
+    }
+    try { boot(); }
+    catch (e) { console.error('[boot]', e); showEmpty('empty-no-deck'); setRoute('quiz'); }
+  });
+})();
+</script>
+
+</body>
+</html>
