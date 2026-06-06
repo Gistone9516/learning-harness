@@ -825,9 +825,62 @@ def write_deck_js(deck: dict, out_dir: Path) -> Path:
     return out_path
 
 
+def write_activities_js(subject_id: str, decks: list[dict], out_dir: Path) -> Path:
+    """
+    activities.js 출력 (플러그인계약 §7·§9, _인터페이스계약 §14)
+    window.ACTIVITIES['card-quiz'] = ActivitySpec[]
+    ActivitySpec: {activity_id, plugin_id, type, front, back, weight, tags, enabled}
+    - activity_id = card_id
+    - plugin_id   = 'card-quiz'
+    - weight      = tags.weight (float[1,10])
+    - tags        = {area, subarea} (weight 제외한 태그 식별 필드)
+    - front/back  = 카드의 front/back 오브젝트 그대로
+    """
+    out_path = out_dir / 'activities.js'
+
+    activity_specs = []
+    for d in decks:
+        for c in d['cards']:
+            spec = {
+                'activity_id': c['card_id'],
+                'plugin_id':   'card-quiz',
+                'type':        c['type'],
+                'front':       c['front'],
+                'back':        c['back'],
+                'weight':      c['tags']['weight'],
+                'tags': {
+                    'area':    c['tags']['area'],
+                    'subarea': c['tags']['subarea'],
+                },
+                'enabled':     c['enabled'],
+            }
+            activity_specs.append(spec)
+
+    specs_js = js_obj(activity_specs)
+    content = (
+        '(window.ACTIVITIES = window.ACTIVITIES || {})'
+        + f'[{js_str("card-quiz")}] = {specs_js};\n'
+    )
+    out_path.write_text(content, encoding='utf-8')
+    return out_path
+
+
+# card-quiz PluginManifest (플러그인계약 §2·§9)
+_CARD_QUIZ_PLUGIN_MANIFEST = {
+    'plugin_id':              'card-quiz',
+    'label':                  '카드 퀴즈',
+    'version':                '1.0.0',
+    'infra':                  'static',
+    'capabilities':           ['quiz'],
+    'scoring_mode':           'auto',
+    'activity_type':          'card-quiz',
+    'progress_schema_version': 1,
+}
+
+
 def write_manifest_js(subject_id: str, subject_label: str, decks: list[dict],
                       config_obj: dict, out_dir: Path, reproducible: bool) -> Path:
-    """manifest.js 출력 (§2.5)"""
+    """manifest.js 출력 (§2.5, 플러그인계약 §7·§9)"""
     out_path = out_dir / 'manifest.js'
 
     if reproducible:
@@ -869,6 +922,8 @@ def write_manifest_js(subject_id: str, subject_label: str, decks: list[dict],
             'by_type':     by_type,
             'by_area':     by_area,
         },
+        # 플러그인계약 §7·§9: MANIFEST[subject].plugins = PluginManifest[]
+        'plugins': [_CARD_QUIZ_PLUGIN_MANIFEST],
     }
 
     obj_js = js_obj(manifest_obj)
@@ -881,8 +936,9 @@ def write_manifest_js(subject_id: str, subject_label: str, decks: list[dict],
 
 def write_script_tag_list(subject_id: str, decks: list[dict],
                           out_dir: Path) -> Path:
-    """HTML 로드 순서 스크립트 태그 목록 파일 (§2.6)"""
+    """HTML 로드 순서 스크립트 태그 목록 파일 (§2.6, 플러그인계약 §7 부트 순서)"""
     out_path = out_dir / 'script_tags.html'
+    # 부트 순서: synonyms → manifest → decks → activities (플러그인계약 §7)
     # config는 규칙.json(JSON)이므로 script 태그 불필요 — fetch/import로 소비
     lines = []
     lines.append(f'<!-- config: config/규칙.json (JSON, fetch로 로드) -->')
@@ -890,6 +946,9 @@ def write_script_tag_list(subject_id: str, decks: list[dict],
     lines.append(f'<script src="manifest.js"></script>')
     for d in decks:
         lines.append(f'<script src="decks/{d["deck_id"]}.js"></script>')
+    # activities.js: window.ACTIVITIES['card-quiz'] 등록 (플러그인계약 §7·§9)
+    lines.append(f'<script src="activities.js"></script>')
+    lines.append('<!-- 플러그인 파일(manifest+plugin.js) → shell.js: 플러그인계약 §7 부트 순서 참조 -->')
     lines.append('<!-- 엔진 코어: 엔진규격 소관 -->')
     out_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return out_path
@@ -1043,9 +1102,12 @@ def cmd_build(args, reporter: Reporter):
     for deck in decks:
         write_deck_js(deck, out_dir)
 
-    # manifest.js 출력
+    # manifest.js 출력 (plugins 필드 포함, 플러그인계약 §7·§9)
     write_manifest_js(subject_id, subject_label, decks, cfg, out_dir,
                       getattr(args, 'reproducible', False))
+
+    # activities.js 출력 — window.ACTIVITIES['card-quiz'] (플러그인계약 §7·§9)
+    write_activities_js(subject_id, decks, out_dir)
 
     # script_tags.html 출력
     write_script_tag_list(subject_id, decks, out_dir)
