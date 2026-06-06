@@ -25,6 +25,17 @@
   <!-- loadPyodide()를 전역에 노출. plugin.js가 mount() 시 lazy-load. -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 
+  <!-- ── CDN: Univer (excel 플러그인 — 스프레드시트, UMD) ── -->
+  <!-- 의존 순서: React → RxJS → Univer 코어 → SheetsCore → 로케일 CSS -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/rxjs@7.8.1/dist/bundles/rxjs.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.5.4/lib/umd/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@univerjs/presets@0.5.4/lib/umd/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/locales/en-US.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/index.css">
+
   <link rel="stylesheet" href="styles.css" />
 </head>
 <!--
@@ -213,6 +224,11 @@
 <script src="../plugins/coding/manifest.js"></script>
 <script src="../plugins/coding/plugin.js"></script>
 <script src="../plugins/coding/_example/activities.js"></script>
+
+<!-- 플러그인 #3: excel (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<script src="../plugins/excel/manifest.js"></script>
+<script src="../plugins/excel/plugin.js"></script>
+<script src="../plugins/excel/_example/activities.js"></script>
 
 <!-- 공통셸 (마지막 로드 → window.SHELL.init 호출) -->
 <script src="shell.js"></script>
