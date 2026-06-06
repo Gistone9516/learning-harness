@@ -16,6 +16,15 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
 
+  <!-- ── CDN: CodeMirror 5 (coding 플러그인 — 에디터) ── -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+
+  <!-- ── CDN: Pyodide (coding 플러그인 — Python 런타임, 브라우저 WebAssembly) ── -->
+  <!-- loadPyodide()를 전역에 노출. plugin.js가 mount() 시 lazy-load. -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+
   <link rel="stylesheet" href="styles.css" />
 </head>
 <!--
@@ -199,6 +208,11 @@
 <!-- 플러그인 #1: card-quiz (manifest → plugin 순서, §7 SoT) -->
 <script src="../plugins/card-quiz/manifest.js"></script>
 <script src="../plugins/card-quiz/plugin.js"></script>
+
+<!-- 플러그인 #2: coding (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<script src="../plugins/coding/manifest.js"></script>
+<script src="../plugins/coding/plugin.js"></script>
+<script src="../plugins/coding/_example/activities.js"></script>
 
 <!-- 공통셸 (마지막 로드 → window.SHELL.init 호출) -->
 <script src="shell.js"></script>
