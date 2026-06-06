@@ -236,6 +236,12 @@
 <script src="../plugins/english/plugin.js"></script>
 <script src="../plugins/english/_example/activities.js"></script>
 
+<!-- 플러그인 #5: aws (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<!-- boto3 채점서버(grade.py) 필요 — 백엔드 미연결 시 graceful fallback(pending+안내) -->
+<script src="../plugins/aws/manifest.js"></script>
+<script src="../plugins/aws/plugin.js"></script>
+<script src="../plugins/aws/_example/activities.js"></script>
+
 <!-- 공통셸 (마지막 로드 → window.SHELL.init 호출) -->
 <script src="shell.js"></script>
 
