@@ -47,7 +47,29 @@
       var key = 'clf:' + pluginId + ':shell-progress';
       localStorage.setItem(key, JSON.stringify(snapshot));
     } catch (e) {
+      // QuotaExceededError: 5MB 초과 → 사용자에 내보내기 유도
+      var isQuota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || (e.code && e.code === 22));
+      if (isQuota) {
+        _showQuotaBanner(pluginId);
+      }
       console.warn('[SHELL] savePluginProgress 실패', e);
+    }
+  }
+
+  function _showQuotaBanner(pluginId) {
+    var errArea = $('settings-error-area'), errMsg = $('settings-error-msg');
+    if (errArea) {
+      errArea.removeAttribute('hidden');
+      if (errMsg) errMsg.textContent = ' [' + pluginId + '] 저장소가 꽉 찼습니다. 설정 화면에서 진도를 내보내기(백업) 후 일부를 삭제하세요.';
+    }
+    // settings 화면이 아닐 때도 인라인 경고 표시
+    var host = $('plugin-host');
+    if (host && !$('quota-warn')) {
+      var w = document.createElement('div');
+      w.id = 'quota-warn';
+      w.style.cssText = 'padding:8px 12px;background:#fef3cd;border:1px solid #f0ad4e;border-radius:4px;margin:8px;font-size:13px';
+      w.innerHTML = '저장소 용량 초과 — <button type="button" style="text-decoration:underline;background:none;border:none;cursor:pointer;font-size:13px" onclick="window.location.hash=\'#settings\'">설정 화면</button>에서 진도를 내보내기하세요.';
+      host.insertBefore(w, host.firstChild);
     }
   }
 
@@ -101,6 +123,7 @@
 
     if (event.type === 'session-done') {
       console.log('[SHELL] session-done from', pluginId);
+      _renderSessionSummary(pluginId, event);
     }
 
     if (event.type === 'navigation-request') {
@@ -110,6 +133,59 @@
       // route 별칭 처리 (concept → concept 화면은 기존 셸이 처리)
       if (target) _setRoute(target);
     }
+  }
+
+  /* ─────────────────────────────────────────────
+     세션 완료 요약 (session-done 소비, mid §셸백로그)
+  ───────────────────────────────────────────── */
+  function _renderSessionSummary(pluginId, event) {
+    var host = $('plugin-host');
+    if (!host) return;
+    var inst = window.PLUGIN_REGISTRY[pluginId];
+    var snap = (inst && inst.getProgressSnapshot) ? inst.getProgressSnapshot() : null;
+
+    // 집계: 총 활동 수, 정답 수, 오답 목록
+    var total = 0, correct = 0;
+    var wrongItems = [];
+    if (snap && snap.activities) {
+      Object.keys(snap.activities).forEach(function (aid) {
+        var ap = snap.activities[aid];
+        total++;
+        if (ap.last_verdict === 'correct') correct++;
+        else if (ap.last_verdict === 'incorrect') wrongItems.push(aid);
+      });
+    }
+
+    // 세션 이벤트에 포함된 데이터 우선
+    if (event && event.total != null) total = event.total;
+    if (event && event.correct != null) correct = event.correct;
+    if (event && Array.isArray(event.wrong)) wrongItems = event.wrong;
+
+    var pct = total > 0 ? Math.round(correct / total * 100) : 0;
+
+    var div = document.createElement('div');
+    div.id = 'session-summary';
+    div.style.cssText = 'padding:24px;max-width:480px;margin:24px auto;background:var(--surface,#fff);border:1px solid var(--line2,#e2e2e2);border-radius:8px;text-align:center';
+    var wrongHtml = '';
+    if (wrongItems.length) {
+      wrongHtml = '<div style="text-align:left;margin-top:12px"><b style="font-size:13px">오답 목록</b><ul style="margin:4px 0 0 16px;font-size:13px">' +
+        wrongItems.slice(0, 10).map(function (id) { return '<li>' + id + '</li>'; }).join('') +
+        (wrongItems.length > 10 ? '<li>… 외 ' + (wrongItems.length - 10) + '개</li>' : '') +
+        '</ul></div>';
+    }
+    div.innerHTML =
+      '<div style="font-size:22px;font-weight:600;margin-bottom:8px">세션 완료</div>' +
+      '<div style="font-size:15px;color:var(--ink3,#666)">총 ' + total + '문제 · 정답 ' + correct + '개 · 정답률 ' + pct + '%</div>' +
+      wrongHtml +
+      '<div style="margin-top:16px">' +
+        '<button type="button" style="padding:8px 20px;border:1px solid var(--line2,#ccc);border-radius:4px;background:none;cursor:pointer;margin-right:8px" onclick="document.getElementById(\'session-summary\').remove();window.SHELL.setRoute(\'learn\')">계속 학습</button>' +
+        '<button type="button" style="padding:8px 20px;border:1px solid var(--line2,#ccc);border-radius:4px;background:none;cursor:pointer" onclick="document.getElementById(\'session-summary\').remove();window.SHELL.setRoute(\'dashboard\')">대시보드</button>' +
+      '</div>';
+
+    // 기존 요약 제거 후 plugin-host 상단에 삽입
+    var old = $('session-summary');
+    if (old) old.remove();
+    host.insertBefore(div, host.firstChild);
   }
 
   /* ─────────────────────────────────────────────
@@ -540,9 +616,58 @@
   /* ─────────────────────────────────────────────
      설정 화면 렌더 (§6 BYO-key + 기존 export)
   ───────────────────────────────────────────── */
+  /* BYO-key 섹션 단일 렌더 헬퍼 */
+  function _renderByokSection(settingsWrap, pManifest) {
+    if (!pManifest || !pManifest.byok || !Array.isArray(pManifest.byok.keys) || !pManifest.byok.keys.length) return;
+    var section = document.createElement('div');
+    section.className = 'settings-section';
+    section.setAttribute('data-byok-section', pManifest.plugin_id);
+    section.innerHTML = '<h2 class="settings-section__title">' + (pManifest.label || pManifest.plugin_id) + ' API 키</h2>';
+
+    pManifest.byok.keys.forEach(function (keyDef) {
+      var lbl = document.createElement('label');
+      lbl.style.cssText = 'display:block;margin-bottom:var(--space-4,12px)';
+      lbl.innerHTML = '<span class="text-muted" style="display:block;margin-bottom:4px">' + keyDef.label + '</span>';
+      var input = document.createElement('input');
+      input.type = 'password';
+      input.style.cssText = 'width:100%;box-sizing:border-box;font-size:var(--fs-md,14px);padding:9px 12px;border:1px solid var(--line2,#ddd);border-radius:var(--r,4px);background:var(--surface,#fff);color:var(--ink,#111)';
+      input.placeholder = keyDef.help || '키를 입력하세요';
+      var saved = '';
+      try { saved = localStorage.getItem('clf:keys:' + keyDef.id) || ''; } catch (e) {}
+      input.value = saved;
+      input.addEventListener('change', function () {
+        try { localStorage.setItem('clf:keys:' + keyDef.id, input.value); } catch (e) {}
+      });
+      lbl.appendChild(input);
+      section.appendChild(lbl);
+    });
+
+    var firstSection = settingsWrap.querySelector('.settings-section');
+    if (firstSection) settingsWrap.insertBefore(section, firstSection);
+    else settingsWrap.appendChild(section);
+  }
+
   function _renderSettings() {
     var manifest = window.MANIFEST && window.MANIFEST[_subject];
-    var plugins = (manifest && manifest.plugins) || [];
+
+    // manifest.plugins 에 등록된 플러그인 목록 수집
+    var pluginsFromManifest = (manifest && manifest.plugins) || [];
+    var seenIds = {};
+    pluginsFromManifest.forEach(function (p) { seenIds[p.plugin_id] = true; });
+
+    // MANIFEST_* 전역 변수에 선언된 플러그인도 수집 (excel/english/aws 등)
+    var extraManifests = [];
+    Object.keys(window).forEach(function (k) {
+      if (/^MANIFEST_[A-Z]/.test(k)) {
+        var m = window[k];
+        if (m && m.plugin_id && !seenIds[m.plugin_id]) {
+          extraManifests.push(m);
+          seenIds[m.plugin_id] = true;
+        }
+      }
+    });
+
+    var allPlugins = pluginsFromManifest.concat(extraManifests);
 
     // BYO-key 섹션 자동 생성
     var settingsWrap = document.querySelector('.settings-wrap');
@@ -551,36 +676,9 @@
     // 기존 byok 섹션 제거 후 재생성
     qsa('[data-byok-section]', settingsWrap).forEach(function (el) { el.remove(); });
 
-    plugins.forEach(function (pManifest) {
-      if (!pManifest.byok || !Array.isArray(pManifest.byok.keys) || !pManifest.byok.keys.length) return;
-      var section = document.createElement('div');
-      section.className = 'settings-section';
-      section.setAttribute('data-byok-section', pManifest.plugin_id);
-      section.innerHTML = '<h2 class="settings-section__title">' + (pManifest.label || pManifest.plugin_id) + ' API 키</h2>';
-
-      pManifest.byok.keys.forEach(function (keyDef) {
-        var label = document.createElement('label');
-        label.style.cssText = 'display:block;margin-bottom:var(--space-4)';
-        label.innerHTML = '<span class="text-muted" style="display:block;margin-bottom:4px">' + keyDef.label + '</span>';
-        var input = document.createElement('input');
-        input.type = 'password';
-        input.style.cssText = 'width:100%;font-size:var(--fs-md);padding:9px 12px;border:1px solid var(--line2);border-radius:var(--r);background:var(--surface);color:var(--ink)';
-        input.placeholder = keyDef.help || '키를 입력하세요';
-        // 기존 저장값 로드
-        var saved = '';
-        try { saved = localStorage.getItem('clf:keys:' + keyDef.id) || ''; } catch (e) {}
-        input.value = saved;
-        input.addEventListener('change', function () {
-          try { localStorage.setItem('clf:keys:' + keyDef.id, input.value); } catch (e) {}
-        });
-        label.appendChild(input);
-        section.appendChild(label);
-      });
-
-      // 첫 번째 settings-section 앞에 삽입
-      var firstSection = settingsWrap.querySelector('.settings-section');
-      if (firstSection) settingsWrap.insertBefore(section, firstSection);
-      else settingsWrap.appendChild(section);
+    // 역순 삽입 (각각 첫번째 섹션 앞에 삽입 → 선언 순서 유지)
+    allPlugins.slice().reverse().forEach(function (pManifest) {
+      _renderByokSection(settingsWrap, pManifest);
     });
   }
 
@@ -657,27 +755,91 @@
       _applyConceptFilter();
     });
 
-    // settings export
+    // settings export — 전체 플러그인 진도 내보내기
     var exportBtn = document.querySelector('[data-settings="export"]');
     if (exportBtn) exportBtn.addEventListener('click', function () {
       try {
-        // card-quiz plugin에서 progressStore 가져오기
-        var inst = window.PLUGIN_REGISTRY['card-quiz'];
-        var snap = inst && inst.getProgressSnapshot ? inst.getProgressSnapshot() : {};
-        var json = JSON.stringify(snap || {}, null, 2);
+        var bundle = { subject: _subject, exported_at: new Date().toISOString(), plugins: {} };
+        Object.keys(window.PLUGIN_REGISTRY).forEach(function (pid) {
+          var inst = window.PLUGIN_REGISTRY[pid];
+          if (inst && inst.getProgressSnapshot) {
+            try { bundle.plugins[pid] = inst.getProgressSnapshot(); } catch (e2) {}
+          }
+        });
+        // PLUGIN_REGISTRY 미등록이어도 localStorage 직접 읽기
+        var lsKeys = [];
+        try {
+          for (var i = 0; i < localStorage.length; i++) {
+            var lk = localStorage.key(i);
+            if (lk && lk.indexOf('clf:') === 0 && lk.indexOf(':progress') !== -1) lsKeys.push(lk);
+          }
+        } catch (e3) {}
+        lsKeys.forEach(function (lk) {
+          // clf:<pluginId>:progress 또는 clf:<pluginId>:shell-progress
+          var parts = lk.split(':');
+          if (parts.length >= 3) {
+            var pid2 = parts[1];
+            if (!bundle.plugins[pid2]) {
+              try { bundle.plugins[pid2] = JSON.parse(localStorage.getItem(lk) || 'null'); } catch (e4) {}
+            }
+          }
+        });
+        var json = JSON.stringify(bundle, null, 2);
         var blob = new Blob([json], { type: 'application/json' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a'); a.href = url;
-        a.download = 'clf-progress-' + _subject + '.json';
+        a.download = 'clf-progress-all-' + _subject + '-' + new Date().toISOString().slice(0,10) + '.json';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
         var exportResult = $('export-result');
-        if (exportResult) exportResult.textContent = '내보내기 완료.';
+        if (exportResult) exportResult.textContent = '내보내기 완료 (' + Object.keys(bundle.plugins).length + '개 플러그인).';
       } catch (e) {
         var exportResult2 = $('export-result');
         if (exportResult2) exportResult2.textContent = '내보내기 실패: ' + e.message;
       }
     });
+
+    // settings import — JSON 가져오기
+    var importBtn = document.querySelector('[data-settings="import"]');
+    var importFile = $('import-file');
+    if (importBtn && importFile) {
+      importBtn.addEventListener('click', function () { importFile.click(); });
+      importFile.addEventListener('change', function () {
+        var file = importFile.files && importFile.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function (evt) {
+          var resultEl = $('export-result');
+          try {
+            var data = JSON.parse(evt.target.result);
+            var plugins = data.plugins || data; // 구버전(단일 플러그인 스냅샷) 호환
+            var count = 0;
+            if (typeof plugins === 'object' && plugins !== null) {
+              Object.keys(plugins).forEach(function (pid) {
+                var snap = plugins[pid];
+                if (!snap) return;
+                // PLUGIN_REGISTRY 인스턴스에 복원
+                var inst = window.PLUGIN_REGISTRY[pid];
+                if (inst && inst.onProgressRestored) {
+                  try { inst.onProgressRestored(snap); count++; } catch (e5) {}
+                }
+                // localStorage 직접 저장 (미마운트 플러그인 대비)
+                try {
+                  localStorage.setItem('clf:' + pid + ':shell-progress', JSON.stringify(snap));
+                  count++;
+                } catch (e6) { _showQuotaBanner(pid); }
+              });
+            }
+            if (resultEl) resultEl.textContent = '가져오기 완료 (대상: ' + Object.keys(plugins || {}).length + '개 플러그인).';
+          } catch (e) {
+            var r2 = $('export-result');
+            if (r2) r2.textContent = '가져오기 실패: ' + e.message;
+          }
+          importFile.value = '';
+        };
+        reader.readAsText(file);
+      });
+    }
 
     // 뷰포트 모드
     function detectViewport() {
@@ -692,6 +854,22 @@
      플러그인 등록 (MANIFEST.plugins 순회)
   ───────────────────────────────────────────── */
   function _registerPlugins(manifest) {
+    // manifest.plugins에 없는 MANIFEST_* 전역 선언도 병합 (excel/english/aws 패턴)
+    if (manifest) {
+      if (!Array.isArray(manifest.plugins)) manifest.plugins = [];
+      var seenPids = {};
+      manifest.plugins.forEach(function (p) { seenPids[p.plugin_id] = true; });
+      Object.keys(window).forEach(function (k) {
+        if (/^MANIFEST_[A-Z]/.test(k)) {
+          var m = window[k];
+          if (m && m.plugin_id && !seenPids[m.plugin_id]) {
+            manifest.plugins.push(m);
+            seenPids[m.plugin_id] = true;
+          }
+        }
+      });
+    }
+
     var plugins = (manifest && manifest.plugins) || [];
     plugins.forEach(function (pManifest) {
       var pid = pManifest.plugin_id;
@@ -701,7 +879,7 @@
       var globalKey = '_' + pid.replace(/-([a-z])/g, function (_, c) { return '_' + c.toUpperCase(); }).toUpperCase() + '_PLUGIN';
       var inst = window[globalKey];
       if (!inst) {
-        // fallback: window._CARD_QUIZ_PLUGIN 등 직접 체크
+        // fallback: window._EXCEL_PLUGIN 등 직접 체크
         var directKey = '_' + pid.replace(/-/g, '_').toUpperCase() + '_PLUGIN';
         inst = window[directKey];
       }

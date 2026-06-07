@@ -442,13 +442,47 @@
       };
     }
 
+    // mid: 오답 노트 — incorrect 시 back.explanation 누적 (최대 20개, snap 레벨 전역 목록)
+    if (!Array.isArray(snap.wrong_notes)) snap.wrong_notes = [];
+    if (result.verdict === 'incorrect') {
+      var wrongActivity = _findActivity(activityId);
+      var explanation = wrongActivity && wrongActivity.back && wrongActivity.back.explanation;
+      if (explanation) {
+        // 중복 activity_id 제거 후 최신으로 갱신, 최대 20개
+        snap.wrong_notes = snap.wrong_notes.filter(function (n) { return n.activity_id !== activityId; });
+        snap.wrong_notes.unshift({ activity_id: activityId, modality: modality, explanation: explanation, ts: Date.now() });
+        if (snap.wrong_notes.length > 20) snap.wrong_notes = snap.wrong_notes.slice(0, 20);
+      }
+    }
+
+    // mid: writing 히스토리 — llm-rubric 채점 후 (pending 포함) 저장 (최대 5회 순환)
+    var history = (entry.plugin_extra && Array.isArray(entry.plugin_extra.history))
+      ? entry.plugin_extra.history.slice()
+      : [];
+    if (modality === 'writing') {
+      history.unshift({
+        answer:    typeof lastAnswer === 'string' ? lastAnswer : '',
+        feedback:  (result.feedback && result.feedback.message) || '',
+        score_raw: result.score_raw,
+        ts:        Date.now()
+      });
+      if (history.length > 5) history = history.slice(0, 5);
+    }
+
+    // tts_rate 보존 (listening 속도 버튼이 별도로 저장하지만 덮어쓰지 않도록 유지)
+    var preservedRate = entry.plugin_extra && typeof entry.plugin_extra.tts_rate === 'number'
+      ? { tts_rate: entry.plugin_extra.tts_rate }
+      : {};
+
     entry.plugin_extra = Object.assign(
       {
         modality:    modality,
         last_answer: typeof lastAnswer === 'string' ? lastAnswer : null,
         score_raw:   result.score_raw
       },
-      sm2Fields
+      sm2Fields,
+      preservedRate,
+      modality === 'writing' ? { history: history } : {}
     );
     _state.progress = snap;
     _saveProgress(snap);
@@ -540,6 +574,38 @@
   }
 
   /* ─────────────────────────────────────────────
+     writing 히스토리 타임라인 렌더 (mid: writing 제출 히스토리)
+     history: [{answer, feedback, score_raw, ts}, ...] 최대 5개
+  ───────────────────────────────────────────── */
+  function _renderWritingHistory(el, history) {
+    if (!el) return;
+    if (!history || !history.length) { el.innerHTML = ''; return; }
+    var html = '<div style="border-top:1px solid var(--line2,#eee);padding-top:14px">';
+    html += '<div style="font-size:0.82rem;font-weight:600;color:var(--ink3,#888);margin-bottom:10px;letter-spacing:0.02em">이전 제출 기록 (' + history.length + '/5)</div>';
+    history.forEach(function (h, i) {
+      var ts = h.ts ? new Date(h.ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+      var scoreLabel = typeof h.score_raw === 'number' ? Math.round(h.score_raw * 100) + '%' : '채점불가';
+      var scoreColor = typeof h.score_raw === 'number'
+        ? (h.score_raw >= 0.6 ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)')
+        : 'var(--warn,#b45309)';
+      html += '<div style="margin-bottom:10px;padding:10px 12px;background:var(--surface2,#f6f8fa);border-radius:6px;border-left:3px solid var(--line2,#ddd)">';
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
+      html += '<span style="font-size:0.78rem;color:var(--ink3,#999)">#' + (i + 1) + ' &nbsp;' + _esc(ts) + '</span>';
+      html += '<span style="margin-left:auto;font-size:0.8rem;font-weight:600;color:' + scoreColor + '">' + _esc(scoreLabel) + '</span>';
+      html += '</div>';
+      if (h.answer) {
+        html += '<div style="font-size:0.83rem;color:var(--ink2,#444);margin-bottom:4px;white-space:pre-wrap;word-break:break-word">' + _esc(h.answer.slice(0, 200)) + (h.answer.length > 200 ? '…' : '') + '</div>';
+      }
+      if (h.feedback) {
+        html += '<div style="font-size:0.8rem;color:var(--ink3,#666);font-style:italic">' + _esc(h.feedback.slice(0, 150)) + (h.feedback.length > 150 ? '…' : '') + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  /* ─────────────────────────────────────────────
      _loadEnglishActivity — 문제 전환 (nav 전환 + 초기 로드 공용)
   ───────────────────────────────────────────── */
   function _loadEnglishActivity(container, ctx, activities, idx) {
@@ -591,15 +657,42 @@
       html += '<div class="eng-passage" style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:var(--r,6px);padding:14px 16px;margin-bottom:14px;font-size:0.95rem;line-height:1.7;white-space:pre-wrap">' + _esc(activity.front.passage) + '</div>';
     }
 
-    // listening: TTS 재생 버튼 + 받아쓰기 입력
+    // listening: TTS 재생 버튼 + 속도 제어 + 받아쓰기 입력 (mid: TTS 재생 속도 제어)
     if (modality === 'listening') {
+      // 저장된 속도 복원 (plugin_extra.tts_rate)
+      var savedRate = 1.0;
+      if (_state.progress) {
+        var actSaved = _state.progress.activities && _state.progress.activities[activity.activity_id];
+        if (actSaved && actSaved.plugin_extra && typeof actSaved.plugin_extra.tts_rate === 'number') {
+          savedRate = actSaved.plugin_extra.tts_rate;
+        }
+      }
       if (!ttSupport) {
         html += '<div class="eng-tts-unsupported" style="padding:10px 14px;background:var(--warn-bg,#fff8e1);border-radius:var(--r,6px);color:var(--warn,#b45309);margin-bottom:12px">' +
                 '이 브라우저는 TTS(SpeechSynthesis)를 지원하지 않습니다. Chrome/Edge를 사용해 주세요.</div>';
       } else {
+        // 속도 제어 버튼 3개
+        html += '<div class="eng-tts-controls" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">';
         html += '<button type="button" id="eng-tts-btn" class="eng-tts-btn"' +
-                ' style="padding:8px 20px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer;margin-bottom:12px;display:inline-flex;align-items:center;gap:6px">' +
+                ' style="padding:8px 20px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer;display:inline-flex;align-items:center;gap:6px">' +
                 '<span>&#9654;</span> 듣기</button>';
+        html += '<span style="font-size:0.8rem;color:var(--ink3,#888);margin-left:4px">속도:</span>';
+        var rates = [
+          { val: 0.75, label: '0.75×' },
+          { val: 1.0,  label: '1.0×'  },
+          { val: 1.25, label: '1.25×' }
+        ];
+        rates.forEach(function (r) {
+          var isActive = savedRate === r.val;
+          html += '<button type="button" class="eng-rate-btn" data-rate="' + r.val + '"' +
+                  ' style="padding:5px 12px;border-radius:6px;border:1.5px solid ' +
+                  (isActive ? 'var(--accent,#0550ae)' : 'var(--line2,#ccc)') +
+                  ';background:' + (isActive ? 'var(--accent-bg,#e8f0fe)' : 'var(--surface,#fff)') +
+                  ';color:' + (isActive ? 'var(--accent,#0550ae)' : 'var(--ink3,#666)') +
+                  ';cursor:pointer;font-size:0.82rem;font-weight:' + (isActive ? '600' : '400') + '">' +
+                  r.label + '</button>';
+        });
+        html += '</div>';
       }
       html += '<div style="font-size:0.88rem;color:var(--ink3,#666);margin-bottom:8px">받아쓰기: 들은 내용을 입력하세요</div>';
       html += '<textarea id="eng-answer-input" class="eng-answer-input"' +
@@ -641,6 +734,10 @@
 
     // 결과 영역
     html += '<div id="eng-result" class="eng-result" style="min-height:28px;margin-top:14px"></div>';
+    // writing: 히스토리 타임라인 컨테이너 (mid: writing 제출 히스토리)
+    if (modality === 'writing') {
+      html += '<div id="eng-history-area" style="margin-top:18px"></div>';
+    }
     html += '</div>';
 
     contentArea.innerHTML = html;
@@ -651,8 +748,41 @@
       if (inp) inp.value = lastAnswer;
     }
 
-    // TTS 버튼 바인딩 (listening)
+    // TTS 버튼 + 속도 제어 바인딩 (listening, mid: TTS 재생 속도 제어)
     if (modality === 'listening' && ttSupport) {
+      // 현재 선택 속도 (클로저 상태)
+      var _currentRate = savedRate;
+
+      // 속도 버튼 클릭 처리
+      var rateBtns = contentArea.querySelectorAll('.eng-rate-btn');
+      for (var ri = 0; ri < rateBtns.length; ri++) {
+        rateBtns[ri].addEventListener('click', (function (btn) {
+          return function () {
+            _currentRate = parseFloat(btn.getAttribute('data-rate'));
+            // 버튼 스타일 갱신
+            var allRateBtns = contentArea.querySelectorAll('.eng-rate-btn');
+            for (var j = 0; j < allRateBtns.length; j++) {
+              var isActive = parseFloat(allRateBtns[j].getAttribute('data-rate')) === _currentRate;
+              allRateBtns[j].style.border = '1.5px solid ' + (isActive ? 'var(--accent,#0550ae)' : 'var(--line2,#ccc)');
+              allRateBtns[j].style.background = isActive ? 'var(--accent-bg,#e8f0fe)' : 'var(--surface,#fff)';
+              allRateBtns[j].style.color = isActive ? 'var(--accent,#0550ae)' : 'var(--ink3,#666)';
+              allRateBtns[j].style.fontWeight = isActive ? '600' : '400';
+            }
+            // plugin_extra.tts_rate 저장
+            var snap = getProgressSnapshot();
+            if (!snap.activities[activity.activity_id]) {
+              snap.activities[activity.activity_id] = {
+                cold_attempts: 0, cold_correct: 0, last_verdict: null,
+                plugin_extra: { modality: modality, last_answer: null, score_raw: null }
+              };
+            }
+            snap.activities[activity.activity_id].plugin_extra.tts_rate = _currentRate;
+            _state.progress = snap;
+            _saveProgress(snap);
+          };
+        })(rateBtns[ri]));
+      }
+
       var ttsBtn = contentArea.querySelector('#eng-tts-btn');
       if (ttsBtn) {
         ttsBtn.addEventListener('click', function () {
@@ -665,7 +795,7 @@
           ttsBtn.innerHTML = '<span>&#9646;&#9646;</span> 재생 중...';
           // voiceschanged 대기 후 재생 (Chrome 비동기 로드)
           function doSpeak() {
-            _speakText(text, { lang: 'en-US', rate: 0.85 }).then(function () {
+            _speakText(text, { lang: 'en-US', rate: _currentRate }).then(function () {
               ttsBtn.disabled = false;
               ttsBtn.innerHTML = '<span>&#9654;</span> 다시 듣기';
             }).catch(function (e) {
@@ -744,6 +874,18 @@
       }
     }
 
+    // writing: 이전 히스토리 초기 렌더 (mid: writing 제출 히스토리)
+    if (modality === 'writing') {
+      var existingHistory = [];
+      if (_state.progress) {
+        var wActSaved = _state.progress.activities && _state.progress.activities[activity.activity_id];
+        if (wActSaved && wActSaved.plugin_extra && Array.isArray(wActSaved.plugin_extra.history)) {
+          existingHistory = wActSaved.plugin_extra.history;
+        }
+      }
+      _renderWritingHistory(contentArea.querySelector('#eng-history-area'), existingHistory);
+    }
+
     // 제출 버튼 바인딩
     var submitBtn = contentArea.querySelector('#eng-submit-btn');
     if (submitBtn) {
@@ -762,6 +904,14 @@
           ctx.emit({ type: 'activity-completed', result: result });
           // 채점 후 nav 배지 즉시 갱신
           _updateNavBadges(container, activities, _state.activityIndex);
+          // writing: 히스토리 갱신 표시
+          if (modality === 'writing') {
+            var histEl = contentArea.querySelector('#eng-history-area');
+            var snap2 = getProgressSnapshot();
+            var wEntry = snap2.activities && snap2.activities[activity.activity_id];
+            var hist2 = (wEntry && wEntry.plugin_extra && wEntry.plugin_extra.history) || [];
+            _renderWritingHistory(histEl, hist2);
+          }
         }).catch(function (e) {
           if (resultEl) resultEl.innerHTML = '<span style="color:var(--hot,#d73a49)">채점 오류: ' + _esc(e.message) + '</span>';
         });
@@ -966,6 +1116,7 @@
 
   /* ─────────────────────────────────────────────
      getDashboardContrib() (플러그인계약 §3 선택)
+     mid: 오답 노트 위젯 — extra_widgets에 "자주 틀리는 표현 TOP5" 추가
   ───────────────────────────────────────────── */
   function getDashboardContrib() {
     var snap = getProgressSnapshot();
@@ -1013,13 +1164,42 @@
       };
     });
 
+    // mid: 오답 노트 위젯 — snap.wrong_notes[] 전역 목록에서 TOP5
+    var allWrongNotes = Array.isArray(snap.wrong_notes) ? snap.wrong_notes : [];
+    // 이미 중복 제거·최신순 정렬된 상태(_updateProgress에서 관리); 앞 5개만 사용
+    var top5WrongNotes = allWrongNotes.slice(0, 5);
+
+    var extraWidgets = [];
+    if (top5WrongNotes.length > 0) {
+      // 위젯 HTML 생성
+      var widgetHtml = '<div style="font-size:0.88rem">';
+      widgetHtml += '<div style="font-weight:600;color:var(--ink2,#444);margin-bottom:8px">자주 틀리는 표현 TOP' + top5WrongNotes.length + '</div>';
+      top5WrongNotes.forEach(function (n, i) {
+        var activity = _findActivity(n.activity_id);
+        var area = activity ? activity.tags.area : n.modality;
+        widgetHtml += '<div style="margin-bottom:8px;padding:8px 10px;background:var(--surface2,#f6f8fa);border-radius:6px;border-left:3px solid var(--hot,#d73a49)">';
+        widgetHtml += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
+        widgetHtml += '<span style="font-size:0.75rem;padding:1px 7px;border-radius:10px;background:var(--hot-bg,#fde8ea);color:var(--hot,#d73a49)">' + _esc(area) + '</span>';
+        widgetHtml += '</div>';
+        widgetHtml += '<div style="color:var(--ink2,#444);font-size:0.82rem;line-height:1.5">' + _esc(n.explanation.slice(0, 120)) + (n.explanation.length > 120 ? '…' : '') + '</div>';
+        widgetHtml += '</div>';
+      });
+      widgetHtml += '</div>';
+      extraWidgets.push({
+        widget_id: 'english-wrong-notes',
+        title:     '자주 틀리는 표현',
+        html:      widgetHtml,
+        data:      { wrong_notes: top5WrongNotes }
+      });
+    }
+
     return {
       plugin_id:    'english',
       by_area:      byArea,
       weakness:     weakness,
       pass_path:    [],
       completion:   completion,
-      extra_widgets: []
+      extra_widgets: extraWidgets
     };
   }
 

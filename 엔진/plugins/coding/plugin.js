@@ -2,11 +2,16 @@
  * coding / plugin.js
  * 플러그인계약 §3 PluginInstance 구현 — coding 플러그인
  * ────────────────────────────────────────────────────────────
- * 런타임규격 conform (buildflow cycle-2, cycle-3 upgrade).
+ * 런타임규격 conform (buildflow cycle-2, cycle-3 upgrade, cycle-4 mid).
  *
  * 의존 CDN (index.html에서 shell.js보다 먼저 로드):
  *   CodeMirror 5.x  — codemirror.min.js + codemirror.min.css + mode/python/python.min.js
  *   Pyodide ≥0.26   — mount() 시 lazy loadPyodide(); window._pyodide 싱글턴 캐시
+ *
+ * mid 기능 (cycle-4):
+ *   - matplotlib 플롯 렌더링: agg 백엔드 + base64 PNG → <img> 출력
+ *   - 문제 태그별 네비 필터: area/subarea 드롭다운
+ *   - 풀이 시간 수집 (solve_ms): mount→score 경과 시간 기록·표시
  *
  * 등록 방식 (shell.js _registerPlugins 규칙):
  *   plugin_id = "coding"
@@ -69,13 +74,15 @@
   /* ─────────────────────────────────────────────
      Pyodide 1케이스 실행 (런타임규격 §3-2)
      stdin 주입 + stdout 캡처 + 5초 타임아웃
+     [mid] matplotlib agg 백엔드 지원: plot_b64 반환
   ───────────────────────────────────────────── */
   /**
    * @param {string} code  사용자 코드
    * @param {string} stdin 테스트 케이스 input 문자열
-   * @returns {Promise<{stdout:string, error:string|null}>}
+   * @param {boolean} [captureplot]  true이면 matplotlib figure를 base64 PNG로 캡처
+   * @returns {Promise<{stdout:string, error:string|null, plot_b64:string|null}>}
    */
-  function _runOneCase(code, stdin) {
+  function _runOneCase(code, stdin, captureplot) {
     var py = _pyodide;
 
     // 케이스 간 전역 오염 방지: 사용자 정의 모듈 제거 (표준라이브러리 유지)
@@ -86,12 +93,23 @@
       );
     } catch (e) { /* 안전망: 실패해도 계속 */ }
 
+    // [mid] matplotlib agg 설정 코드 (matplotlib이 import되는 경우 agg 강제)
+    var mplSetup = captureplot
+      ? 'try:\n' +
+        '    import matplotlib as _mpl\n' +
+        '    _mpl.use("agg")\n' +
+        'except Exception:\n' +
+        '    pass\n'
+      : '';
+
     // stdin 주입 + stdout/stderr 리디렉션 래퍼 코드
     var wrapper =
+      mplSetup +
       'import sys as _sys, io as _io\n' +
       '_sys.stdin  = _io.StringIO(_STDIN_STR)\n' +
       '_sys.stdout = _io.StringIO()\n' +
       '_sys.stderr = _io.StringIO()\n' +
+      '_PLOT_B64 = ""\n' +
       'try:\n' +
       '    exec(_USER_CODE)\n' +
       'except SystemExit:\n' +
@@ -99,17 +117,33 @@
       '_STDOUT_VAL = _sys.stdout.getvalue()\n' +
       '_STDERR_VAL = _sys.stderr.getvalue()\n';
 
+    // [mid] matplotlib 플롯 캡처: exec 후 열린 figure를 base64 PNG로 저장
+    var mplCapture = captureplot
+      ? 'try:\n' +
+        '    import matplotlib.pyplot as _plt, base64 as _b64, io as _bio\n' +
+        '    _figs = _plt.get_fignums()\n' +
+        '    if _figs:\n' +
+        '        _buf = _bio.BytesIO()\n' +
+        '        _plt.savefig(_buf, format="png", bbox_inches="tight", dpi=96)\n' +
+        '        _buf.seek(0)\n' +
+        '        _PLOT_B64 = _b64.b64encode(_buf.read()).decode("ascii")\n' +
+        '        _plt.close("all")\n' +
+        'except Exception:\n' +
+        '    pass\n'
+      : '';
+
     // 전역에 변수 주입 (globals.set)
     py.globals.set('_STDIN_STR', stdin);
     py.globals.set('_USER_CODE', code);
 
-    var runPromise = py.runPythonAsync(wrapper).then(function () {
-      var out = py.globals.get('_STDOUT_VAL') || '';
-      return { stdout: out, error: null };
+    var runPromise = py.runPythonAsync(wrapper + mplCapture).then(function () {
+      var out   = py.globals.get('_STDOUT_VAL') || '';
+      var pb64  = captureplot ? (py.globals.get('_PLOT_B64') || '') : '';
+      return { stdout: out, error: null, plot_b64: pb64 || null };
     }).catch(function (e) {
       // Python 예외: 첫 줄만 반환 (런타임규격 §3-2)
       var msg = String(e.message || e).split('\n')[0];
-      return { stdout: '', error: msg };
+      return { stdout: '', error: msg, plot_b64: null };
     });
 
     var timeoutPromise = new Promise(function (_, reject) {
@@ -118,10 +152,25 @@
 
     return Promise.race([runPromise, timeoutPromise]).catch(function (e) {
       if (String(e.message).indexOf('timeout') !== -1) {
-        return { stdout: '', error: 'timeout' };
+        return { stdout: '', error: 'timeout', plot_b64: null };
       }
-      return { stdout: '', error: String(e.message || e).split('\n')[0] };
+      return { stdout: '', error: String(e.message || e).split('\n')[0], plot_b64: null };
     });
+  }
+
+  /* ─────────────────────────────────────────────
+     [mid] matplotlib 플롯 렌더링 헬퍼
+     실행전용(Run) 버튼에서만 사용 — 채점 케이스에는 미적용
+  ───────────────────────────────────────────── */
+  /**
+   * allowed_packages에 matplotlib이 포함된 activity인지 확인
+   * @param {object} activity
+   * @returns {boolean}
+   */
+  function _hasMplPackage(activity) {
+    var pkgs = activity && activity.grading && activity.grading.allowed_packages;
+    if (!Array.isArray(pkgs)) return false;
+    return pkgs.some(function (p) { return p && p.toLowerCase().indexOf('matplotlib') !== -1; });
   }
 
   /* ─────────────────────────────────────────────
@@ -261,14 +310,17 @@
      플러그인 내부 상태
   ───────────────────────────────────────────── */
   var _state = {
-    mounted:       false,
-    host:          null,   // HTMLElement — #plugin-host
-    ctx:           null,   // PluginContext
-    activity:      null,   // 현재 ActivitySpec
-    activityIndex: 0,      // 현재 활성 activity 인덱스
-    editor:        null,   // CodeMirror 인스턴스
-    progress:      null,   // PluginProgressSnapshot (메모리 캐시)
-    restored:      false   // onProgressRestored 호출됐는지
+    mounted:        false,
+    host:           null,   // HTMLElement — #plugin-host
+    ctx:            null,   // PluginContext
+    activity:       null,   // 현재 ActivitySpec
+    activityIndex:  0,      // 현재 활성 activity 인덱스
+    editor:         null,   // CodeMirror 인스턴스
+    progress:       null,   // PluginProgressSnapshot (메모리 캐시)
+    restored:       false,  // onProgressRestored 호출됐는지
+    mountTime:      0,      // [mid] 풀이 시간: mount() 호출 시각 (Date.now())
+    filterArea:     '',     // [mid] 태그 필터: 현재 선택 area (''=전체)
+    filterSubarea:  ''      // [mid] 태그 필터: 현재 선택 subarea (''=전체)
   };
 
   /* ─────────────────────────────────────────────
@@ -341,20 +393,63 @@
       '</details>';
   }
 
-  /** 영속 셸 HTML (nav + 편집기 뼈대, activities 배열 기반) */
+  /* ─────────────────────────────────────────────
+     [mid] 태그 필터: activities에서 area/subarea 목록 수집
+  ───────────────────────────────────────────── */
+  function _collectTags(activities) {
+    var areaSet = {}, subareaByArea = {};
+    (activities || []).forEach(function (act) {
+      var tags = act && act.tags;
+      if (!tags) return;
+      if (tags.area)    areaSet[tags.area] = true;
+      if (tags.area && tags.subarea) {
+        if (!subareaByArea[tags.area]) subareaByArea[tags.area] = {};
+        subareaByArea[tags.area][tags.subarea] = true;
+      }
+    });
+    return {
+      areas:          Object.keys(areaSet).sort(),
+      subareaByArea:  subareaByArea
+    };
+  }
+
+  /** 영속 셸 HTML (nav + 태그 필터 + 편집기 뼈대, activities 배열 기반) */
   function _buildShellHTML(activities) {
     var navHtml = '';
-    if (activities.length > 1) {
+    if (activities.length > 0) {
       var btnHtmls = activities.map(function (act, i) {
         return '<button type="button" class="act-nav-btn" data-act-idx="' + i + '" ' +
           'style="padding:5px 14px;border-radius:6px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.85em;color:var(--ink3,#666);transition:background 0.15s">' +
           _esc(act.activity_id || ('문제 ' + (i + 1))) +
           '</button>';
       }).join('\n');
+
+      // [mid] 태그 필터 드롭다운 (activities 2개 이상일 때만 표시)
+      var filterHtml = '';
+      if (activities.length > 1) {
+        var tags = _collectTags(activities);
+        var areaOptions = '<option value="">전체 영역</option>' +
+          tags.areas.map(function (a) { return '<option value="' + _esc(a) + '">' + _esc(a) + '</option>'; }).join('');
+        filterHtml = [
+          '<div class="act-tag-filter" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">',
+          '  <select class="act-filter-area" style="padding:3px 8px;border-radius:5px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);font-size:0.82em;color:var(--ink3,#555);cursor:pointer">',
+          '    ' + areaOptions,
+          '  </select>',
+          '  <select class="act-filter-subarea" style="padding:3px 8px;border-radius:5px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);font-size:0.82em;color:var(--ink3,#555);cursor:pointer">',
+          '    <option value="">전체 세부</option>',
+          '  </select>',
+          '  <span class="act-filter-count" style="font-size:0.78em;color:var(--ink3,#999)"></span>',
+          '</div>'
+        ].join('\n');
+      }
+
       navHtml = [
+        '<div class="act-nav-wrap">',
+        filterHtml,
         '<div class="act-nav" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line2,#eee)">',
         btnHtmls,
         '<span class="act-count" style="margin-left:auto;font-size:0.8em;color:var(--ink3,#888)">1 / ' + activities.length + '</span>',
+        '</div>',
         '</div>'
       ].join('\n');
     }
@@ -362,7 +457,7 @@
     return [
       '<div class="coding-wrap">',
 
-      /* activity nav */
+      /* activity nav + 태그 필터 */
       navHtml,
 
       /* 문제 영역 (동적) */
@@ -393,12 +488,17 @@
       '          style="display:none;padding:8px 16px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface2,#f6f8fa);cursor:pointer;font-size:0.88em;color:var(--ink3,#555)">',
       '    모범 답안 보기',
       '  </button>',
+      /* [mid] 풀이 시간 표시 (제출 후 표시됨) */
+      '  <span class="coding-solve-time" style="display:none;font-size:0.82em;color:var(--ink3,#888);margin-left:4px"></span>',
       '</div>',
 
       /* 실행 출력창 */
       '<pre class="coding-output"',
       '     style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:6px;padding:12px;min-height:48px;font-size:0.85em;white-space:pre-wrap;overflow-x:auto;color:var(--ink,#111)">',
       '</pre>',
+
+      /* [mid] matplotlib 플롯 출력 영역 */
+      '<div class="coding-plot-output" style="display:none;margin-top:6px;text-align:center"></div>',
 
       /* 채점 결과 */
       '<div class="coding-result" style="min-height:28px"></div>',
@@ -414,6 +514,9 @@
     _state.activityIndex = idx;
     _state.activity = activities[idx] || null;
     var activity = _state.activity;
+
+    // [mid] 풀이 시간 타이머 리셋 (문제 전환 시 새 시작)
+    _state.mountTime = Date.now();
 
     // 문제 영역 갱신
     var problemEl = container.querySelector('#coding-problem-area');
@@ -431,34 +534,69 @@
       _state.editor.setValue(code);
     }
 
-    // 출력·결과 초기화, solution 버튼 숨기기
-    var outputEl = container.querySelector('.coding-output');
-    var resultEl = container.querySelector('.coding-result');
-    var solBtn   = container.querySelector('.coding-btn-solution');
+    // 출력·결과·플롯 초기화, solution 버튼·시간표시 숨기기
+    var outputEl  = container.querySelector('.coding-output');
+    var resultEl  = container.querySelector('.coding-result');
+    var solBtn    = container.querySelector('.coding-btn-solution');
+    var plotEl    = container.querySelector('.coding-plot-output');
+    var timeEl    = container.querySelector('.coding-solve-time');
     if (outputEl) outputEl.textContent = '';
     if (resultEl) resultEl.innerHTML = '';
     if (solBtn)   solBtn.style.display = 'none';
+    if (plotEl)   { plotEl.innerHTML = ''; plotEl.style.display = 'none'; }
+    if (timeEl)   timeEl.style.display = 'none';
 
-    // nav 버튼 활성 상태 + completion badge 갱신
+    // nav 버튼 활성 상태 + completion badge 갱신 (필터 고려)
+    _applyNavFilter(container, activities, idx);
+  }
+
+  /* ─────────────────────────────────────────────
+     [mid] _applyNavFilter — 태그 필터 적용 후 nav 버튼 visibility 갱신
+  ───────────────────────────────────────────── */
+  function _applyNavFilter(container, activities, activeIdx) {
+    var filterArea    = _state.filterArea    || '';
+    var filterSubarea = _state.filterSubarea || '';
+
     var actBtns = container.querySelectorAll('.act-nav-btn');
+    var visibleCount = 0;
+    var firstVisibleIdx = -1;
+
     for (var i = 0; i < actBtns.length; i++) {
       var btn = actBtns[i];
-      var isActive = (i === idx);
+      var isActive = (i === activeIdx);
       var act = activities[i];
-      var saved2 = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
+      var saved2 = act && _state.progress && _state.progress.activities && _state.progress.activities[act && act.activity_id];
       var done = saved2 && saved2.last_verdict === 'correct';
+
+      // 필터 매칭
+      var tags = act && act.tags;
+      var matchArea    = !filterArea    || (tags && tags.area    === filterArea);
+      var matchSub     = !filterSubarea || (tags && tags.subarea === filterSubarea);
+      var visible      = matchArea && matchSub;
+
+      btn.style.display = visible ? '' : 'none';
+      if (visible) {
+        visibleCount++;
+        if (firstVisibleIdx < 0) firstVisibleIdx = i;
+      }
+
       btn.style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
       btn.style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
       btn.style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
-      // completion badge
       var label = act ? (act.activity_id || ('문제 ' + (i + 1))) : ('문제 ' + (i + 1));
       btn.textContent = done ? label + ' ✓' : label;
       btn.title = done ? '완료 ✓' : '';
     }
 
-    // 카운트 표시 갱신
-    var countEl = container.querySelector('.act-count');
-    if (countEl) countEl.textContent = (idx + 1) + ' / ' + activities.length;
+    // 카운트·필터 카운트 갱신
+    var countEl  = container.querySelector('.act-count');
+    var fcountEl = container.querySelector('.act-filter-count');
+    if (countEl) countEl.textContent = (activeIdx + 1) + ' / ' + activities.length;
+    if (fcountEl) {
+      fcountEl.textContent = (filterArea || filterSubarea)
+        ? visibleCount + '개 표시'
+        : '';
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -473,9 +611,12 @@
     // 이미 마운트된 경우 먼저 정리
     if (_state.mounted) unmount();
 
-    _state.host    = container;
-    _state.ctx     = ctx;
-    _state.mounted = true;
+    _state.host          = container;
+    _state.ctx           = ctx;
+    _state.mounted       = true;
+    _state.mountTime     = Date.now();   // [mid] 풀이 시간 타이머 시작
+    _state.filterArea    = '';           // [mid] 필터 리셋
+    _state.filterSubarea = '';
 
     // activities 목록 취득 (window.ACTIVITIES['coding'])
     var activities = (window.ACTIVITIES && window.ACTIVITIES['coding']) || [];
@@ -502,6 +643,8 @@
     var loadingEl  = container.querySelector('.coding-pyodide-loading');
     var resultEl   = container.querySelector('.coding-result');
     var solBtn     = container.querySelector('.coding-btn-solution');
+    var plotEl     = container.querySelector('.coding-plot-output');    // [mid]
+    var timeEl     = container.querySelector('.coding-solve-time');    // [mid]
 
     // 에디터 1회 생성 (스위치 시 재사용)
     _state.editor = _createEditor(editorWrap, '');
@@ -518,6 +661,29 @@
           if (!isNaN(newIdx)) _applyActivity(container, activities, newIdx);
         });
       })(actBtns[bi]);
+    }
+
+    // [mid] 태그 필터 드롭다운 이벤트 바인딩
+    var areaSelect    = container.querySelector('.act-filter-area');
+    var subareaSelect = container.querySelector('.act-filter-subarea');
+    if (areaSelect && subareaSelect) {
+      var tagData = _collectTags(activities);
+
+      areaSelect.addEventListener('change', function () {
+        _state.filterArea    = areaSelect.value;
+        _state.filterSubarea = '';
+        // subarea 드롭다운 재구성
+        var subs = _state.filterArea ? Object.keys((tagData.subareaByArea[_state.filterArea] || {})).sort() : [];
+        subareaSelect.innerHTML = '<option value="">전체 세부</option>' +
+          subs.map(function (s) { return '<option value="' + _esc(s) + '">' + _esc(s) + '</option>'; }).join('');
+        subareaSelect.value = '';
+        _applyNavFilter(container, activities, _state.activityIndex);
+      });
+
+      subareaSelect.addEventListener('change', function () {
+        _state.filterSubarea = subareaSelect.value;
+        _applyNavFilter(container, activities, _state.activityIndex);
+      });
     }
 
     // Pyodide 백그라운드 프리로드 + allowed_packages 사전 설치
@@ -550,7 +716,7 @@
       }
     });
 
-    /* ── Run 버튼: 제출 없이 실행만 (stdout 출력) ── */
+    /* ── Run 버튼: 제출 없이 실행만 (stdout + matplotlib 플롯 출력) ── */
     if (runBtn) {
       runBtn.disabled = true; // Pyodide 로드 전 비활성
       runBtn.addEventListener('click', function () {
@@ -560,8 +726,17 @@
         }
         var code = _state.editor.getValue();
         _showOutput(outputEl, '실행 중...');
-        _runOneCase(code, '').then(function (res) {
+        // [mid] matplotlib 패키지 설치된 activity이면 플롯 캡처 활성화
+        var capturePlot = _hasMplPackage(_state.activity);
+        if (plotEl) { plotEl.innerHTML = ''; plotEl.style.display = 'none'; }
+        _runOneCase(code, '', capturePlot).then(function (res) {
           _showOutput(outputEl, res.error ? ('오류: ' + res.error) : (res.stdout || '(출력 없음)'));
+          // [mid] 플롯이 캡처됐으면 img 태그로 표시
+          if (plotEl && res.plot_b64) {
+            plotEl.innerHTML = '<img src="data:image/png;base64,' + res.plot_b64 +
+              '" alt="matplotlib 출력" style="max-width:100%;border-radius:6px;border:1px solid var(--line2,#ddd)">';
+            plotEl.style.display = 'block';
+          }
         });
       });
     }
@@ -580,9 +755,18 @@
         }
         var code = _state.editor.getValue();
         var activity = _state.activity;
+        // [mid] 풀이 시간 측정 시작 (이 버튼 클릭 시점 기준)
+        var scoreStart = Date.now();
         _showResult(resultEl, null, '채점 중...');
         // score() 호출
         score({ code: code }).then(function (result) {
+          // [mid] 풀이 시간 계산 및 표시 (mount 기준 경과)
+          var solveMs = Date.now() - _state.mountTime;
+          if (timeEl) {
+            var sec = (solveMs / 1000).toFixed(1);
+            timeEl.textContent = '풀이 시간: ' + sec + 's';
+            timeEl.style.display = 'inline';
+          }
           _showResult(resultEl, result, null);
           // solution 버튼: back에 내용이 있으면 표시
           if (solBtn && activity.back && (activity.back.solution || activity.back.explanation)) {
@@ -591,7 +775,7 @@
           // 진도 자동 저장 (emit → shell이 getProgressSnapshot 호출)
           ctx.emit({ type: 'activity-completed', result: result });
           // nav badge 갱신 (verdict 반영)
-          _applyActivityNavOnly(container, activities, _state.activityIndex);
+          _applyNavFilter(container, activities, _state.activityIndex);
         }).catch(function (e) {
           _showResult(resultEl, null, '채점 오류: ' + e.message);
         });
@@ -623,24 +807,10 @@
     return Promise.resolve();
   }
 
-  /**
-   * nav 버튼 badge만 갱신 (submit 후 verdict 반영용, 에디터/문제 건드리지 않음)
-   */
+  // _applyActivityNavOnly: _applyNavFilter로 통합됨 (mid 필터 지원)
+  // 하위 호환을 위해 alias로 유지
   function _applyActivityNavOnly(container, activities, idx) {
-    var actBtns = container.querySelectorAll('.act-nav-btn');
-    for (var i = 0; i < actBtns.length; i++) {
-      var btn = actBtns[i];
-      var isActive = (i === idx);
-      var act = activities[i];
-      var saved2 = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
-      var done = saved2 && saved2.last_verdict === 'correct';
-      btn.style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
-      btn.style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
-      btn.style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
-      var label = act ? (act.activity_id || ('문제 ' + (i + 1))) : ('문제 ' + (i + 1));
-      btn.textContent = done ? label + ' ✓' : label;
-      btn.title = done ? '완료 ✓' : '';
-    }
+    _applyNavFilter(container, activities, idx);
   }
 
   /* ─────────────────────────────────────────────
@@ -654,6 +824,9 @@
     _state.editor         = null;
     _state.activity       = null;
     _state.activityIndex  = 0;
+    _state.mountTime      = 0;       // [mid]
+    _state.filterArea     = '';      // [mid]
+    _state.filterSubarea  = '';      // [mid]
   }
 
   /* ─────────────────────────────────────────────
@@ -811,17 +984,20 @@
         cold_attempts: 0,
         cold_correct:  0,
         last_verdict:  null,
-        plugin_extra:  { last_code: '', passed: 0, total: 0 }
+        plugin_extra:  { last_code: '', passed: 0, total: 0, solve_ms: 0 }
       };
     }
     var entry = snap.activities[activityId];
     entry.cold_attempts++;
     if (result.verdict === 'correct') entry.cold_correct++;
     entry.last_verdict = result.verdict;
+    // [mid] solve_ms: mount(또는 마지막 문제 전환) 이후 경과 ms 기록
+    var solveMs = _state.mountTime ? (Date.now() - _state.mountTime) : 0;
     entry.plugin_extra = {
       last_code: code,
       passed:    result.feedback.passed,
-      total:     result.feedback.total
+      total:     result.feedback.total,
+      solve_ms:  solveMs
     };
     _state.progress = snap;
     _saveProgress(snap);

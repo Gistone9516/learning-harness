@@ -257,16 +257,29 @@
       'font-size:0.95em;line-height:1.7;color:var(--ink,#111)">' +
       _esc(prompt) + '</div>');
 
-    // 체크리스트
+    // 체크리스트 (자가체크 — 클릭 가능한 체크박스, localStorage 저장)
     if (checkpoints.length) {
-      parts.push('<div style="margin-bottom:16px">');
+      var cpState = _loadCheckpointState(actId);
+      parts.push('<div class="aws-checkpoints" style="margin-bottom:16px">');
       parts.push('<div style="font-size:0.82em;font-weight:700;color:var(--ink3,#666);' +
         'margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">달성 단계</div>');
-      parts.push('<ol style="margin:0;padding-left:20px;line-height:1.8;font-size:0.92em;color:var(--ink,#111)">');
-      checkpoints.forEach(function (cp) {
-        parts.push('<li style="margin-bottom:4px">' + _esc(cp) + '</li>');
+      checkpoints.forEach(function (cp, i) {
+        var checked = cpState[i] ? true : false;
+        var labelStyle = checked
+          ? 'text-decoration:line-through;color:var(--ink3,#aaa);'
+          : 'color:var(--ink,#111);';
+        parts.push(
+          '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:7px;cursor:pointer" ' +
+          'class="aws-cp-row" data-cp-idx="' + i + '">' +
+          '<input type="checkbox" class="aws-cp-check" data-cp-idx="' + i + '"' +
+          (checked ? ' checked' : '') +
+          ' style="margin-top:3px;cursor:pointer;accent-color:#ff9900;width:15px;height:15px;flex-shrink:0">' +
+          '<span class="aws-cp-label" style="font-size:0.92em;line-height:1.7;' + labelStyle + '">' +
+          _esc(cp) + '</span>' +
+          '</div>'
+        );
       });
-      parts.push('</ol></div>');
+      parts.push('</div>');
     }
 
     // CLI 힌트 (토글)
@@ -329,6 +342,37 @@
      이벤트 바인딩 (힌트·풀이·검증 버튼)
   ───────────────────────────────────────────── */
   function _bindActivityEvents(viewerEl, activity, backendOnline) {
+    // 체크포인트 자가체크
+    var cpSection = viewerEl.querySelector('.aws-checkpoints');
+    if (cpSection && activity) {
+      cpSection.addEventListener('change', function (e) {
+        var cb = e.target;
+        if (!cb.classList.contains('aws-cp-check')) return;
+        var idx = parseInt(cb.getAttribute('data-cp-idx'), 10);
+        var state = _loadCheckpointState(activity.activity_id);
+        state[idx] = cb.checked;
+        _saveCheckpointState(activity.activity_id, state);
+        var row = cpSection.querySelector('.aws-cp-row[data-cp-idx="' + idx + '"]');
+        var label = row && row.querySelector('.aws-cp-label');
+        if (label) {
+          if (cb.checked) {
+            label.style.textDecoration = 'line-through';
+            label.style.color = 'var(--ink3,#aaa)';
+          } else {
+            label.style.textDecoration = '';
+            label.style.color = 'var(--ink,#111)';
+          }
+        }
+      });
+      // 행 클릭(체크박스 외 영역)도 토글
+      cpSection.addEventListener('click', function (e) {
+        var row = e.target.closest('.aws-cp-row');
+        if (!row || e.target.type === 'checkbox') return;
+        var cb = row.querySelector('.aws-cp-check');
+        if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      });
+    }
+
     var hintBtn  = viewerEl.querySelector('.aws-hint-btn');
     var hintBody = viewerEl.querySelector('.aws-hint-body');
     if (hintBtn && hintBody) {
@@ -454,6 +498,19 @@
     }
     html += '</div>';
     el.innerHTML = html;
+
+    // 정답 시 해설 자동 노출 (back.explanation 포함 섹션)
+    if (isCorrect) {
+      var wrap = el.closest('.aws-wrap') || el.parentNode;
+      if (wrap) {
+        var solBody = wrap.querySelector('.aws-solution-body');
+        var solBtn  = wrap.querySelector('.aws-solution-btn');
+        if (solBody && solBody.hasAttribute('hidden')) {
+          solBody.removeAttribute('hidden');
+          if (solBtn) solBtn.textContent = '풀이 숨기기';
+        }
+      }
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -501,6 +558,25 @@
         }
       }, null);
     }
+  }
+
+  /* ─────────────────────────────────────────────
+     체크포인트 자가체크 — localStorage 헬퍼
+     키: clf:aws:cp:<activity_id>  → {0: true, 1: false, ...}
+  ───────────────────────────────────────────── */
+  function _cpKey(activityId) {
+    return 'clf:aws:cp:' + activityId;
+  }
+
+  function _loadCheckpointState(activityId) {
+    try {
+      var raw = localStorage.getItem(_cpKey(activityId));
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+
+  function _saveCheckpointState(activityId, state) {
+    try { localStorage.setItem(_cpKey(activityId), JSON.stringify(state)); } catch (e) {}
   }
 
   /* ─────────────────────────────────────────────

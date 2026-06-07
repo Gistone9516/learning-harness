@@ -185,9 +185,11 @@
         <!-- BYO-key 섹션: shell.js가 data-byok-section 속성으로 동적 생성 -->
 
         <div class="settings-section">
-          <h2 class="settings-section__title">진도 내보내기 / 백업</h2>
-          <p class="text-muted">학습 진도·오답 데이터를 JSON 파일로 내보냅니다.</p>
+          <h2 class="settings-section__title">진도 내보내기 / 가져오기</h2>
+          <p class="text-muted">전체 플러그인 학습 진도를 JSON 파일로 내보내거나 가져옵니다.</p>
           <button type="button" data-settings="export" class="btn-settings-action" aria-label="진도 데이터 내보내기">내보내기 (JSON)</button>
+          <button type="button" data-settings="import" class="btn-settings-action" style="margin-left:8px" aria-label="진도 데이터 가져오기">가져오기 (JSON)</button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none" aria-label="진도 파일 선택">
           <div id="export-result" aria-live="polite" class="text-muted"></div>
         </div>
         <div class="settings-section">

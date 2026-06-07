@@ -94,9 +94,17 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
             return True, f"Lambda 함수 '{identifier}' 존재함"
 
         elif service == "iam":
-            # identifier = 역할 이름 (RoleName)
-            client.get_role(RoleName=identifier)
-            return True, f"IAM 역할 '{identifier}' 존재함"
+            # identifier = 역할 이름(RoleName) 또는 사용자 이름(UserName)
+            # 역할 먼저 시도, NoSuchEntity 이면 사용자 시도
+            try:
+                client.get_role(RoleName=identifier)
+                return True, f"IAM 역할 '{identifier}' 존재함"
+            except ClientError as role_exc:
+                role_code = role_exc.response["Error"]["Code"]
+                if role_code not in ("NoSuchEntity", "NoSuchEntityException"):
+                    raise
+            client.get_user(UserName=identifier)
+            return True, f"IAM 사용자 '{identifier}' 존재함"
 
         elif service == "dynamodb":
             client.describe_table(TableName=identifier)
@@ -106,6 +114,17 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
             # identifier = 큐 이름 (QueueName); SQS get_queue_url 으로 존재 확인
             client.get_queue_url(QueueName=identifier)
             return True, f"SQS 큐 '{identifier}' 존재함"
+
+        elif service == "sns":
+            # identifier = 토픽 이름 (TopicName); list_topics 페이지네이션으로 확인
+            paginator = client.get_paginator("list_topics")
+            for page in paginator.paginate():
+                for topic in page.get("Topics", []):
+                    arn = topic.get("TopicArn", "")
+                    # ARN 마지막 세그먼트가 토픽 이름
+                    if arn.split(":")[-1] == identifier:
+                        return True, f"SNS 토픽 '{identifier}' 존재함 (ARN: {arn})"
+            return False, f"SNS 토픽 '{identifier}' 없음"
 
         else:
             return False, f"resource-exists: 미지원 서비스 '{service}'"
@@ -139,8 +158,13 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     if not isinstance(expected, dict) or len(expected) == 0:
         return False, "config-equals: expected 는 {attribute_path: value} dict 이어야 함"
 
-    # 축약키 처리 — 축약키가 1개이고 값이 dict이면 전용 핸들러 우선 시도
-    alias_keys = {"versioning", "public_access_block", "env_var", "redrive_policy"}
+    # 축약키 처리 — 축약키가 1개이고 값이 dict/str이면 전용 핸들러 우선 시도
+    alias_keys = {
+        "versioning", "public_access_block", "env_var", "redrive_policy",
+        # 확장 (mid)
+        "lambda_runtime", "dynamodb_billing_mode", "iam_policy_attached",
+        "ec2_state", "ec2_tags", "sns_attributes",
+    }
     exp_keys = set(expected.keys())
     if len(exp_keys) == 1 and exp_keys.issubset(alias_keys):
         alias_key = next(iter(exp_keys))
@@ -259,6 +283,99 @@ def _check_alias(service: str, identifier: str, alias_key: str, exp_val) -> tupl
             msg = " | ".join(results)
             return all_ok, f"'{identifier}' RedrivePolicy — {msg}"
 
+        elif alias_key == "lambda_runtime":
+            # exp_val: "python3.12" 등 런타임 문자열
+            resp = client.get_function_configuration(FunctionName=identifier)
+            actual = resp.get("Runtime", "")
+            if isinstance(exp_val, str):
+                ok = actual == exp_val
+                return ok, f"'{identifier}' 런타임: 기대={exp_val!r}, 실제={actual!r} → {'✓' if ok else '✗'}"
+            return False, "lambda_runtime: expected는 문자열이어야 함"
+
+        elif alias_key == "dynamodb_billing_mode":
+            # exp_val: "PAY_PER_REQUEST" 또는 "PROVISIONED"
+            resp = client.describe_table(TableName=identifier)
+            billing = resp.get("Table", {}).get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
+            if isinstance(exp_val, str):
+                ok = billing == exp_val
+                return ok, f"'{identifier}' 과금 모드: 기대={exp_val!r}, 실제={billing!r} → {'✓' if ok else '✗'}"
+            return False, "dynamodb_billing_mode: expected는 문자열이어야 함"
+
+        elif alias_key == "iam_policy_attached":
+            # exp_val: {"role": "role-name", "policy_arn": "arn:..."} 또는 {"user": ...}
+            if not isinstance(exp_val, dict):
+                return False, "iam_policy_attached: expected는 dict이어야 함"
+            policy_arn = exp_val.get("policy_arn", "")
+            if "role" in exp_val:
+                resp = client.list_attached_role_policies(RoleName=exp_val["role"])
+                attached = [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+            elif "user" in exp_val:
+                resp = client.list_attached_user_policies(UserName=exp_val["user"])
+                attached = [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+            else:
+                return False, "iam_policy_attached: expected에 'role' 또는 'user' 키 필요"
+            ok = policy_arn in attached
+            return ok, f"정책 '{policy_arn}' 연결 여부: {'✓ 연결됨' if ok else '✗ 미연결'}"
+
+        elif alias_key == "ec2_state":
+            # exp_val: "running" 등
+            resp = client.describe_instances(InstanceIds=[identifier])
+            reservations = resp.get("Reservations", [])
+            if not reservations:
+                return False, f"EC2 인스턴스 '{identifier}' 없음"
+            actual_state = reservations[0]["Instances"][0].get("State", {}).get("Name", "")
+            if isinstance(exp_val, str):
+                ok = actual_state == exp_val
+                return ok, f"'{identifier}' 상태: 기대={exp_val!r}, 실제={actual_state!r} → {'✓' if ok else '✗'}"
+            return False, "ec2_state: expected는 문자열이어야 함"
+
+        elif alias_key == "ec2_tags":
+            # exp_val: {"Name": "my-server"} 등 태그 dict
+            resp = client.describe_instances(InstanceIds=[identifier])
+            reservations = resp.get("Reservations", [])
+            if not reservations:
+                return False, f"EC2 인스턴스 '{identifier}' 없음"
+            tags_raw = reservations[0]["Instances"][0].get("Tags", [])
+            tags = {t["Key"]: t["Value"] for t in tags_raw}
+            if not isinstance(exp_val, dict):
+                return False, "ec2_tags: expected는 dict이어야 함"
+            results, all_ok = [], True
+            for k, v in exp_val.items():
+                actual = tags.get(k)
+                ok = actual == v
+                if not ok: all_ok = False
+                results.append(f"Tag[{k}]: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+            msg = " | ".join(results)
+            return all_ok, f"'{identifier}' 태그 — {msg}"
+
+        elif alias_key == "sns_attributes":
+            # exp_val: {"DisplayName": "..."} 등 토픽 속성 dict
+            # identifier = 토픽 이름; ARN을 먼저 찾아야 함
+            topic_arn = None
+            paginator = client.get_paginator("list_topics")
+            for page in paginator.paginate():
+                for topic in page.get("Topics", []):
+                    arn = topic.get("TopicArn", "")
+                    if arn.split(":")[-1] == identifier:
+                        topic_arn = arn
+                        break
+                if topic_arn:
+                    break
+            if not topic_arn:
+                return False, f"SNS 토픽 '{identifier}' 없음"
+            attrs_resp = client.get_topic_attributes(TopicArn=topic_arn)
+            attrs = attrs_resp.get("Attributes", {})
+            if not isinstance(exp_val, dict):
+                return False, "sns_attributes: expected는 dict이어야 함"
+            results, all_ok = [], True
+            for k, v in exp_val.items():
+                actual = attrs.get(k)
+                ok = str(actual) == str(v) if actual is not None else False
+                if not ok: all_ok = False
+                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+            msg = " | ".join(results)
+            return all_ok, f"'{identifier}' SNS 속성 — {msg}"
+
         else:
             return False, f"미지원 축약키: {alias_key!r}"
 
@@ -313,6 +430,27 @@ def _fetch_resource_config(client, service: str, identifier: str) -> dict:
         queue_url_resp = client.get_queue_url(QueueName=identifier)
         queue_url      = queue_url_resp["QueueUrl"]
         resp = client.get_queue_attributes(QueueUrl=queue_url, AttributeNames=["All"])
+        resp.pop("ResponseMetadata", None)
+        return resp
+
+    elif service == "sns":
+        # identifier = 토픽 이름; ARN 검색 후 속성 반환
+        topic_arn = None
+        paginator = client.get_paginator("list_topics")
+        for page in paginator.paginate():
+            for topic in page.get("Topics", []):
+                arn = topic.get("TopicArn", "")
+                if arn.split(":")[-1] == identifier:
+                    topic_arn = arn
+                    break
+            if topic_arn:
+                break
+        if not topic_arn:
+            raise ClientError(
+                {"Error": {"Code": "NotFound", "Message": f"SNS 토픽 '{identifier}' 없음"}},
+                "get_topic_attributes"
+            )
+        resp = client.get_topic_attributes(TopicArn=topic_arn)
         resp.pop("ResponseMetadata", None)
         return resp
 

@@ -24,11 +24,14 @@
  * ActivitySpec type = "sheet-task" (런타임규격 §2)
  * 채점: compare="value" 정적 셀값 비교 (MVP, 런타임규격 §4)
  *
- * 파킹(v2):
+ * mid 구현 (buildflow cycle-4):
+ *   - 진도 셀 스냅샷: _updateProgress에서 getSnapshot() 저장, onProgressRestored에서 createWorkbook 재주입
+ *   - 약점 영역 재도전 필터: 네비게이션 배지 난이도 아이콘 + '약점만 보기' 필터 버튼
+ *
+ * 파킹/skip:
  *   - 수식 동치 채점(formula-equivalence): PySheetGrader 백엔드 필요
- *   - 서식·조건부서식 채점: Facade 서식 API 별도 구현 필요
+ *   - 서식·조건부서식 채점: C4 계약 대기 + Facade API 미확정 → skip
  *   - Univer 고급함수 커버리지 미검증
- *   - 진도 셀 스냅샷 복원: getSnapshot() → createWorkbook() 재주입 흐름
  *   - 한국어 로케일: ko-KR UMD 제공 여부 미확인, v1은 en-US 고정
  */
 (function () {
@@ -62,7 +65,8 @@
     progress:      null,   // PluginProgressSnapshot (메모리 캐시)
     restored:      false,  // onProgressRestored 호출됐는지
     activityIndex: 0,      // 현재 활동 인덱스
-    univerContainer: null  // Univer 컨테이너 ref (dispose용)
+    univerContainer: null, // Univer 컨테이너 ref (dispose용)
+    weaknessOnly:  false   // mid: 약점 영역만 보기 필터 상태
   };
 
   /* ─────────────────────────────────────────────
@@ -442,21 +446,64 @@
   }
 
   /* ─────────────────────────────────────────────
+     weight → 난이도 아이콘 매핑 (mid: 약점 영역 재도전 필터)
+     weight 1-3: easy(●), 4-6: medium(◆), 7-10: hard(★)
+  ───────────────────────────────────────────── */
+  function _diffIcon(weight) {
+    if (!weight || weight <= 3) return { icon: '●', label: '쉬움', color: '#3cbb74' };
+    if (weight <= 6)             return { icon: '◆', label: '중간', color: '#f0a015' };
+    return                               { icon: '★', label: '어려움', color: '#d73a49' };
+  }
+
+  /* ─────────────────────────────────────────────
+     약점 unit 집합 계산 (getDashboardContrib.weakness 재활용)
+  ───────────────────────────────────────────── */
+  function _weaknessUnits() {
+    var contrib = getDashboardContrib();
+    if (!contrib || !contrib.weakness || !contrib.weakness.length) return null;
+    var units = {};
+    contrib.weakness.forEach(function (w) { units[w.unit] = true; });
+    return units;
+  }
+
+  /* ─────────────────────────────────────────────
      Activity 네비게이션 바 HTML 생성
+     mid: 각 버튼에 난이도 아이콘 추가
+          weakness 데이터 있을 때 '약점만 보기' 필터 버튼 추가
   ───────────────────────────────────────────── */
   /**
-   * @param {Array}  activities
-   * @param {number} currentIdx
+   * @param {Array}   activities
+   * @param {number}  currentIdx
+   * @param {boolean} weaknessOnly  약점 필터 ON 여부
    * @returns {string}
    */
-  function _buildNavHTML(activities, currentIdx) {
+  function _buildNavHTML(activities, currentIdx, weaknessOnly) {
     if (!activities || activities.length <= 1) return '';
+    var weakUnits = _weaknessUnits();
+    var hasWeakness = weakUnits && Object.keys(weakUnits).length > 0;
+
     var html = '<div class="act-nav" style="display:flex;align-items:center;gap:6px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line2,#eee);flex-wrap:wrap">';
     html += '<span style="font-size:0.8rem;color:var(--ink3,#888);font-weight:500;margin-right:2px">문제</span>';
     for (var i = 0; i < activities.length; i++) {
+      var act = activities[i];
+      var diff = _diffIcon(act && act.weight);
+      var isWeak = weakUnits && act && act.tags && weakUnits[act.tags.unit];
+      // 약점 필터 ON 이고 약점 아닌 활동은 흐리게 표시
+      var dimStyle = (weaknessOnly && !isWeak) ? 'opacity:0.35;' : '';
       html += '<button type="button" class="act-nav-btn" data-act-idx="' + i + '"' +
-        ' style="min-width:34px;height:34px;border-radius:7px;border:1.5px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.83rem;font-weight:500">' +
-        (i + 1) + '</button>';
+        ' style="' + dimStyle + 'min-width:34px;height:34px;border-radius:7px;border:1.5px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.83rem;font-weight:500;position:relative">' +
+        (i + 1) +
+        '<span style="position:absolute;top:-5px;right:-3px;font-size:0.6rem;line-height:1;color:' + diff.color + '" title="난이도: ' + diff.label + '">' + diff.icon + '</span>' +
+        '</button>';
+    }
+    // 약점 필터 버튼 (weakness 데이터 있을 때만)
+    if (hasWeakness) {
+      var filterBg = weaknessOnly ? 'var(--hot,#d73a49)' : 'var(--surface,#fff)';
+      var filterColor = weaknessOnly ? '#fff' : 'var(--hot,#d73a49)';
+      html += '<button type="button" class="act-weakness-filter" ' +
+        'style="margin-left:6px;padding:4px 10px;border-radius:6px;border:1.5px solid var(--hot,#d73a49);' +
+        'background:' + filterBg + ';color:' + filterColor + ';font-size:0.78rem;cursor:pointer;font-weight:500">' +
+        (weaknessOnly ? '전체 보기' : '약점만 보기') + '</button>';
     }
     html += '<span class="act-count" style="margin-left:auto;font-size:0.8rem;color:var(--ink3,#888)">' + (currentIdx + 1) + ' / ' + activities.length + '</span>';
     html += '</div>';
@@ -464,7 +511,7 @@
   }
 
   /* ─────────────────────────────────────────────
-     네비게이션 배지 업데이트 (진도·활성 상태 반영)
+     네비게이션 배지 업데이트 (진도·활성 상태 반영 + 난이도 아이콘)
   ───────────────────────────────────────────── */
   /**
    * @param {HTMLElement} container
@@ -472,16 +519,19 @@
    * @param {number}      currentIdx
    */
   function _updateNavBadges(container, activities, currentIdx) {
+    var weakUnits = _weaknessUnits();
     var btns = container.querySelectorAll('.act-nav-btn');
     for (var i = 0; i < btns.length; i++) {
       var isActive = i === currentIdx;
       var act = activities[i];
       var saved = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
       var done = saved && saved.last_verdict === 'correct';
+      var isWeak = weakUnits && act && act.tags && weakUnits[act.tags.unit];
+      var diff = _diffIcon(act && act.weight);
       btns[i].style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
       btns[i].style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
-      btns[i].style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
-      btns[i].title = done ? '완료 ✓' : '';
+      btns[i].style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : (isWeak ? 'var(--hot,#d73a49)' : 'var(--line2,#ddd)'));
+      btns[i].title = (done ? '완료 ✓ · ' : '') + '난이도: ' + diff.label + (isWeak ? ' · 약점 영역' : '');
     }
     var countEl = container.querySelector('.act-count');
     if (countEl) countEl.textContent = (currentIdx + 1) + ' / ' + activities.length;
@@ -539,6 +589,40 @@
   }
 
   /* ─────────────────────────────────────────────
+     mid: 약점 필터 버튼 이벤트 바인딩 (이벤트 위임)
+     nav 재렌더 후에도 호출해 최신 버튼에 바인딩
+  ───────────────────────────────────────────── */
+  function _bindWeaknessFilter(container, ctx, activities) {
+    var filterBtn = container.querySelector('.act-weakness-filter');
+    if (!filterBtn) return;
+    filterBtn.addEventListener('click', function () {
+      _state.weaknessOnly = !_state.weaknessOnly;
+      // nav 영역만 교체 (Univer 건드리지 않음)
+      var navEl = container.querySelector('.act-nav');
+      if (navEl) {
+        var tempDiv = document.createElement('div');
+        tempDiv.innerHTML = _buildNavHTML(activities, _state.activityIndex, _state.weaknessOnly);
+        var newNav = tempDiv.firstChild;
+        navEl.parentNode.replaceChild(newNav, navEl);
+      }
+      // 새로 삽입된 nav-btn·weakness-filter에 이벤트 재바인딩
+      var newNavBtns = container.querySelectorAll('.act-nav-btn');
+      for (var j = 0; j < newNavBtns.length; j++) {
+        (function (btn) {
+          btn.addEventListener('click', function () {
+            var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
+            if (!isNaN(newIdx) && newIdx !== _state.activityIndex) {
+              _switchExcelActivity(container, ctx, activities, newIdx);
+            }
+          });
+        })(newNavBtns[j]);
+      }
+      _bindWeaknessFilter(container, ctx, activities);
+      _updateNavBadges(container, activities, _state.activityIndex);
+    });
+  }
+
+  /* ─────────────────────────────────────────────
      UI HTML 생성
   ───────────────────────────────────────────── */
   /**
@@ -550,7 +634,7 @@
   function _buildHTML(activity, activities, currentIdx) {
     var prompt = (activity && activity.front && activity.front.prompt) || '(문제 없음)';
     var actId  = (activity && activity.activity_id) || '';
-    var navHtml = _buildNavHTML(activities, currentIdx);
+    var navHtml = _buildNavHTML(activities, currentIdx, _state.weaknessOnly);
 
     return [
       '<div class="excel-wrap" data-activity-id="' + _esc(actId) + '">',
@@ -708,6 +792,9 @@
       })(navBtns[i]);
     }
 
+    // mid: 약점 필터 버튼 바인딩 (weakness filter)
+    _bindWeaknessFilter(container, ctx, activities);
+
     // 초기 배지 상태 반영
     _updateNavBadges(container, activities, initIdx);
 
@@ -736,6 +823,7 @@
     _state.activity       = null;
     _state.activityIndex  = 0;
     _state.univerContainer = null;
+    _state.weaknessOnly   = false;
   }
 
   /* ─────────────────────────────────────────────
@@ -792,12 +880,33 @@
 
   /* ─────────────────────────────────────────────
      onProgressRestored(snapshot) — 플러그인계약 §3
+     mid: 셀 스냅샷 복원 (cell_snapshot → createWorkbook 재주입)
   ───────────────────────────────────────────── */
   function onProgressRestored(snapshot) {
     if (!snapshot) return;
     _state.progress = snapshot;
     _state.restored = true;
-    // v2 파킹: 셀 스냅샷 복원(getSnapshot→createWorkbook 재주입)은 v2에서 구현
+
+    // mid: 현재 활동의 cell_snapshot이 있으면 Univer workbook에 재주입
+    var activityId = _state.activity && _state.activity.activity_id;
+    if (!activityId) return;
+    var entry = snapshot.activities && snapshot.activities[activityId];
+    if (!entry) return;
+    var savedSnapshot = entry.plugin_extra && entry.plugin_extra.cell_snapshot;
+    if (!savedSnapshot) return;
+    if (!_state.univerAPI) return;
+
+    // createWorkbook으로 스냅샷 재주입 (getSnapshot() 반환값을 그대로 전달)
+    try {
+      if (typeof _state.univerAPI.createWorkbook === 'function') {
+        _state.univerAPI.createWorkbook(savedSnapshot);
+      } else if (typeof _state.univerAPI.createUniverSheet === 'function') {
+        _state.univerAPI.createUniverSheet(savedSnapshot);
+      }
+    } catch (e) {
+      // createWorkbook이 스냅샷 형태를 거부할 경우 무시 (graceful fallback)
+      console.warn('[excel] onProgressRestored: createWorkbook 재주입 실패', e);
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -882,7 +991,7 @@
      내부 헬퍼
   ───────────────────────────────────────────── */
 
-  /** 진도 캐시 업데이트 */
+  /** 진도 캐시 업데이트 (mid: 셀 스냅샷 저장 포함) */
   function _updateProgress(activityId, result) {
     var snap = getProgressSnapshot();
     if (!snap.activities[activityId]) {
@@ -890,19 +999,33 @@
         cold_attempts: 0,
         cold_correct:  0,
         last_verdict:  null,
-        plugin_extra:  { last_score: { passed: 0, total: 0 } }
+        plugin_extra:  { last_score: { passed: 0, total: 0 }, cell_snapshot: null }
       };
     }
     var entry = snap.activities[activityId];
     entry.cold_attempts++;
     if (result.verdict === 'correct') entry.cold_correct++;
     entry.last_verdict = result.verdict;
+
+    // mid: 셀 스냅샷 저장 — getSnapshot() API가 존재할 때만 시도
+    var cellSnapshot = null;
+    try {
+      if (_state.univerAPI) {
+        var wb = _state.univerAPI.getActiveWorkbook();
+        if (wb && typeof wb.getSnapshot === 'function') {
+          cellSnapshot = wb.getSnapshot();
+        }
+      }
+    } catch (e) {
+      // getSnapshot() 미지원 버전 — 무시, cellSnapshot = null
+    }
+
     entry.plugin_extra = {
       last_score: {
         passed: result.feedback.passed,
         total:  result.feedback.total
-      }
-      // v2 파킹: 셀 스냅샷(univerAPI.getActiveWorkbook().getSnapshot())
+      },
+      cell_snapshot: cellSnapshot  // mid: 셀 스냅샷 (getSnapshot 지원 시)
     };
     _state.progress = snap;
     _saveProgress(snap);
