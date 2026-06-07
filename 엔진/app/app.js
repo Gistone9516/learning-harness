@@ -1067,6 +1067,58 @@ function initSession(deck_id, opts, now) {
 // ─────────────────────────────────────────────
 // 전역 공개 인터페이스 (window.__CLF__)
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// §7.1  공용 순수 헬퍼 (플러그인 공통 — DEFER-C)
+// ─────────────────────────────────────────────
+
+/**
+ * HTML 이스케이프 (coding/excel/english/aws 공통).
+ * @param {*} s
+ * @returns {string}
+ */
+function _clfEsc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * localStorage에서 JSON 로드 (플러그인 진도 공용).
+ * @param {string} key  localStorage 키 (예: 'clf:coding:progress')
+ * @returns {object|null}
+ */
+function _clfLoadPersist(key) {
+  try {
+    var raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+/**
+ * localStorage에 JSON 저장 (플러그인 진도 공용).
+ * @param {string} key  localStorage 키
+ * @param {*}      val  직렬화할 값
+ */
+function _clfSavePersist(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+}
+
+/**
+ * activities 배열에서 activity_id로 검색 (플러그인 공용).
+ * @param {object[]} list  ActivitySpec 배열
+ * @param {string}   activityId
+ * @returns {object|null}
+ */
+function _clfFindActivity(list, activityId) {
+  if (!Array.isArray(list)) return null;
+  for (var _i = 0; _i < list.length; _i++) {
+    if (list[_i].activity_id === activityId) return list[_i];
+  }
+  return null;
+}
+
 if (typeof window !== "undefined") {
   window.__CLF__ = {
     // 상수
@@ -1116,6 +1168,12 @@ if (typeof window !== "undefined") {
     initSession,
     getNextCard,
     processAttempt,
+
+    // 공용 순수 헬퍼 (DEFER-C §7.1)
+    esc:          _clfEsc,
+    loadPersist:  _clfLoadPersist,
+    savePersist:  _clfSavePersist,
+    findActivity: _clfFindActivity,
   };
 }
 

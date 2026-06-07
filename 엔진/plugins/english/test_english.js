@@ -8,17 +8,25 @@
 /* ─────────────────────────────────────────
    최소 브라우저 mock — plugin.js IIFE 로드용
 ───────────────────────────────────────── */
+const _lsStore = {};
+global.localStorage = {
+  _store: _lsStore,
+  getItem: function(k) { return Object.prototype.hasOwnProperty.call(_lsStore, k) ? _lsStore[k] : null; },
+  setItem: function(k, v) { _lsStore[k] = v; }
+};
 global.window = {
   speechSynthesis: null,        // TTS 없음 (테스트 범위 외)
   SpeechRecognition: null,
   webkitSpeechRecognition: null,
   location: { hash: '' },
-  ACTIVITIES: {}
-};
-global.localStorage = {
-  _store: {},
-  getItem: function(k) { return this._store[k] || null; },
-  setItem: function(k, v) { this._store[k] = v; }
+  ACTIVITIES: {},
+  // DEFER-C: 공용 헬퍼 스텁 (plugin.js가 window.__CLF__를 참조)
+  __CLF__: {
+    esc: function(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); },
+    loadPersist: function(key) { try { var r = global.localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch(e) { return null; } },
+    savePersist: function(key, val) { try { global.localStorage.setItem(key, JSON.stringify(val)); } catch(e) {} },
+    findActivity: function(list, id) { if (!Array.isArray(list)) return null; for (var i=0;i<list.length;i++) { if(list[i].activity_id===id) return list[i]; } return null; }
+  }
 };
 global.document = {};
 

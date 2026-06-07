@@ -42,20 +42,17 @@
 
   /* ─────────────────────────────────────────────
      진도 localStorage 헬퍼
+     __CLF__.loadPersist / savePersist 위임 (DEFER-C)
   ───────────────────────────────────────────── */
   function _loadProgress() {
-    try {
-      var raw = localStorage.getItem(PROGRESS_KEY);
-      if (!raw) return null;
-      var parsed = JSON.parse(raw);
-      // 폴백: 스키마 필수 필드 누락 시 null 반환 (getProgressSnapshot이 신규 생성)
-      if (!parsed || typeof parsed !== 'object' || !parsed.activities) return null;
-      return parsed;
-    } catch (e) { return null; }
+    var parsed = window.__CLF__.loadPersist(PROGRESS_KEY);
+    // 폴백: 스키마 필수 필드 누락 시 null 반환 (getProgressSnapshot이 신규 생성)
+    if (!parsed || typeof parsed !== 'object' || !parsed.activities) return null;
+    return parsed;
   }
 
   function _saveProgress(snap) {
-    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(snap)); } catch (e) {}
+    window.__CLF__.savePersist(PROGRESS_KEY, snap);
   }
 
   function _loadWrongNotes() {
@@ -128,14 +125,10 @@
   }
 
   /* ─────────────────────────────────────────────
-     HTML 이스케이프
+     HTML 이스케이프 (DEFER-C: __CLF__.esc 위임)
   ───────────────────────────────────────────── */
   function _esc(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return window.__CLF__.esc(s);
   }
 
   /* ─────────────────────────────────────────────
@@ -1388,14 +1381,11 @@
   }
 
   /* ─────────────────────────────────────────────
-     내부 헬퍼: window.ACTIVITIES['english'] 검색
+     내부 헬퍼: window.ACTIVITIES['english'] 검색 (DEFER-C)
   ───────────────────────────────────────────── */
   function _findActivity(activityId) {
     var list = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].activity_id === activityId) return list[i];
-    }
-    return null;
+    return window.__CLF__.findActivity(list, activityId);
   }
 
   /* ─────────────────────────────────────────────

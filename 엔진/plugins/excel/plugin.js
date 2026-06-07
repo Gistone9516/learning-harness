@@ -39,18 +39,16 @@
 
   /* ─────────────────────────────────────────────
      진도 localStorage 헬퍼 (키: clf:excel:progress)
+     __CLF__.loadPersist / savePersist 위임 (DEFER-C)
   ───────────────────────────────────────────── */
   var PROGRESS_KEY = 'clf:excel:progress';
 
   function _loadProgress() {
-    try {
-      var raw = localStorage.getItem(PROGRESS_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+    return window.__CLF__.loadPersist(PROGRESS_KEY);
   }
 
   function _saveProgress(snap) {
-    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(snap)); } catch (e) {}
+    window.__CLF__.savePersist(PROGRESS_KEY, snap);
   }
 
   /* ─────────────────────────────────────────────
@@ -374,12 +372,9 @@
   /* ─────────────────────────────────────────────
      채점 결과 렌더 헬퍼
   ───────────────────────────────────────────── */
+  /** HTML 이스케이프 (DEFER-C: __CLF__.esc 위임) */
   function _esc(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return window.__CLF__.esc(s);
   }
 
   /**
@@ -1177,13 +1172,10 @@
     _saveProgress(snap);
   }
 
-  /** window.ACTIVITIES['excel']에서 activityId 검색 */
+  /** window.ACTIVITIES['excel']에서 activityId 검색 (DEFER-C) */
   function _findActivity(activityId) {
     var list = (window.ACTIVITIES && window.ACTIVITIES['excel']) || [];
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].activity_id === activityId) return list[i];
-    }
-    return null;
+    return window.__CLF__.findActivity(list, activityId);
   }
 
   /* ─────────────────────────────────────────────

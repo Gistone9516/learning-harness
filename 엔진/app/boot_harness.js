@@ -185,6 +185,11 @@ function stubAppCore() {
     loadProgress: (id) => ({ deck_namespace: id, schema_version: 1, cards: {} }),
     buildQueue:   () => [],
     getNextCard:  () => null,
+    // 공용 순수 헬퍼 (DEFER-C §7.1)
+    esc:          (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'),
+    loadPersist:  (key) => { try { var r = global.localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch(e){ return null; } },
+    savePersist:  (key, val) => { try { global.localStorage.setItem(key, JSON.stringify(val)); } catch(e){} },
+    findActivity: (list, id) => { if (!Array.isArray(list)) return null; for (var i=0;i<list.length;i++) { if(list[i].activity_id===id) return list[i]; } return null; },
   };
   console.log('[HARNESS] window.APP / window.__CLF__ — stub 주입');
 }
