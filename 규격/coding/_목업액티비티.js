@@ -260,6 +260,94 @@
         ],
         compare: 'stdout-trim'
       }
+    },
+
+    /* ────────────────────────────────────────────────────────────
+       E. micropip 화이트리스트 core 픽스처 — numpy 통계 문제
+       // [픽스처: micropip 화이트리스트 core]
+       //
+       // 목적: grading.allowed_packages[] 필드를 포함하는 첫 번째 픽스처.
+       //       기존 4개 픽스처는 표준라이브러리(math/sys)만 사용해
+       //       allowed_packages 경로가 전혀 검증되지 않는 갭을 메움.
+       //
+       // ★ 스키마 계약 관계 (micropip 화이트리스트 core 구현 시 추가될 필드):
+       //   현재 런타임규격.md §2-1 grading 스키마는
+       //     "additionalProperties": false
+       //     "required": ["test_cases","compare"]
+       //   로 선언되어 있으며, allowed_packages 필드가 정의되어 있지 않음.
+       //   → 현행 스키마 기준으로 이 픽스처의 grading은 §2-1 validate를 통과하지 못함.
+       //
+       //   micropip 화이트리스트 core(기능백로그.md core 3번) 구현 승인·착수 시:
+       //     1. 런타임규격.md §2-1 grading 스키마에 아래 필드 추가:
+       //          "allowed_packages": {
+       //            "type": "array",
+       //            "items": { "type": "string" },
+       //            "default": []
+       //          }
+       //     2. §3-2 허용패키지 규칙 업데이트: "MVP: 없음" → allowed_packages[] 기반 허용
+       //     3. 기계검증 체크리스트에 V12(allowed_packages → micropip.install 연결) 추가
+       //     4. 이 픽스처(cod-mock-005)로 화이트리스트 mount 경로 회귀 검증
+       //
+       //   변경 전에는 allowed_packages 필드를 주석 처리하지 않고 그대로 두어
+       //   "이 픽스처가 어떤 계약을 기다리는지" 명시적으로 표시.
+    ──────────────────────────────────────────────────────────── */
+    {
+      activity_id: 'cod-mock-005',
+      plugin_id:   'coding',
+      type:        'code-problem',
+      weight:      3,
+      tags: { area: '과학 컴퓨팅', subarea: '통계', unit: '평균·표준편차 출력' },
+      enabled:     true,
+      front: {
+        prompt: [
+          '첫 번째 줄에 정수 N(2 ≤ N ≤ 100)이 주어진다.',
+          '두 번째 줄에 공백으로 구분된 N개의 실수가 주어진다.',
+          'numpy를 사용하여 이 수열의 산술 평균과 표준편차(모표준편차)를',
+          '각각 소수점 둘째 자리까지 반올림하여 한 줄에 공백으로 구분해 출력하시오.',
+          '',
+          '예) 입력: 4 / 1.0 2.0 3.0 4.0  →  출력: 2.5 1.12'
+        ].join('\n'),
+        starter_code: [
+          'import numpy as np',
+          '',
+          'n = int(input())',
+          'nums = list(map(float, input().split()))',
+          '# numpy로 평균과 모표준편차를 계산하여 출력하세요.',
+          'print(  )  # 완성 필요'
+        ].join('\n'),
+        language: 'python'
+      },
+      back: {
+        solution: [
+          'import numpy as np',
+          '',
+          'n = int(input())',
+          'nums = list(map(float, input().split()))',
+          'arr = np.array(nums)',
+          'mean = round(float(np.mean(arr)), 2)',
+          'std  = round(float(np.std(arr)),  2)',
+          'print(mean, std)'
+        ].join('\n'),
+        explanation: [
+          '핵심: np.mean()=산술 평균, np.std()=모표준편차(ddof=0 기본값).',
+          'round() + float() 변환으로 소수점 둘째 자리 고정 출력.',
+          '복잡도: O(N). numpy 없이 statistics.stdev()(표본표준편차)와 혼동 주의 — ddof 기본값 다름.'
+        ].join(' / ')
+      },
+      grading: {
+        // ★ allowed_packages: micropip 화이트리스트 core 구현 승인 후 런타임이 읽을 필드.
+        //   현행 런타임규격 §2-1 grading 스키마(additionalProperties:false)에 미정의 상태.
+        //   Pyodide 채점 시 이 배열을 읽어 mount() 단계에서 micropip.install() 사전 실행.
+        //   (계약: 기능백로그.md core "micropip 화이트리스트" 구현 완료 시 스키마에 추가)
+        allowed_packages: ['numpy'],
+        test_cases: [
+          { input: '4\n1.0 2.0 3.0 4.0',          expected: '2.5 1.12'   },
+          { input: '2\n0.0 0.0',                    expected: '0.0 0.0'   },
+          { input: '3\n10.0 20.0 30.0',             expected: '20.0 8.16' },
+          { input: '5\n-2.0 -1.0 0.0 1.0 2.0',     expected: '0.0 1.41'  }
+        ],
+        compare: 'stdout-trim'
+      }
     }
 
   ];

@@ -62,9 +62,9 @@
 
     /* ──────────────────────────────────────────────────────────────
        [픽스처: static-채점 완전동작 + back.explanation 해설]
-       2. Grammar — 가정법 과거 cloze (빈칸 채우기)
+       2. Grammar — 가정법 과거완료 4지선다 (객관식, exact)
        modality : grammar
-       grading  : cloze  (grader_id = "engine")
+       grading  : exact  (grader_id = "engine")
     ────────────────────────────────────────────────────────────── */
     {
       activity_id: 'eng-grm-subjunctive-001',
@@ -96,7 +96,7 @@
           '[출처: Purdue OWL – Conditional Sentences]'
       },
       grading: {
-        mode:   'cloze',
+        mode:   'exact',
         accept: ['B', 'b', 'B) had had', 'had had']
       }
     },

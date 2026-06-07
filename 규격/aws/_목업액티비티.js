@@ -426,6 +426,12 @@ window.ACTIVITIES['aws'] = [
           "type": "resource-exists",
           "service": "sqs",
           "identifier": "lab-main-queue"
+        },
+        {
+          "type": "config-equals",
+          "service": "sqs",
+          "identifier": "lab-main-queue",
+          "expected": { "redrive_policy": { "maxReceiveCount": 3 } }
         }
       ]
     }
