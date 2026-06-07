@@ -1154,4 +1154,80 @@
   ───────────────────────────────────────────── */
   window._CODING_PLUGIN = _instance;
 
+  /* ─────────────────────────────────────────────
+     테스트 전용 export 가드 (Node.js 환경 한정)
+     브라우저에서는 typeof module === 'undefined' → 실행 안 됨.
+     _gradeExport: stubRunner 주입 가능 버전 (_runOneCase 대체)
+  ───────────────────────────────────────────── */
+  if (typeof module !== 'undefined' && module.exports) {
+    // _gradeExport: _runOneCase 대신 stubRunner(code, stdin) 사용
+    function _gradeExport(activity, stubRunner) {
+      var testCases = activity.grading.test_cases;
+      var compare   = activity.grading.compare || 'stdout-trim';
+      var tolerance = activity.grading.tolerance;
+      var total = testCases.length;
+      var passed = 0;
+      var firstFail = null;
+      var errorMsg = null;
+      var cases = [];
+
+      var chain = Promise.resolve();
+      testCases.forEach(function (tc, idx) {
+        chain = chain.then(function () {
+          if (errorMsg === 'timeout') {
+            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'skipped' });
+            return;
+          }
+          return stubRunner('', tc.input).then(function (res) {
+            if (res.error === 'timeout') {
+              errorMsg = 'timeout';
+              if (!firstFail) {
+                firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: '' };
+              }
+              cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'timeout' });
+              return;
+            }
+            if (res.error) {
+              if (!firstFail) {
+                firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
+              }
+              if (!errorMsg) errorMsg = res.error;
+              cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: false, error: res.error });
+              return;
+            }
+            var ok = _compare(res.stdout, tc.expected, compare, tolerance);
+            if (ok) {
+              passed++;
+            } else if (!firstFail) {
+              firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
+            }
+            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: ok });
+          });
+        });
+      });
+
+      return chain.then(function () {
+        var verdict = (passed === total && !errorMsg) ? 'correct' : 'incorrect';
+        var feedback = {
+          passed:     passed,
+          total:      total,
+          first_fail: firstFail,
+          cases:      cases
+        };
+        if (errorMsg) feedback.error = errorMsg;
+        return {
+          verdict:   verdict,
+          score_raw: total > 0 ? passed / total : 0,
+          grader_id: 'pyodide',
+          feedback:  feedback
+        };
+      });
+    }
+
+    global._CODING_TEST_EXPORTS = {
+      _compareExport: _compare,
+      _gradeExport:   _gradeExport
+    };
+  }
+
 })();

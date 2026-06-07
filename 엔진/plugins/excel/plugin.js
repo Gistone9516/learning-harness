@@ -1058,6 +1058,20 @@
      globalKey  = "_EXCEL_PLUGIN"
      directKey  = "_EXCEL_PLUGIN"  (동일)
   ───────────────────────────────────────────── */
-  window._EXCEL_PLUGIN = _instance;
+  if (typeof window !== 'undefined') {
+    window._EXCEL_PLUGIN = _instance;
+  }
+
+  /* ─────────────────────────────────────────────
+     Node.js 테스트 전용 exports (브라우저 동작 불변)
+     순수 채점 함수만 노출. DOM/Univer 의존 없음.
+  ───────────────────────────────────────────── */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      _compareValue:   _compareValue,
+      _runScore:       _runScore,
+      _gridToCellData: _gridToCellData
+    };
+  }
 
 })();

@@ -378,7 +378,8 @@
   ───────────────────────────────────────────── */
   function _sm2Update(extra, verdict) {
     var now      = Date.now();
-    var interval = (extra && typeof extra.sm2_interval === 'number') ? extra.sm2_interval : 1;
+    // 신규 카드 기본값 0 (미학습 상태). 1은 "첫 복습 완료" 상태.
+    var interval = (extra && typeof extra.sm2_interval === 'number') ? extra.sm2_interval : 0;
     var efactor  = (extra && typeof extra.sm2_efactor === 'number')  ? extra.sm2_efactor  : 2.5;
 
     var q = verdict === 'correct' ? 5 : 1;
@@ -389,12 +390,17 @@
 
     var newInterval;
     if (verdict !== 'correct') {
-      // 오답: 간격 초기화 (1일)
-      newInterval = 1;
+      // 오답: 간격 초기화 (0 → 1일, 다음 복습 시 1→6 진행 가능)
+      newInterval = 0;
     } else {
       // 정답: SM-2 간격 확장
-      if (interval <= 1) {
+      // n=1(interval=0): 첫 정답 → 1일 후 복습
+      // n=2(interval=1): 두 번째 정답 → 6일 후 복습
+      // n≥3(interval>6): EF 곱하여 간격 확장
+      if (interval <= 0) {
         newInterval = 1;
+      } else if (interval <= 1) {
+        newInterval = 6;
       } else if (interval <= 6) {
         newInterval = 6;
       } else {
@@ -402,8 +408,9 @@
       }
     }
 
-    // due_at: 지금으로부터 newInterval 일 후 (ms)
-    var dueAt = now + newInterval * 24 * 60 * 60 * 1000;
+    // due_at: 지금으로부터 max(newInterval,1) 일 후 (ms). 0인 경우도 1일 후로 처리.
+    var daysAhead = newInterval > 0 ? newInterval : 1;
+    var dueAt = now + daysAhead * 24 * 60 * 60 * 1000;
 
     return { sm2_interval: newInterval, sm2_efactor: newEF, due_at: dueAt };
   }
