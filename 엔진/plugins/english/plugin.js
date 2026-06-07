@@ -26,12 +26,13 @@
      내부 상태
   ───────────────────────────────────────────── */
   var _state = {
-    mounted:  false,
-    host:     null,   // HTMLElement — #plugin-host
-    ctx:      null,   // PluginContext
-    activity: null,   // 현재 ActivitySpec (lang-task)
-    progress: null,   // PluginProgressSnapshot 메모리 캐시
-    restored: false,  // onProgressRestored 호출 여부
+    mounted:    false,
+    host:       null,   // HTMLElement — #plugin-host
+    ctx:        null,   // PluginContext
+    activity:   null,   // 현재 ActivitySpec (lang-task)
+    activities: null,   // SM-2 정렬 후 배열 (mount 클로저와 onProgressRestored 공유용)
+    progress:   null,   // PluginProgressSnapshot 메모리 캐시
+    restored:   false,  // onProgressRestored 호출 여부
     currentRecognition: null,  // SpeechRecognition 인스턴스 (speaking)
     activityIndex: 0   // 현재 활성 문제 인덱스
   };
@@ -59,6 +60,7 @@
     if (typeof s !== 'string') return '';
     return s
       .toLowerCase()
+      .replace(/[‘’‚‛]/g, "’") // 유니코드 어포스트로피 → ASCII (STT 출력 대응, 런타임규격 §4-5)
       .replace(/[.,!?;:'"()\[\]{}—\-]/g, '')  // 구두점 제거 (em dash 포함)
       .replace(/\s+/g, ' ')
       .trim();
@@ -68,33 +70,14 @@
     return normalize(s).split(' ').filter(function (t) { return t.length > 0; });
   }
 
-  /* ─────────────────────────────────────────────
-     LCS 길이 계산 (dictation-diff용)
+  /* word-level diff: [{word, status: "match"|"miss"|"extra"}]
      런타임규격 §4-3: expected_tokens.length ≤ 200
-  ───────────────────────────────────────────── */
-  function _lcsLength(a, b) {
-    var m = a.length, n = b.length;
-    // 200단어 상한 방어
-    if (m > 200) { throw new Error('dictation-diff: expected 단어 수 200 초과 (' + m + ')'); }
-    var dp = [];
-    for (var i = 0; i <= m; i++) {
-      dp.push(new Array(n + 1).fill(0));
-    }
-    for (var i = 1; i <= m; i++) {
-      for (var j = 1; j <= n; j++) {
-        if (a[i - 1] === b[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-        }
-      }
-    }
-    return dp[m][n];
-  }
-
-  /* word-level diff: [{word, status: "match"|"miss"|"extra"}] */
+     lcsLen = diff.filter(match).length (별도 _lcsLength 불요 — DP 1회)
+  */
   function _wordDiff(expected, actual) {
     var m = expected.length, n = actual.length;
+    // 200단어 상한 방어 (런타임규격 §4-3)
+    if (m > 200) { throw new Error('dictation-diff: expected 단어 수 200 초과 (' + m + ')'); }
     // DP 경로 역추적
     var dp = [];
     for (var i = 0; i <= m; i++) {
@@ -246,8 +229,8 @@
 
     var lcsLen, diffDetail;
     try {
-      lcsLen     = _lcsLength(expTokens, actTokens);
       diffDetail = _wordDiff(expTokens, actTokens);
+      lcsLen = diffDetail.filter(function (d) { return d.status === 'match'; }).length;
     } catch (e) {
       return {
         verdict:   'incorrect',
@@ -326,8 +309,20 @@
     })
     .then(function (data) {
       var text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+      // 마크다운 코드 펜스 제거 (gpt-4o-mini 등 JSON mode 미설정 시 빈번)
+      var cleaned = (text || '').replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
       var parsed;
-      try { parsed = JSON.parse(text); } catch (e) { parsed = { score: 0, feedback: text }; }
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (e) {
+        // 파싱 실패 → incorrect 오채점 대신 pending 반환 (SM-2 오염 방지)
+        return {
+          verdict:   'pending',
+          score_raw: null,
+          grader_id: 'llm',
+          feedback:  { message: 'LLM 응답 파싱 오류 (JSON 형식 아님). 재시도하거나 모델을 확인하세요.' }
+        };
+      }
       var scoreRaw = Math.min(10, Math.max(0, Number(parsed.score) || 0)) / 10;
       return {
         verdict:   scoreRaw >= 0.6 ? 'correct' : 'incorrect',
@@ -393,22 +388,20 @@
       // 오답: 간격 초기화 (0 → 1일, 다음 복습 시 1→6 진행 가능)
       newInterval = 0;
     } else {
-      // 정답: SM-2 간격 확장
+      // 정답: SM-2 간격 확장 (표준 알고리즘)
       // n=1(interval=0): 첫 정답 → 1일 후 복습
       // n=2(interval=1): 두 번째 정답 → 6일 후 복습
-      // n≥3(interval>6): EF 곱하여 간격 확장
+      // n≥3(interval≥2): EF 곱하여 간격 확장
       if (interval <= 0) {
         newInterval = 1;
       } else if (interval <= 1) {
-        newInterval = 6;
-      } else if (interval <= 6) {
         newInterval = 6;
       } else {
         newInterval = Math.round(interval * newEF);
       }
     }
 
-    // due_at: 지금으로부터 max(newInterval,1) 일 후 (ms). 0인 경우도 1일 후로 처리.
+    // due_at: 지금으로부터 newInterval일 후 (ms). 오답(newInterval=0)은 1일 후.
     var daysAhead = newInterval > 0 ? newInterval : 1;
     var dueAt = now + daysAhead * 24 * 60 * 60 * 1000;
 
@@ -437,16 +430,11 @@
     entry.last_verdict = result.verdict;
 
     // SM-2: vocab/grammar 모달에만 적용 (core ③)
+    // 비대상 모달은 sm2Fields={}로 두면 Object.assign이 기존 값을 덮어쓰지 않아 보존됨.
+    // (undefined 값 복사는 JSON 직렬화에서 키 소멸 → 오염 유발하므로 금지)
     var sm2Fields = {};
     if ((modality === 'vocab' || modality === 'grammar') && result.verdict !== 'pending') {
       sm2Fields = _sm2Update(entry.plugin_extra, result.verdict);
-    } else if (entry.plugin_extra) {
-      // 다른 모달은 기존 SM-2 필드 보존
-      sm2Fields = {
-        sm2_interval: entry.plugin_extra.sm2_interval,
-        sm2_efactor:  entry.plugin_extra.sm2_efactor,
-        due_at:       entry.plugin_extra.due_at
-      };
     }
 
     // mid: 오답 노트 — incorrect 시 back.explanation 누적 (최대 20개, snap 레벨 전역 목록)
@@ -462,11 +450,12 @@
       }
     }
 
-    // mid: writing 히스토리 — llm-rubric 채점 후 (pending 포함) 저장 (최대 5회 순환)
+    // mid: writing 히스토리 — llm-rubric 채점 완료(pending 제외) 후 저장 (최대 5회 순환)
+    // pending = 키 부재 상태; 유의미 채점 기록이 아니므로 슬롯 소모 금지.
     var history = (entry.plugin_extra && Array.isArray(entry.plugin_extra.history))
       ? entry.plugin_extra.history.slice()
       : [];
-    if (modality === 'writing') {
+    if (modality === 'writing' && result.verdict !== 'pending') {
       history.unshift({
         answer:    typeof lastAnswer === 'string' ? lastAnswer : '',
         feedback:  (result.feedback && result.feedback.message) || '',
@@ -537,7 +526,7 @@
   /** 키 상태 배지 (writing/speaking) */
   function _keyBadge(keyPresent, keyLabel) {
     if (keyPresent) {
-      return '<span style="display:inline-block;padding:3px 9px;font-size:0.78rem;border-radius:12px;background:var(--ok-bg,#e6f4ea);color:var(--ok,#22863a);margin-bottom:8px">' +
+      return '<span style="display:inline-block;padding:3px 9px;font-size:0.78rem;border-radius:20px;background:var(--brand-bg,#e4efe7);color:var(--brand-deep,#124e35);margin-bottom:8px">' +
              keyLabel + ' 설정됨</span>';
     }
     return '<span style="display:inline-block;padding:3px 9px;font-size:0.78rem;border-radius:12px;background:var(--warn-bg,#fff8e1);color:var(--warn,#b45309);margin-bottom:8px" title="설정 > 키 설정에서 입력">' +
@@ -571,9 +560,9 @@
       var act = activities[i];
       var saved = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
       var done = saved && saved.last_verdict === 'correct';
-      btns[i].style.background = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
-      btns[i].style.color = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
-      btns[i].style.borderColor = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      btns[i].style.background = isActive ? 'var(--brand,#1f6b4a)' : 'var(--surface,#fbfaf6)';
+      btns[i].style.color = isActive ? '#fff' : (done ? 'var(--brand-deep,#124e35)' : 'var(--ink3,#7a7168)');
+      btns[i].style.borderColor = isActive ? 'var(--brand,#1f6b4a)' : (done ? 'var(--brand,#1f6b4a)' : 'var(--line2,#cfc7b4)');
       btns[i].title = done ? '완료 ✓' : '';
     }
     var countEl = container.querySelector('.act-count');
@@ -593,9 +582,9 @@
       var ts = h.ts ? new Date(h.ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
       var scoreLabel = typeof h.score_raw === 'number' ? Math.round(h.score_raw * 100) + '%' : '채점불가';
       var scoreColor = typeof h.score_raw === 'number'
-        ? (h.score_raw >= 0.6 ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)')
+        ? (h.score_raw >= 0.6 ? 'var(--brand,#1f6b4a)' : 'var(--hot,#a8301f)')
         : 'var(--warn,#b45309)';
-      html += '<div style="margin-bottom:10px;padding:10px 12px;background:var(--surface2,#f6f8fa);border-radius:6px;border-left:3px solid var(--line2,#ddd)">';
+      html += '<div style="margin-bottom:10px;padding:10px 12px;background:var(--surface2,#f2eee5);border-radius:6px;border-left:3px solid var(--line2,#ddd)">';
       html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
       html += '<span style="font-size:0.78rem;color:var(--ink3,#999)">#' + (i + 1) + ' &nbsp;' + _esc(ts) + '</span>';
       html += '<span style="margin-left:auto;font-size:0.8rem;font-weight:600;color:' + scoreColor + '">' + _esc(scoreLabel) + '</span>';
@@ -656,12 +645,12 @@
 
     // 모달별 HTML 조립
     var html = '<div class="eng-wrap" data-modality="' + _esc(modality) + '" data-activity-id="' + _esc(activity.activity_id) + '">';
-    html += '<div class="eng-modality-badge" style="display:inline-block;padding:2px 10px;font-size:0.78rem;border-radius:12px;background:var(--accent-bg,#e8f0fe);color:var(--accent,#0550ae);margin-bottom:12px;font-weight:600">' + _esc(modality.toUpperCase()) + '</div>';
+    html += '<div class="eng-modality-badge plugin-badge" style="margin-bottom:12px">' + _esc(modality.toUpperCase()) + '</div>';
     html += '<div class="eng-prompt" style="font-size:var(--fs-lg,1.1rem);font-weight:600;margin-bottom:12px;line-height:1.5">' + _esc(activity.front.prompt) + '</div>';
 
     // reading: 지문 표시
     if (modality === 'reading' && activity.front.passage) {
-      html += '<div class="eng-passage" style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:var(--r,6px);padding:14px 16px;margin-bottom:14px;font-size:0.95rem;line-height:1.7;white-space:pre-wrap">' + _esc(activity.front.passage) + '</div>';
+      html += '<div class="eng-passage" style="background:var(--surface2,#f2eee5);border:1px solid var(--line2,#ddd);border-radius:var(--r,6px);padding:14px 16px;margin-bottom:14px;font-size:0.95rem;line-height:1.7;white-space:pre-wrap">' + _esc(activity.front.passage) + '</div>';
     }
 
     // listening: TTS 재생 버튼 + 속도 제어 + 받아쓰기 입력 (mid: TTS 재생 속도 제어)
@@ -693,9 +682,9 @@
           var isActive = savedRate === r.val;
           html += '<button type="button" class="eng-rate-btn" data-rate="' + r.val + '"' +
                   ' style="padding:5px 12px;border-radius:6px;border:1.5px solid ' +
-                  (isActive ? 'var(--accent,#0550ae)' : 'var(--line2,#ccc)') +
-                  ';background:' + (isActive ? 'var(--accent-bg,#e8f0fe)' : 'var(--surface,#fff)') +
-                  ';color:' + (isActive ? 'var(--accent,#0550ae)' : 'var(--ink3,#666)') +
+                  (isActive ? 'var(--brand,#1f6b4a)' : 'var(--line2,#cfc7b4)') +
+                  ';background:' + (isActive ? 'var(--brand-bg,#e4efe7)' : 'var(--surface,#fbfaf6)') +
+                  ';color:' + (isActive ? 'var(--brand-deep,#124e35)' : 'var(--ink3,#7a7168)') +
                   ';cursor:pointer;font-size:0.82rem;font-weight:' + (isActive ? '600' : '400') + '">' +
                   r.label + '</button>';
         });
@@ -736,7 +725,7 @@
     // 제출 버튼
     html += '<div style="margin-top:12px">';
     html += '<button type="button" id="eng-submit-btn" class="eng-submit-btn"' +
-            ' style="padding:9px 24px;border-radius:6px;border:none;background:var(--accent,#0550ae);color:#fff;font-weight:600;cursor:pointer;font-size:var(--fs-md,1rem)">제출·채점</button>';
+            ' style="padding:9px 24px;border-radius:var(--r,10px);border:none;background:var(--brand,#1f6b4a);color:#fff;font-weight:600;cursor:pointer;font-size:var(--fs-md,14px)">제출·채점</button>';
     html += '</div>';
 
     // 결과 영역
@@ -770,9 +759,9 @@
             var allRateBtns = contentArea.querySelectorAll('.eng-rate-btn');
             for (var j = 0; j < allRateBtns.length; j++) {
               var isActive = parseFloat(allRateBtns[j].getAttribute('data-rate')) === _currentRate;
-              allRateBtns[j].style.border = '1.5px solid ' + (isActive ? 'var(--accent,#0550ae)' : 'var(--line2,#ccc)');
-              allRateBtns[j].style.background = isActive ? 'var(--accent-bg,#e8f0fe)' : 'var(--surface,#fff)';
-              allRateBtns[j].style.color = isActive ? 'var(--accent,#0550ae)' : 'var(--ink3,#666)';
+              allRateBtns[j].style.border = '1.5px solid ' + (isActive ? 'var(--brand,#1f6b4a)' : 'var(--line2,#cfc7b4)');
+              allRateBtns[j].style.background = isActive ? 'var(--brand-bg,#e4efe7)' : 'var(--surface,#fbfaf6)';
+              allRateBtns[j].style.color = isActive ? 'var(--brand-deep,#124e35)' : 'var(--ink3,#7a7168)';
               allRateBtns[j].style.fontWeight = isActive ? '600' : '400';
             }
             // plugin_extra.tts_rate 저장
@@ -812,9 +801,22 @@
             });
           }
           if (window.speechSynthesis.getVoices().length === 0) {
+            // Chrome에서 voices 로드 완료 후 onvoiceschanged 미발화 race 방어: 500ms timeout fallback
+            var _voiceStarted = false;
+            var _voiceFallback = setTimeout(function () {
+              if (!_voiceStarted) {
+                window.speechSynthesis.onvoiceschanged = null;
+                _voiceStarted = true;
+                doSpeak();
+              }
+            }, 500);
             window.speechSynthesis.onvoiceschanged = function () {
-              window.speechSynthesis.onvoiceschanged = null;
-              doSpeak();
+              if (!_voiceStarted) {
+                clearTimeout(_voiceFallback);
+                window.speechSynthesis.onvoiceschanged = null;
+                _voiceStarted = true;
+                doSpeak();
+              }
             };
           } else {
             doSpeak();
@@ -851,8 +853,10 @@
           recordBtn.innerHTML = '<span>&#9646;&#9646;</span> 녹음 중 (클릭하여 중지)';
           if (statusEl) statusEl.textContent = '말씀하세요...';
           rec.onresult = function (e) {
-            var transcript  = e.results[0][0].transcript;
-            if (ansInput) ansInput.value = transcript;
+            var transcript = e.results[0][0].transcript;
+            // contentArea가 이미 다른 문항으로 교체됐을 수 있으므로 실시간 재조회
+            var currentInput = contentArea.querySelector('#eng-answer-input');
+            if (currentInput) currentInput.value = transcript;
             _recording = false;
             _state.currentRecognition = null;
             recordBtn.innerHTML = '<span>&#9679;</span> 다시 녹음';
@@ -920,7 +924,7 @@
             _renderWritingHistory(histEl, hist2);
           }
         }).catch(function (e) {
-          if (resultEl) resultEl.innerHTML = '<span style="color:var(--hot,#d73a49)">채점 오류: ' + _esc(e.message) + '</span>';
+          if (resultEl) resultEl.innerHTML = '<span style="color:var(--hot,#a8301f)">채점 오류: ' + _esc(e.message) + '</span>';
         });
       });
     }
@@ -956,11 +960,16 @@
     var activities = activitiesRaw.slice().sort(function (a, b) {
       var ea = snap && snap.activities && snap.activities[a.activity_id];
       var eb = snap && snap.activities && snap.activities[b.activity_id];
-      var da = (ea && ea.plugin_extra && typeof ea.plugin_extra.due_at === 'number') ? ea.plugin_extra.due_at : Infinity;
-      var db = (eb && eb.plugin_extra && typeof eb.plugin_extra.due_at === 'number') ? eb.plugin_extra.due_at : Infinity;
-      // SM-2 적용 대상(vocab/grammar)만 due_at 정렬; 나머지는 원래 순서 유지 위해 Infinity 처리됨
+      // SM-2 적용 대상(vocab/grammar)만 due_at 정렬; 비대상 모달은 Infinity로 원래 순서 유지
+      var isSmA = a.front && (a.front.modality === 'vocab' || a.front.modality === 'grammar');
+      var isSmB = b.front && (b.front.modality === 'vocab' || b.front.modality === 'grammar');
+      var da = (isSmA && ea && ea.plugin_extra && typeof ea.plugin_extra.due_at === 'number') ? ea.plugin_extra.due_at : Infinity;
+      var db = (isSmB && eb && eb.plugin_extra && typeof eb.plugin_extra.due_at === 'number') ? eb.plugin_extra.due_at : Infinity;
       return da - db;
     });
+
+    // 정렬된 배열 _state에 보존 (onProgressRestored nav 배지 갱신이 동일 배열 참조하도록)
+    _state.activities = activities;
 
     // 초기 인덱스: URL 해시 또는 0
     var hashParts = window.location.hash.split('/');
@@ -1015,6 +1024,7 @@
     _state.host          = null;
     _state.ctx           = null;
     _state.activity      = null;
+    _state.activities    = null;
     _state.activityIndex = 0;
   }
 
@@ -1113,8 +1123,8 @@
         var inp = contentArea ? contentArea.querySelector('#eng-answer-input') : null;
         if (inp) inp.value = saved.plugin_extra.last_answer;
       }
-      // nav 배지도 갱신
-      var activities = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+      // nav 배지도 갱신 (정렬된 배열 사용 — 원본 배열과 인덱스 불일치 방지)
+      var activities = _state.activities || (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
       if (activities.length > 1) {
         _updateNavBadges(_state.host, activities, _state.activityIndex);
       }
@@ -1135,7 +1145,7 @@
     actIds.forEach(function (id) {
       var a = acts[id];
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags) return;
       var key = activity.tags.area + '||' + activity.tags.subarea;
       if (!areaMap[key]) {
         areaMap[key] = { area: activity.tags.area, subarea: activity.tags.subarea, correct: 0, total: 0 };
@@ -1154,7 +1164,7 @@
       var a = acts[id];
       if (!a.cold_attempts) return;
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags) return;
       var rate = (a.cold_attempts - a.cold_correct) / a.cold_attempts;
       if (rate > 0) {
         weakness.push({ area: activity.tags.area, subarea: activity.tags.subarea, unit: activity.tags.unit, wrong_rate: rate });
@@ -1184,9 +1194,9 @@
       top5WrongNotes.forEach(function (n, i) {
         var activity = _findActivity(n.activity_id);
         var area = activity ? activity.tags.area : n.modality;
-        widgetHtml += '<div style="margin-bottom:8px;padding:8px 10px;background:var(--surface2,#f6f8fa);border-radius:6px;border-left:3px solid var(--hot,#d73a49)">';
+        widgetHtml += '<div style="margin-bottom:8px;padding:8px 10px;background:var(--surface2,#f2eee5);border-radius:var(--r,10px);border-left:3px solid var(--hot,#a8301f)">';
         widgetHtml += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
-        widgetHtml += '<span style="font-size:0.75rem;padding:1px 7px;border-radius:10px;background:var(--hot-bg,#fde8ea);color:var(--hot,#d73a49)">' + _esc(area) + '</span>';
+        widgetHtml += '<span style="font-size:var(--fs-xs,11px);padding:1px 7px;border-radius:20px;background:var(--hot-bg,#f9e7e2);color:var(--hot,#a8301f)">' + _esc(area) + '</span>';
         widgetHtml += '</div>';
         widgetHtml += '<div style="color:var(--ink2,#444);font-size:0.82rem;line-height:1.5">' + _esc(n.explanation.slice(0, 120)) + (n.explanation.length > 120 ? '…' : '') + '</div>';
         widgetHtml += '</div>';
@@ -1219,7 +1229,7 @@
     var fb      = result.feedback || {};
     var verdict = result.verdict;
 
-    var colorMap = { correct: 'var(--ok,#22863a)', incorrect: 'var(--hot,#d73a49)', pending: 'var(--warn,#b45309)' };
+    var colorMap = { correct: 'var(--brand,#1f6b4a)', incorrect: 'var(--hot,#a8301f)', pending: 'var(--warn,#9a5a09)' };
     var labelMap = { correct: '정답', incorrect: '오답', pending: '대기 중' };
     var color = colorMap[verdict] || 'var(--ink3,#666)';
     var label = labelMap[verdict] || verdict;
@@ -1254,7 +1264,7 @@
         if (d.status === 'match') {
           html += '<span style="color:var(--ink,#111)">' + _esc(d.word) + '</span> ';
         } else if (d.status === 'miss') {
-          html += '<span style="text-decoration:line-through;color:var(--hot,#d73a49)">' + _esc(d.word) + '</span> ';
+          html += '<span style="text-decoration:line-through;color:var(--hot,#a8301f)">' + _esc(d.word) + '</span> ';
         } else { // extra
           html += '<span style="color:var(--warn,#b45309);font-style:italic">' + _esc(d.word) + '</span> ';
         }
@@ -1268,12 +1278,18 @@
 
     // 에러 표시
     if (fb.error) {
-      html += '<div style="margin-top:6px;font-size:0.85rem;color:var(--hot,#d73a49)">오류: ' + _esc(fb.error) + '</div>';
+      html += '<div style="margin-top:6px;font-size:0.85rem;color:var(--hot,#a8301f)">오류: ' + _esc(fb.error) + '</div>';
     }
 
-    // back.explanation 표시 (있으면, 정답/오답 시)
-    if (verdict !== 'pending' && activity && activity.back && activity.back.explanation) {
-      html += '<div style="margin-top:10px;padding:10px 12px;background:var(--surface2,#f6f8fa);border-radius:6px;font-size:0.88rem;color:var(--ink2,#444)">' +
+    // back.explanation 표시 (있으면, 정답 시 또는 pending 아닌 비-listening 오답 시)
+    // listening 오답 시 해설(= 정답 텍스트) 즉시 노출하면 재인출 가치가 0이 됨 → 숨김.
+    // (방향성 원칙4: 인출을 약화시키는 편의기능 제외)
+    var modality = activity && activity.front && activity.front.modality;
+    var showExplanation = verdict !== 'pending' &&
+                         activity && activity.back && activity.back.explanation &&
+                         !(modality === 'listening' && verdict === 'incorrect');
+    if (showExplanation) {
+      html += '<div style="margin-top:10px;padding:10px 12px;background:var(--surface2,#f2eee5);border-radius:6px;font-size:0.88rem;color:var(--ink2,#444)">' +
               '<strong>해설:</strong> ' + _esc(activity.back.explanation) + '</div>';
     }
 

@@ -270,11 +270,12 @@ tests.push(_gradeExport(MOCK_001, wrongAtIdx1Stub(CORRECT_001)).then(r => {
   assert('T2: score_raw=2/3', Math.abs(r.score_raw - 2/3) < 1e-9);
 }));
 
-// T3: 런타임 에러 → verdict=incorrect, cases[0].error 있음, first_fail.idx=0
+// T3: 런타임 에러 → verdict=incorrect, cases[0].error 있음, 나머지 skipped, first_fail.idx=0
 tests.push(_gradeExport(MOCK_001, errorStub('NameError: x')).then(r => {
   assert('T3: verdict=incorrect (런타임 에러)', r.verdict === 'incorrect');
-  assert('T3: cases.length=3 (에러 포함 전체 순회)', r.feedback.cases.length === 3);
+  assert('T3: cases.length=3 (에러+skipped 포함)', r.feedback.cases.length === 3);
   assert('T3: cases[0].error 있음', !!r.feedback.cases[0].error);
+  assert('T3: cases[1].error=skipped (early-exit)', r.feedback.cases[1].error === 'skipped');
   assert('T3: first_fail.idx=0', r.feedback.first_fail && r.feedback.first_fail.idx === 0);
   assert('T3: feedback.error 있음', !!r.feedback.error);
 }));

@@ -57,16 +57,18 @@
      플러그인 내부 상태
   ───────────────────────────────────────────── */
   var _state = {
-    mounted:       false,
-    host:          null,   // HTMLElement — #plugin-host
-    ctx:           null,   // PluginContext
-    activity:      null,   // 현재 ActivitySpec (sheet-task)
-    univerAPI:     null,   // Univer Facade API 인스턴스
-    progress:      null,   // PluginProgressSnapshot (메모리 캐시)
-    restored:      false,  // onProgressRestored 호출됐는지
-    activityIndex: 0,      // 현재 활동 인덱스
-    univerContainer: null, // Univer 컨테이너 ref (dispose용)
-    weaknessOnly:  false   // mid: 약점 영역만 보기 필터 상태
+    mounted:        false,
+    host:           null,   // HTMLElement — #plugin-host
+    ctx:            null,   // PluginContext
+    activity:       null,   // 현재 ActivitySpec (sheet-task)
+    univerAPI:      null,   // Univer Facade API 인스턴스
+    progress:       null,   // PluginProgressSnapshot (메모리 캐시)
+    restored:       false,  // onProgressRestored 호출됐는지
+    pendingSnapshot: null,  // onProgressRestored가 mount 전에 호출됐을 때 보관
+    activityIndex:  0,      // 현재 활동 인덱스
+    univerContainer: null,  // Univer 컨테이너 ref (dispose용)
+    weaknessOnly:   false,  // mid: 약점 영역만 보기 필터 상태
+    scoreInFlight:  false   // 채점 중 중복 클릭 방어
   };
 
   /* ─────────────────────────────────────────────
@@ -76,7 +78,8 @@
     return (
       typeof UniverPresets !== 'undefined' &&
       typeof UniverCore !== 'undefined' &&
-      typeof UniverPresetSheetsCore !== 'undefined'
+      typeof UniverPresetSheetsCore !== 'undefined' &&
+      typeof UniverPresets.createUniver === 'function'  // API 형태 검증 추가
     );
   }
 
@@ -101,6 +104,21 @@
       });
     });
     return cellData;
+  }
+
+  /* ─────────────────────────────────────────────
+     createWorkbook 공통 헬퍼 — API 버전 분기 중복 제거
+     두 호출 지점(_mountUniver, onProgressRestored)에서 공유
+  ───────────────────────────────────────────── */
+  function _createWorkbook(univerAPI, data) {
+    if (typeof univerAPI.createWorkbook === 'function') {
+      univerAPI.createWorkbook(data);
+    } else if (typeof univerAPI.createUniverSheet === 'function') {
+      univerAPI.createUniverSheet(data);
+    } else {
+      console.warn('[excel] univerAPI.createWorkbook / createUniverSheet 없음');
+      throw new Error('Univer 워크북 생성 API 없음');
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -154,13 +172,7 @@
     };
 
     // createWorkbook (Facade API 공식) — 일부 버전은 createUniverSheet 별칭
-    if (typeof univerAPI.createWorkbook === 'function') {
-      univerAPI.createWorkbook(workbookData);
-    } else if (typeof univerAPI.createUniverSheet === 'function') {
-      univerAPI.createUniverSheet(workbookData);
-    } else {
-      console.warn('[excel] univerAPI.createWorkbook / createUniverSheet 없음');
-    }
+    _createWorkbook(univerAPI, workbookData);
 
     return { univerAPI: univerAPI };
   }
@@ -212,6 +224,15 @@
     }
 
     var expected  = activity.grading.expected;
+    // 런타임규격 §2-1: grading.expected minItems:1 — 빈 배열은 spec 위반, incorrect로 처리
+    if (!expected || expected.length === 0) {
+      return {
+        verdict:   'incorrect',
+        score_raw: 0,
+        grader_id: 'engine',
+        feedback:  { passed: 0, total: 0, first_fail: null, cell_results: [] }
+      };
+    }
     var tolerance = (activity.grading && typeof activity.grading.tolerance === 'number')
       ? activity.grading.tolerance : 0;
     var total    = expected.length;
@@ -347,7 +368,7 @@
     }
 
     var isCorrect    = result.verdict === 'correct';
-    var verdictColor = isCorrect ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
+    var verdictColor = isCorrect ? 'var(--brand,#1f6b4a)' : 'var(--hot,#a8301f)';
     var verdictLabel = isCorrect ? '✓ 정답' : '✗ 오답';
     var passed       = fb.passed != null ? fb.passed : 0;
     var total        = fb.total  != null ? fb.total  : 0;
@@ -373,15 +394,15 @@
     var cellResults = fb.cell_results || [];
     if (cellResults.length > 0) {
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.82em;margin-bottom:8px">';
-      html += '<thead><tr style="background:var(--surface2,#f6f8fa)">';
+      html += '<thead><tr style="background:var(--surface2,#f2eee5)">';
       html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">셀</th>';
       html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">기대값</th>';
       html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">입력값</th>';
       html += '<th style="padding:4px 8px;text-align:center;border:1px solid var(--line2,#ddd)">결과</th>';
       html += '</tr></thead><tbody>';
       cellResults.forEach(function (cr) {
-        var rowBg = cr.ok ? '#f0fff4' : '#fff5f5';
-        var icon  = cr.ok ? '<span style="color:#22863a">✓</span>' : '<span style="color:#d73a49">✗</span>';
+        var rowBg = cr.ok ? 'var(--brand-bg,#e4efe7)' : 'var(--hot-bg,#f9e7e2)';
+        var icon  = cr.ok ? '<span style="color:var(--brand,#1f6b4a)">✓</span>' : '<span style="color:var(--hot,#a8301f)">✗</span>';
         html += '<tr style="background:' + rowBg + '">';
         html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(cr.cell) + '</code></td>';
         html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.expected)) + '</code></td>';
@@ -390,30 +411,26 @@
         html += '</tr>';
       });
       html += '</tbody></table>';
-    } else if (fb.first_fail) {
-      // cellResults 없는 구버전 fallback
-      html += '<div style="font-size:0.85em;margin-top:6px;color:var(--ink3,#666)">' +
-        '첫 불일치 · 셀: <code>' + _esc(fb.first_fail.cell) + '</code>' +
-        ' / 기대: <code>' + _esc(String(fb.first_fail.expected)) + '</code>' +
-        ' / 실제: <code>' + _esc(String(fb.first_fail.actual)) + '</code>' +
-        '</div>';
     }
 
     // ── 해설 패널 (back.solution / back.explanation) ──
     if (back && (back.solution || back.explanation)) {
       var panelId = 'excel-explanation-' + Date.now();
+      // 오답일 때 해설 자동 펼침 → 인출 실패 직후 즉시 피드백 제공
+      var panelOpen = !isCorrect;
       html += '<div style="margin-top:8px">';
       // 토글 버튼
       html += '<button type="button" class="excel-btn-explanation" data-panel="' + panelId + '"' +
         ' style="font-size:0.82em;padding:5px 12px;border-radius:5px;border:1px solid var(--line2,#ccc);' +
-        'background:var(--surface2,#f6f8fa);cursor:pointer;color:var(--ink2,#444)">해설 보기 ▸</button>';
-      // 해설 패널 (초기 숨김)
-      html += '<div id="' + panelId + '" style="display:none;margin-top:8px;padding:12px 14px;' +
+        'background:var(--surface2,#f2eee5);cursor:pointer;color:var(--ink2,#444)">' +
+        (panelOpen ? '해설 닫기 ▾' : '해설 보기 ▸') + '</button>';
+      // 해설 패널 (오답 시 초기 펼침)
+      html += '<div id="' + panelId + '" style="display:' + (panelOpen ? 'block' : 'none') + ';margin-top:8px;padding:12px 14px;' +
         'border:1px solid var(--line2,#ddd);border-radius:7px;background:#fafbff;font-size:0.87em;line-height:1.7">';
       if (back.solution) {
         html += '<div style="margin-bottom:8px">';
-        html += '<span style="font-weight:600;color:var(--accent,#0550ae);font-size:0.9em">모범 수식</span>';
-        html += '<pre style="margin:4px 0 0;padding:8px 10px;background:var(--surface2,#f6f8fa);' +
+        html += '<span style="font-weight:600;color:var(--brand,#1f6b4a);font-size:0.9em">모범 수식</span>';
+        html += '<pre style="margin:4px 0 0;padding:8px 10px;background:var(--surface2,#f2eee5);' +
           'border-radius:5px;white-space:pre-wrap;word-break:break-all;font-size:0.95em">' +
           _esc(back.solution) + '</pre>';
         html += '</div>';
@@ -450,9 +467,9 @@
      weight 1-3: easy(●), 4-6: medium(◆), 7-10: hard(★)
   ───────────────────────────────────────────── */
   function _diffIcon(weight) {
-    if (!weight || weight <= 3) return { icon: '●', label: '쉬움', color: '#3cbb74' };
-    if (weight <= 6)             return { icon: '◆', label: '중간', color: '#f0a015' };
-    return                               { icon: '★', label: '어려움', color: '#d73a49' };
+    if (!weight || weight <= 3) return { icon: '●', label: '쉬움', color: 'var(--brand,#1f6b4a)' };
+    if (weight <= 6)             return { icon: '◆', label: '중간', color: 'var(--warn,#9a5a09)' };
+    return                               { icon: '★', label: '어려움', color: 'var(--hot,#a8301f)' };
   }
 
   /* ─────────────────────────────────────────────
@@ -491,18 +508,18 @@
       // 약점 필터 ON 이고 약점 아닌 활동은 흐리게 표시
       var dimStyle = (weaknessOnly && !isWeak) ? 'opacity:0.35;' : '';
       html += '<button type="button" class="act-nav-btn" data-act-idx="' + i + '"' +
-        ' style="' + dimStyle + 'min-width:34px;height:34px;border-radius:7px;border:1.5px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.83rem;font-weight:500;position:relative">' +
+        ' title="' + (i + 1) + '번 문제 · 난이도: ' + diff.label + (isWeak ? ' · 약점 영역' : '') + '"' +
+        ' style="' + dimStyle + 'min-width:34px;height:34px;border-radius:var(--r,10px);border:1.5px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);cursor:pointer;font-size:var(--fs-sm,12.5px);font-weight:500">' +
         (i + 1) +
-        '<span style="position:absolute;top:-5px;right:-3px;font-size:0.6rem;line-height:1;color:' + diff.color + '" title="난이도: ' + diff.label + '">' + diff.icon + '</span>' +
         '</button>';
     }
     // 약점 필터 버튼 (weakness 데이터 있을 때만)
     if (hasWeakness) {
-      var filterBg = weaknessOnly ? 'var(--hot,#d73a49)' : 'var(--surface,#fff)';
-      var filterColor = weaknessOnly ? '#fff' : 'var(--hot,#d73a49)';
+      var filterBg = weaknessOnly ? 'var(--hot,#a8301f)' : 'var(--surface,#fbfaf6)';
+      var filterColor = weaknessOnly ? '#fff' : 'var(--hot,#a8301f)';
       html += '<button type="button" class="act-weakness-filter" ' +
-        'style="margin-left:6px;padding:4px 10px;border-radius:6px;border:1.5px solid var(--hot,#d73a49);' +
-        'background:' + filterBg + ';color:' + filterColor + ';font-size:0.78rem;cursor:pointer;font-weight:500">' +
+        'style="margin-left:6px;padding:4px 10px;border-radius:var(--r,10px);border:1.5px solid var(--hot,#a8301f);' +
+        'background:' + filterBg + ';color:' + filterColor + ';font-size:var(--fs-xs,11px);cursor:pointer;font-weight:500">' +
         (weaknessOnly ? '전체 보기' : '약점만 보기') + '</button>';
     }
     html += '<span class="act-count" style="margin-left:auto;font-size:0.8rem;color:var(--ink3,#888)">' + (currentIdx + 1) + ' / ' + activities.length + '</span>';
@@ -528,9 +545,9 @@
       var done = saved && saved.last_verdict === 'correct';
       var isWeak = weakUnits && act && act.tags && weakUnits[act.tags.unit];
       var diff = _diffIcon(act && act.weight);
-      btns[i].style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
-      btns[i].style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
-      btns[i].style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : (isWeak ? 'var(--hot,#d73a49)' : 'var(--line2,#ddd)'));
+      btns[i].style.background   = isActive ? 'var(--brand,#1f6b4a)' : 'var(--surface,#fbfaf6)';
+      btns[i].style.color        = isActive ? '#fff' : (done ? 'var(--brand-deep,#124e35)' : 'var(--ink3,#7a7168)');
+      btns[i].style.borderColor  = isActive ? 'var(--brand,#1f6b4a)' : (done ? 'var(--brand,#1f6b4a)' : (isWeak ? 'var(--hot,#a8301f)' : 'var(--line2,#cfc7b4)'));
       btns[i].title = (done ? '완료 ✓ · ' : '') + '난이도: ' + diff.label + (isWeak ? ' · 약점 영역' : '');
     }
     var countEl = container.querySelector('.act-count');
@@ -545,8 +562,9 @@
    * @param {object}        ctx
    * @param {Array}         activities
    * @param {number}        idx
+   * @param {boolean}       [keepResult=false]  true이면 채점 결과 영역 유지 (Reset 버튼용)
    */
-  function _switchExcelActivity(container, ctx, activities, idx) {
+  function _switchExcelActivity(container, ctx, activities, idx, keepResult) {
     _state.activityIndex = idx;
     _state.activity = activities[idx] || null;
     var activity = _state.activity;
@@ -561,9 +579,9 @@
     var promptEl = container.querySelector('.excel-prompt');
     if (promptEl && activity) promptEl.textContent = (activity.front && activity.front.prompt) || '';
 
-    // 채점 결과 초기화
+    // 채점 결과 초기화 — keepResult=true(Reset 버튼)이면 피드백 보존
     var resultEl = container.querySelector('.excel-result');
-    if (resultEl) resultEl.innerHTML = '';
+    if (resultEl && !keepResult) resultEl.innerHTML = '';
 
     // activity-id 속성 갱신
     var wrap = container.querySelector('.excel-wrap');
@@ -588,39 +606,8 @@
     _updateNavBadges(container, activities, idx);
   }
 
-  /* ─────────────────────────────────────────────
-     mid: 약점 필터 버튼 이벤트 바인딩 (이벤트 위임)
-     nav 재렌더 후에도 호출해 최신 버튼에 바인딩
-  ───────────────────────────────────────────── */
-  function _bindWeaknessFilter(container, ctx, activities) {
-    var filterBtn = container.querySelector('.act-weakness-filter');
-    if (!filterBtn) return;
-    filterBtn.addEventListener('click', function () {
-      _state.weaknessOnly = !_state.weaknessOnly;
-      // nav 영역만 교체 (Univer 건드리지 않음)
-      var navEl = container.querySelector('.act-nav');
-      if (navEl) {
-        var tempDiv = document.createElement('div');
-        tempDiv.innerHTML = _buildNavHTML(activities, _state.activityIndex, _state.weaknessOnly);
-        var newNav = tempDiv.firstChild;
-        navEl.parentNode.replaceChild(newNav, navEl);
-      }
-      // 새로 삽입된 nav-btn·weakness-filter에 이벤트 재바인딩
-      var newNavBtns = container.querySelectorAll('.act-nav-btn');
-      for (var j = 0; j < newNavBtns.length; j++) {
-        (function (btn) {
-          btn.addEventListener('click', function () {
-            var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
-            if (!isNaN(newIdx) && newIdx !== _state.activityIndex) {
-              _switchExcelActivity(container, ctx, activities, newIdx);
-            }
-          });
-        })(newNavBtns[j]);
-      }
-      _bindWeaknessFilter(container, ctx, activities);
-      _updateNavBadges(container, activities, _state.activityIndex);
-    });
-  }
+  // _bindWeaknessFilter 제거 — mount()의 이벤트 위임 단일 리스너로 통합
+  // (nav DOM 재생성 후에도 container 레벨 click 리스너가 처리함)
 
   /* ─────────────────────────────────────────────
      UI HTML 생성
@@ -635,6 +622,7 @@
     var prompt = (activity && activity.front && activity.front.prompt) || '(문제 없음)';
     var actId  = (activity && activity.activity_id) || '';
     var navHtml = _buildNavHTML(activities, currentIdx, _state.weaknessOnly);
+    var diff = _diffIcon(activity && activity.weight);
 
     return [
       '<div class="excel-wrap" data-activity-id="' + _esc(actId) + '">',
@@ -644,13 +632,13 @@
 
       /* 문제 지문 */
       '<div class="excel-problem" style="' +
-        'background:var(--surface2,#f6f8fa);' +
-        'border:1px solid var(--line2,#ddd);' +
-        'border-radius:8px;padding:14px 16px;margin-bottom:12px">',
-      '  <div class="excel-badge" style="' +
-        'display:inline-block;font-size:0.75em;font-weight:600;' +
-        'color:var(--accent,#0550ae);background:var(--accent-bg,#e8f0fe);' +
-        'padding:2px 8px;border-radius:12px;margin-bottom:6px">EXCEL 실습</div>',
+        'background:var(--surface2,#f2eee5);' +
+        'border:1px solid var(--line2,#cfc7b4);' +
+        'border-radius:var(--r,10px);padding:14px 16px;margin-bottom:12px">',
+      '  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">',
+      '    <div class="excel-badge plugin-badge">EXCEL 실습</div>',
+      '    <span style="font-size:0.75em;color:' + diff.color + ';font-weight:500">' + _esc(diff.label) + '</span>',
+      '  </div>',
       '  <div class="excel-prompt" style="font-size:0.95em;line-height:1.6;white-space:pre-wrap">' +
         _esc(prompt) + '</div>',
       '</div>',
@@ -664,12 +652,12 @@
       /* 버튼 영역 */
       '<div class="excel-actions" style="display:flex;gap:8px;margin-bottom:8px">',
       '  <button type="button" class="excel-btn-submit"',
-      '          style="padding:8px 22px;border-radius:6px;border:none;' +
-        'background:var(--accent,#0550ae);color:#fff;cursor:pointer;font-weight:600">',
+      '          style="padding:8px 22px;border-radius:var(--r,10px);border:none;' +
+        'background:var(--brand,#1f6b4a);color:#fff;cursor:pointer;font-weight:600">',
       '    채점',
       '  </button>',
       '  <button type="button" class="excel-btn-reset"',
-      '          style="padding:8px 16px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer;font-size:0.88rem;color:var(--ink3,#666)">',
+      '          style="padding:8px 16px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);cursor:pointer;font-size:var(--fs-sm,12.5px);color:var(--ink3,#7a7168)">',
       '    초기화',
       '  </button>',
       '</div>',
@@ -719,7 +707,7 @@
     if (!_checkUniver()) {
       var errEl = container.querySelector('.excel-univer-container');
       if (errEl) {
-        errEl.style.cssText = 'padding:20px;color:var(--hot,#d73a49);background:var(--surface2,#f6f8fa)';
+        errEl.style.cssText = 'padding:20px;color:var(--hot,#a8301f);background:var(--surface2,#f2eee5)';
         errEl.textContent =
           'Univer CDN 미로드. index.html에서 @univerjs/presets · @univerjs/preset-sheets-core 스크립트를 shell.js 앞에 추가하세요.';
       }
@@ -738,7 +726,7 @@
     } catch (e) {
       console.error('[excel] Univer 마운트 실패:', e);
       if (univerContainer) {
-        univerContainer.style.cssText = 'padding:20px;color:var(--hot,#d73a49)';
+        univerContainer.style.cssText = 'padding:20px;color:var(--hot,#a8301f)';
         univerContainer.textContent = 'Univer 초기화 실패: ' + e.message;
       }
       return Promise.resolve();
@@ -750,6 +738,8 @@
 
     if (submitBtn) {
       submitBtn.addEventListener('click', function () {
+        // 채점 중 중복 클릭 방어
+        if (_state.scoreInFlight) return;
         if (!_state.activity) {
           _showResult(resultEl, null, '문제가 로드되지 않았습니다.');
           return;
@@ -758,6 +748,8 @@
           _showResult(resultEl, null, 'Univer 초기화 실패 — 페이지를 새로고침하세요.');
           return;
         }
+        _state.scoreInFlight = true;
+        submitBtn.disabled = true;
         _showResult(resultEl, null, '채점 중...', null);
         score().then(function (scoreResult) {
           var back = (_state.activity && _state.activity.back) || null;
@@ -767,36 +759,52 @@
           _updateNavBadges(container, activities, _state.activityIndex);
         }).catch(function (e) {
           _showResult(resultEl, null, '채점 오류: ' + e.message);
+        }).then(function () {
+          _state.scoreInFlight = false;
+          submitBtn.disabled = false;
         });
       });
     }
 
-    // Reset(초기화) 버튼 바인딩
+    // Reset(초기화) 버튼 — 시트만 초기화, 채점 결과는 유지 (학습 피드백 분석 보호)
     var resetBtn = container.querySelector('.excel-btn-reset');
     if (resetBtn) {
       resetBtn.addEventListener('click', function () {
-        _switchExcelActivity(container, ctx, activities, _state.activityIndex);
+        _switchExcelActivity(container, ctx, activities, _state.activityIndex, true /* keepResult */);
       });
     }
 
-    // 네비게이션 버튼 바인딩
-    var navBtns = container.querySelectorAll('.act-nav-btn');
-    for (var i = 0; i < navBtns.length; i++) {
-      (function (btn) {
-        btn.addEventListener('click', function () {
-          var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
-          if (!isNaN(newIdx) && newIdx !== _state.activityIndex) {
-            _switchExcelActivity(container, ctx, activities, newIdx);
-          }
-        });
-      })(navBtns[i]);
-    }
-
-    // mid: 약점 필터 버튼 바인딩 (weakness filter)
-    _bindWeaknessFilter(container, ctx, activities);
+    // 이벤트 위임 — nav 영역 단일 리스너 (nav-btn + weakness-filter 모두 처리)
+    // DOM 재생성 후에도 container 레벨 리스너 하나로 영구 동작
+    container.addEventListener('click', function (e) {
+      var navBtn = e.target.closest && e.target.closest('.act-nav-btn');
+      if (navBtn) {
+        var newIdx = parseInt(navBtn.getAttribute('data-act-idx'), 10);
+        if (!isNaN(newIdx) && newIdx !== _state.activityIndex) {
+          _switchExcelActivity(container, ctx, activities, newIdx);
+        }
+        return;
+      }
+      var filterBtn = e.target.closest && e.target.closest('.act-weakness-filter');
+      if (filterBtn) {
+        _state.weaknessOnly = !_state.weaknessOnly;
+        // nav 영역만 교체 (Univer·결과 건드리지 않음)
+        var navEl = container.querySelector('.act-nav');
+        if (navEl) {
+          var tempDiv = document.createElement('div');
+          tempDiv.innerHTML = _buildNavHTML(activities, _state.activityIndex, _state.weaknessOnly);
+          var newNav = tempDiv.firstChild;
+          navEl.parentNode.replaceChild(newNav, navEl);
+        }
+        _updateNavBadges(container, activities, _state.activityIndex);
+      }
+    });
 
     // 초기 배지 상태 반영
     _updateNavBadges(container, activities, initIdx);
+
+    // 진도 복원 지연 플러시 (onProgressRestored가 mount 전에 호출된 경우)
+    _flushPendingRestore();
 
     return Promise.resolve();
   }
@@ -817,13 +825,17 @@
 
     if (_state.host) _state.host.innerHTML = '';
 
-    _state.mounted        = false;
-    _state.host           = null;
-    _state.ctx            = null;
-    _state.activity       = null;
-    _state.activityIndex  = 0;
+    _state.mounted         = false;
+    _state.host            = null;
+    _state.ctx             = null;
+    _state.activity        = null;
+    _state.activityIndex   = 0;
     _state.univerContainer = null;
-    _state.weaknessOnly   = false;
+    _state.weaknessOnly    = false;
+    _state.scoreInFlight   = false;
+    _state.progress        = null;   // 재마운트 시 오염 방지 — 진도는 localStorage 재로드
+    _state.restored        = false;
+    _state.pendingSnapshot = null;
   }
 
   /* ─────────────────────────────────────────────
@@ -856,7 +868,10 @@
     }
 
     return _scoreAfterCalc(activity, univerAPI).then(function (result) {
-      _updateProgress(activity.activity_id, result);
+      // timeout은 사용자 시도가 아니므로 진도 갱신 건너뜀 (런타임규격 §5-3 last_verdict 계약 준수)
+      if (result.verdict !== 'timeout') {
+        _updateProgress(activity.activity_id, result);
+      }
       return result;
     });
   }
@@ -887,25 +902,38 @@
     _state.progress = snapshot;
     _state.restored = true;
 
-    // mid: 현재 활동의 cell_snapshot이 있으면 Univer workbook에 재주입
+    // univerAPI가 아직 null이면 지연 큐에 보관 → mount() 완료 후 _flushPendingRestore()에서 처리
+    if (!_state.univerAPI) {
+      _state.pendingSnapshot = snapshot;
+      return;
+    }
+    _applySnapshotRestore(snapshot);
+  }
+
+  /** 셀 스냅샷 실제 재주입 (univerAPI 준비됐을 때만 호출) */
+  function _applySnapshotRestore(snapshot) {
     var activityId = _state.activity && _state.activity.activity_id;
     if (!activityId) return;
     var entry = snapshot.activities && snapshot.activities[activityId];
     if (!entry) return;
     var savedSnapshot = entry.plugin_extra && entry.plugin_extra.cell_snapshot;
     if (!savedSnapshot) return;
-    if (!_state.univerAPI) return;
 
     // createWorkbook으로 스냅샷 재주입 (getSnapshot() 반환값을 그대로 전달)
     try {
-      if (typeof _state.univerAPI.createWorkbook === 'function') {
-        _state.univerAPI.createWorkbook(savedSnapshot);
-      } else if (typeof _state.univerAPI.createUniverSheet === 'function') {
-        _state.univerAPI.createUniverSheet(savedSnapshot);
-      }
+      _createWorkbook(_state.univerAPI, savedSnapshot);
     } catch (e) {
       // createWorkbook이 스냅샷 형태를 거부할 경우 무시 (graceful fallback)
       console.warn('[excel] onProgressRestored: createWorkbook 재주입 실패', e);
+    }
+  }
+
+  /** mount() 완료 직후 호출 — onProgressRestored가 먼저 도착했을 때 플러시 */
+  function _flushPendingRestore() {
+    if (_state.pendingSnapshot && _state.univerAPI) {
+      var snap = _state.pendingSnapshot;
+      _state.pendingSnapshot = null;
+      _applySnapshotRestore(snap);
     }
   }
 
@@ -925,7 +953,7 @@
     actIds.forEach(function (id) {
       var a        = acts[id];
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags || !activity.tags.area) return;
       var key = activity.tags.area + '||' + activity.tags.subarea;
       if (!areaMap[key]) {
         areaMap[key] = {
@@ -954,7 +982,7 @@
       var a = acts[id];
       if (!a.cold_attempts) return;
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags || !activity.tags.area) return;
       var rate = (a.cold_attempts - a.cold_correct) / a.cold_attempts;
       if (rate > 0) {
         weakness.push({
@@ -993,6 +1021,8 @@
 
   /** 진도 캐시 업데이트 (mid: 셀 스냅샷 저장 포함) */
   function _updateProgress(activityId, result) {
+    // feedback 없거나 passed/total 없으면 안전하게 0으로 폴백
+    var fb = (result && result.feedback) || {};
     var snap = getProgressSnapshot();
     if (!snap.activities[activityId]) {
       snap.activities[activityId] = {
@@ -1005,7 +1035,9 @@
     var entry = snap.activities[activityId];
     entry.cold_attempts++;
     if (result.verdict === 'correct') entry.cold_correct++;
-    entry.last_verdict = result.verdict;
+    // last_verdict는 'correct' | 'incorrect' | null 만 허용 (런타임규격 §5-3)
+    entry.last_verdict = (result.verdict === 'correct' || result.verdict === 'incorrect')
+      ? result.verdict : null;
 
     // mid: 셀 스냅샷 저장 — getSnapshot() API가 존재할 때만 시도
     var cellSnapshot = null;
@@ -1022,8 +1054,8 @@
 
     entry.plugin_extra = {
       last_score: {
-        passed: result.feedback.passed,
-        total:  result.feedback.total
+        passed: fb.passed != null ? fb.passed : 0,
+        total:  fb.total  != null ? fb.total  : 0
       },
       cell_snapshot: cellSnapshot  // mid: 셀 스냅샷 (getSnapshot 지원 시)
     };

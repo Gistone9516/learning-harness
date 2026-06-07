@@ -18,22 +18,22 @@
 
   <!-- ── CDN: CodeMirror 5 (coding 플러그인 — 에디터) ── -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" onerror="window.__CDN_FAILED=true"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
 
   <!-- ── CDN: Pyodide (coding 플러그인 — Python 런타임, 브라우저 WebAssembly) ── -->
-  <!-- loadPyodide()를 전역에 노출. plugin.js가 mount() 시 lazy-load. -->
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <!-- defer로 변경: 부트 순서 차단 없음. plugin.js가 mount() 시 lazy-load. -->
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js" onerror="window.__CDN_FAILED=true"></script>
 
   <!-- ── CDN: Univer (excel 플러그인 — 스프레드시트, UMD) ── -->
   <!-- 의존 순서: React → RxJS → Univer 코어 → SheetsCore → 로케일 CSS -->
-  <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/rxjs@7.8.1/dist/bundles/rxjs.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.5.4/lib/umd/index.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@univerjs/presets@0.5.4/lib/umd/index.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/index.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/locales/en-US.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" onerror="window.__CDN_FAILED=true"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/rxjs@7.8.1/dist/bundles/rxjs.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/presets@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/locales/en-US.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/index.css">
 
   <link rel="stylesheet" href="styles.css" />
@@ -59,7 +59,6 @@
         <div class="brand-glyph" id="brand-glyph">컴</div>
         <div>
           <div class="brand-name" id="brand-name">컴활1급 학습</div>
-          <div class="brand-sub" id="brand-sub">Leitner · 인출연습 · 자가테스트</div>
         </div>
       </div>
       <div class="overall">
@@ -85,12 +84,6 @@
       <div class="search-wrap">
         <svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="search" type="text" placeholder="개념·함수 검색 (예: VLOOKUP, 피벗)" autocomplete="off" />
-      </div>
-      <div class="chips" id="freq-chips" aria-label="빈출 레벨 필터">
-        <button class="chip active" data-lv="all">전체</button>
-        <button class="chip lv3" data-lv="3"><span class="dot">★★★</span>최빈출</button>
-        <button class="chip lv2" data-lv="2"><span class="dot">★★</span>빈출</button>
-        <button class="chip lv1" data-lv="1"><span class="dot">★</span>심화</button>
       </div>
       <nav class="app-header__nav" role="navigation" aria-label="주 메뉴">
         <button type="button" class="nav-btn" data-route-trigger="quiz" aria-label="퀴즈 화면">퀴즈</button>
@@ -170,6 +163,12 @@
     <section data-screen="concept" hidden aria-label="개념서 뷰">
       <div class="concept-wrap">
         <button type="button" data-concept="back-to-quiz" class="concept-back-btn" aria-label="퀴즈로 돌아가기">← 퀴즈로 돌아가기</button>
+        <div class="chips" id="freq-chips" aria-label="빈출 레벨 필터" style="margin-bottom:12px">
+          <button class="chip active" data-lv="all">전체</button>
+          <button class="chip lv3" data-lv="3" aria-label="최빈출"><span class="dot" aria-hidden="true">★★★</span></button>
+          <button class="chip lv2" data-lv="2" aria-label="빈출"><span class="dot" aria-hidden="true">★★</span></button>
+          <button class="chip lv1" data-lv="1" aria-label="심화"><span class="dot" aria-hidden="true">★</span></button>
+        </div>
         <div data-concept="body" id="concept-body" role="region" aria-label="개념서 본문">
           <p class="text-muted">개념서 섹션을 선택하면 내용이 표시됩니다.</p>
         </div>
@@ -263,26 +262,12 @@
      라우트 복원 → 활성 플러그인 mount
 ============================================================ -->
 <script>
-(function () {
-  'use strict';
-  window.addEventListener('DOMContentLoaded', function () {
-    if (typeof window.SHELL === 'undefined' || typeof window.SHELL.init !== 'function') {
-      console.warn('[학습앱] shell.js 로드 실패.');
-      var banner = document.createElement('div');
-      banner.className = 'error-banner';
-      banner.style.margin = 'var(--space-6)';
-      banner.textContent = 'shell.js를 불러오지 못했습니다. 파일 구조를 확인하세요.';
-      var mc = document.getElementById('main-content');
-      if (mc) mc.prepend(banner);
-      return;
-    }
-    try {
-      window.SHELL.init({ subject: 'comp1' });
-    } catch (e) {
-      console.error('[SHELL.init]', e);
-    }
-  });
-})();
+// shell.js는 동기 로드 완료 후 이 스크립트 실행 — DOMContentLoaded 불필요
+try {
+  window.SHELL.init({ subject: 'comp1' });
+} catch (e) {
+  console.error('[SHELL.init]', e);
+}
 </script>
 
 </body>

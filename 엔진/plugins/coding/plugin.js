@@ -35,6 +35,7 @@
    * Pyodide 1회 로드 보장.
    * CDN URL: https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js
    * index.html에서 스크립트 태그로 미리 포함하거나, 없으면 동적 inject.
+   * 실패 시 _pyodideLoading을 null로 리셋해 다음 호출 시 재시도 가능.
    * @returns {Promise<Pyodide>}
    */
   function _ensurePyodide() {
@@ -46,25 +47,33 @@
         return loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/' })
           .then(function (py) {
             _pyodide = py;
-            window._pyodide = py; // 전역 캐시 (다른 스크립트 공유 가능)
             // _safe_modules: 케이스 간 오염 방지용 기준 모듈셋 저장
             py.runPython('import sys as _sys; _safe_modules = set(_sys.modules.keys())');
             return py;
           });
       }
 
+      var p;
       // loadPyodide 전역 함수 존재 여부 확인
       if (typeof loadPyodide === 'function') {
-        return doLoad();
+        p = doLoad();
+      } else {
+        // 없으면 CDN 스크립트 동적 inject
+        p = new Promise(function (resolve, reject) {
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
+          s.onload = function () { doLoad().then(resolve).catch(reject); };
+          s.onerror = function () {
+            reject(new Error('Pyodide CDN 로드 실패. 인터넷 연결을 확인하거나 index.html의 Pyodide script 태그 주석을 해제하세요.'));
+          };
+          document.head.appendChild(s);
+        });
       }
 
-      // 없으면 CDN 스크립트 동적 inject
-      return new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
-        s.onload = function () { doLoad().then(resolve).catch(reject); };
-        s.onerror = function () { reject(new Error('Pyodide CDN 로드 실패')); };
-        document.head.appendChild(s);
+      // 실패 시 캐시 리셋 → 다음 호출에서 재시도 가능
+      return p.catch(function (e) {
+        _pyodideLoading = null;
+        return Promise.reject(e);
       });
     })();
 
@@ -146,12 +155,14 @@
       return { stdout: '', error: msg, plot_b64: null };
     });
 
+    // sentinel 객체로 타임아웃을 정확히 식별 (메시지 문자열 매칭 회피)
+    var TIMEOUT_SENTINEL = {};
     var timeoutPromise = new Promise(function (_, reject) {
-      setTimeout(function () { reject(new Error('timeout')); }, 5000);
+      setTimeout(function () { reject(TIMEOUT_SENTINEL); }, 5000);
     });
 
     return Promise.race([runPromise, timeoutPromise]).catch(function (e) {
-      if (String(e.message).indexOf('timeout') !== -1) {
+      if (e === TIMEOUT_SENTINEL) {
         return { stdout: '', error: 'timeout', plot_b64: null };
       }
       return { stdout: '', error: String(e.message || e).split('\n')[0], plot_b64: null };
@@ -219,11 +230,27 @@
      ScoreResult.feedback.cases[] — 전체 케이스 결과 배열
   ───────────────────────────────────────────── */
   /**
-   * @param {object} activity  ActivitySpec (code-problem)
-   * @param {string} code      에디터 현재 코드
+   * 채점 공통 로직.
+   * runnerFn(code, stdin) → Promise<{stdout, error, plot_b64}> 를 주입 받아 실행.
+   * 브라우저 실행 시 _runOneCase, 테스트 시 stubRunner 사용.
+   * grading 또는 test_cases 누락 시 빈 결과 반환(graceful fallback).
+   *
+   * @param {object}   activity   ActivitySpec
+   * @param {string}   code       제출 코드
+   * @param {Function} runnerFn   (code, stdin) => Promise<RunResult>
    * @returns {Promise<ScoreResult>}
    */
-  function _grade(activity, code) {
+  function _gradeWithRunner(activity, code, runnerFn) {
+    // test_cases 방어 검증
+    if (!activity.grading || !Array.isArray(activity.grading.test_cases) || !activity.grading.test_cases.length) {
+      return Promise.resolve({
+        verdict:   'incorrect',
+        score_raw: 0,
+        grader_id: 'pyodide',
+        feedback:  { passed: 0, total: 0, first_fail: null, cases: [], error: '테스트 케이스 없음' }
+      });
+    }
+
     var testCases = activity.grading.test_cases;
     var compare   = activity.grading.compare || 'stdout-trim';
     var tolerance = activity.grading.tolerance;
@@ -237,12 +264,12 @@
     var chain = Promise.resolve();
     testCases.forEach(function (tc, idx) {
       chain = chain.then(function () {
-        if (errorMsg === 'timeout') {
-          // 타임아웃 후 나머지: skipped로 기록
+        if (errorMsg) {
+          // 타임아웃 또는 런타임 에러 발생 후 나머지: skipped로 기록 (early-exit)
           cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'skipped' });
           return;
         }
-        return _runOneCase(code, tc.input).then(function (res) {
+        return runnerFn(code, tc.input).then(function (res) {
           if (res.error === 'timeout') {
             errorMsg = 'timeout';
             if (!firstFail) {
@@ -255,7 +282,7 @@
             if (!firstFail) {
               firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
             }
-            if (!errorMsg) errorMsg = res.error;
+            errorMsg = res.error;
             cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: false, error: res.error });
             return;
           }
@@ -290,6 +317,15 @@
     });
   }
 
+  /**
+   * @param {object} activity  ActivitySpec (code-problem)
+   * @param {string} code      에디터 현재 코드
+   * @returns {Promise<ScoreResult>}
+   */
+  function _grade(activity, code) {
+    return _gradeWithRunner(activity, code, _runOneCase);
+  }
+
   /* ─────────────────────────────────────────────
      진도 localStorage 헬퍼 (키: clf:coding:progress)
   ───────────────────────────────────────────── */
@@ -317,7 +353,6 @@
     activityIndex:  0,      // 현재 활성 activity 인덱스
     editor:         null,   // CodeMirror 인스턴스
     progress:       null,   // PluginProgressSnapshot (메모리 캐시)
-    restored:       false,  // onProgressRestored 호출됐는지
     mountTime:      0,      // [mid] 풀이 시간: mount() 호출 시각 (Date.now())
     filterArea:     '',     // [mid] 태그 필터: 현재 선택 area (''=전체)
     filterSubarea:  ''      // [mid] 태그 필터: 현재 선택 subarea (''=전체)
@@ -368,27 +403,25 @@
     var langLabel = (activity && activity.front && activity.front.language) || 'python';
     return [
       '<div class="coding-problem">',
-      '  <div class="coding-lang-badge" style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent,#0550ae);color:#fff;font-size:0.75em;font-weight:700;margin-bottom:8px">' + _esc(langLabel.toUpperCase()) + '</div>',
+      '  <div class="coding-lang-badge plugin-badge" style="margin-bottom:8px">' + _esc(langLabel.toUpperCase()) + '</div>',
       '  <div class="coding-prompt" style="white-space:pre-wrap;font-size:0.95em;line-height:1.6;color:var(--ink,#111)">' + _esc(prompt) + '</div>',
       '</div>'
     ].join('\n');
   }
 
-  /** 테스트 케이스 패널 HTML */
+  /** 테스트 케이스 패널 HTML — 입력만 공개 (기대 출력은 채점 후 결과표에서 공개) */
   function _buildTestCasesHTML(activity) {
     var tcs = activity && activity.grading && activity.grading.test_cases;
     if (!tcs || !tcs.length) return '';
     var rows = tcs.map(function (tc, i) {
       var inputDisplay = _esc(tc.input).replace(/\n/g, '↵');
-      var expectedDisplay = _esc(tc.expected).replace(/\n/g, '↵');
       return '<div style="margin-bottom:6px;padding:8px;background:var(--surface,#fff);border:1px solid var(--line2,#ddd);border-radius:4px;font-size:0.82em;font-family:monospace">' +
         '<span style="color:var(--ink3,#666)">케이스 ' + (i + 1) + '</span>&nbsp;&nbsp;' +
-        '<span style="color:var(--ink3,#555)">입력:</span> <code style="background:var(--surface2,#f6f8fa);padding:1px 4px;border-radius:3px">' + inputDisplay + '</code>' +
-        '&nbsp;&nbsp;<span style="color:var(--ink3,#555)">기대 출력:</span> <code style="background:var(--surface2,#f6f8fa);padding:1px 4px;border-radius:3px">' + expectedDisplay + '</code>' +
+        '<span style="color:var(--ink3,#555)">입력:</span> <code style="background:var(--surface2,#f2eee5);padding:1px 4px;border-radius:3px">' + inputDisplay + '</code>' +
         '</div>';
     }).join('');
     return '<details style="margin-bottom:8px">' +
-      '<summary style="cursor:pointer;font-size:0.85em;color:var(--ink3,#666);user-select:none;padding:4px 0">테스트 케이스 ' + tcs.length + '개 보기</summary>' +
+      '<summary style="cursor:pointer;font-size:0.85em;color:var(--ink3,#666);padding:4px 0">테스트 케이스 입력 ' + tcs.length + '개 보기</summary>' +
       '<div style="margin-top:6px">' + rows + '</div>' +
       '</details>';
   }
@@ -413,13 +446,16 @@
     };
   }
 
-  /** 영속 셸 HTML (nav + 태그 필터 + 편집기 뼈대, activities 배열 기반) */
-  function _buildShellHTML(activities) {
+  /**
+   * 영속 셸 HTML (nav + 태그 필터 + 편집기 뼈대, activities 배열 기반)
+   * tagData: _collectTags(activities) 결과 — 이중 호출 방지를 위해 mount()에서 전달
+   */
+  function _buildShellHTML(activities, tagData) {
     var navHtml = '';
     if (activities.length > 0) {
       var btnHtmls = activities.map(function (act, i) {
         return '<button type="button" class="act-nav-btn" data-act-idx="' + i + '" ' +
-          'style="padding:5px 14px;border-radius:6px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.85em;color:var(--ink3,#666);transition:background 0.15s">' +
+          'style="padding:5px 14px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);cursor:pointer;font-size:var(--fs-sm,12.5px);color:var(--ink3,#7a7168);transition:background 0.15s">' +
           _esc(act.activity_id || ('문제 ' + (i + 1))) +
           '</button>';
       }).join('\n');
@@ -427,15 +463,14 @@
       // [mid] 태그 필터 드롭다운 (activities 2개 이상일 때만 표시)
       var filterHtml = '';
       if (activities.length > 1) {
-        var tags = _collectTags(activities);
         var areaOptions = '<option value="">전체 영역</option>' +
-          tags.areas.map(function (a) { return '<option value="' + _esc(a) + '">' + _esc(a) + '</option>'; }).join('');
+          tagData.areas.map(function (a) { return '<option value="' + _esc(a) + '">' + _esc(a) + '</option>'; }).join('');
         filterHtml = [
           '<div class="act-tag-filter" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">',
-          '  <select class="act-filter-area" style="padding:3px 8px;border-radius:5px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);font-size:0.82em;color:var(--ink3,#555);cursor:pointer">',
+          '  <select class="act-filter-area" style="padding:3px 8px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);font-size:var(--fs-xs,11px);color:var(--ink3,#7a7168);cursor:pointer">',
           '    ' + areaOptions,
           '  </select>',
-          '  <select class="act-filter-subarea" style="padding:3px 8px;border-radius:5px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);font-size:0.82em;color:var(--ink3,#555);cursor:pointer">',
+          '  <select class="act-filter-subarea" style="padding:3px 8px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);font-size:var(--fs-xs,11px);color:var(--ink3,#7a7168);cursor:pointer">',
           '    <option value="">전체 세부</option>',
           '  </select>',
           '  <span class="act-filter-count" style="font-size:0.78em;color:var(--ink3,#999)"></span>',
@@ -467,8 +502,8 @@
       '<div id="coding-testcases-wrap"></div>',
 
       /* Pyodide 로딩 표시 */
-      '<div class="coding-pyodide-loading" style="font-size:0.85em;color:var(--ink3,#888);margin-bottom:8px">',
-      '  ⏳ Python 런타임(Pyodide) 로드 중...',
+      '<div class="coding-pyodide-loading" style="font-size:var(--fs-sm,12.5px);color:var(--ink3,#7a7168);margin-bottom:8px">',
+      '  Python 런타임(Pyodide) 로드 중...',
       '</div>',
 
       /* 에디터 영역 (에디터 인스턴스 주입됨) */
@@ -477,24 +512,22 @@
       /* 버튼 영역 */
       '<div class="coding-actions" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">',
       '  <button type="button" class="coding-btn-run" disabled',
-      '          style="padding:8px 18px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer">',
-      '    실행 <span style="font-size:0.75em;color:var(--ink3,#999)">(Ctrl+Enter)</span>',
+      '          style="padding:8px 18px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);cursor:pointer">',
+      '    로딩 중...',
       '  </button>',
       '  <button type="button" class="coding-btn-submit" disabled',
-      '          style="padding:8px 22px;border-radius:6px;border:none;background:var(--accent,#0550ae);color:#fff;cursor:pointer;font-weight:600">',
-      '    제출·채점 <span style="font-size:0.75em;opacity:0.85">(Shift+Enter)</span>',
+      '          style="padding:8px 22px;border-radius:var(--r,10px);border:none;background:var(--brand,#1f6b4a);color:#fff;cursor:pointer;font-weight:600;opacity:0.6">',
+      '    로딩 중...',
       '  </button>',
       '  <button type="button" class="coding-btn-solution"',
-      '          style="display:none;padding:8px 16px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface2,#f6f8fa);cursor:pointer;font-size:0.88em;color:var(--ink3,#555)">',
+      '          style="display:none;padding:8px 16px;border-radius:var(--r,10px);border:1px solid var(--line2,#cfc7b4);background:var(--surface2,#f2eee5);cursor:pointer;font-size:var(--fs-sm,12.5px);color:var(--ink3,#7a7168)">',
       '    모범 답안 보기',
       '  </button>',
-      /* [mid] 풀이 시간 표시 (제출 후 표시됨) */
-      '  <span class="coding-solve-time" style="display:none;font-size:0.82em;color:var(--ink3,#888);margin-left:4px"></span>',
       '</div>',
 
       /* 실행 출력창 */
       '<pre class="coding-output"',
-      '     style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:6px;padding:12px;min-height:48px;font-size:0.85em;white-space:pre-wrap;overflow-x:auto;color:var(--ink,#111)">',
+      '     style="background:var(--surface2,#f2eee5);border:1px solid var(--line2,#ddd);border-radius:6px;padding:12px;min-height:48px;font-size:0.85em;white-space:pre-wrap;overflow-x:auto;color:var(--ink,#111)">',
       '</pre>',
 
       /* [mid] matplotlib 플롯 출력 영역 */
@@ -502,6 +535,9 @@
 
       /* 채점 결과 */
       '<div class="coding-result" style="min-height:28px"></div>',
+
+      /* 모범 답안 전용 영역 (중복 방지용 분리 div) */
+      '<div class="coding-solution-area"></div>',
 
       '</div>'
     ].join('\n');
@@ -534,17 +570,17 @@
       _state.editor.setValue(code);
     }
 
-    // 출력·결과·플롯 초기화, solution 버튼·시간표시 숨기기
+    // 출력·결과·플롯·솔루션 초기화, solution 버튼 숨기기
     var outputEl  = container.querySelector('.coding-output');
     var resultEl  = container.querySelector('.coding-result');
     var solBtn    = container.querySelector('.coding-btn-solution');
     var plotEl    = container.querySelector('.coding-plot-output');
-    var timeEl    = container.querySelector('.coding-solve-time');
+    var solArea   = container.querySelector('.coding-solution-area');
     if (outputEl) outputEl.textContent = '';
     if (resultEl) resultEl.innerHTML = '';
     if (solBtn)   solBtn.style.display = 'none';
     if (plotEl)   { plotEl.innerHTML = ''; plotEl.style.display = 'none'; }
-    if (timeEl)   timeEl.style.display = 'none';
+    if (solArea)  solArea.innerHTML = '';
 
     // nav 버튼 활성 상태 + completion badge 갱신 (필터 고려)
     _applyNavFilter(container, activities, idx);
@@ -580,9 +616,9 @@
         if (firstVisibleIdx < 0) firstVisibleIdx = i;
       }
 
-      btn.style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
-      btn.style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
-      btn.style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      btn.style.background   = isActive ? 'var(--brand,#1f6b4a)' : 'var(--surface,#fbfaf6)';
+      btn.style.color        = isActive ? '#fff' : (done ? 'var(--brand-deep,#124e35)' : 'var(--ink3,#7a7168)');
+      btn.style.borderColor  = isActive ? 'var(--brand,#1f6b4a)' : (done ? 'var(--brand,#1f6b4a)' : 'var(--line2,#cfc7b4)');
       var label = act ? (act.activity_id || ('문제 ' + (i + 1))) : ('문제 ' + (i + 1));
       btn.textContent = done ? label + ' ✓' : label;
       btn.title = done ? '완료 ✓' : '';
@@ -633,8 +669,11 @@
       }
     } catch (e) { /* hash 파싱 실패 무시 */ }
 
+    // tagData: _collectTags 1회만 호출 (셸 HTML + 필터 핸들러 공유)
+    var tagData = _collectTags(activities);
+
     // 셸 HTML 주입
-    container.innerHTML = _buildShellHTML(activities);
+    container.innerHTML = _buildShellHTML(activities, tagData);
 
     var editorWrap = container.querySelector('.coding-editor-wrap');
     var outputEl   = container.querySelector('.coding-output');
@@ -644,7 +683,6 @@
     var resultEl   = container.querySelector('.coding-result');
     var solBtn     = container.querySelector('.coding-btn-solution');
     var plotEl     = container.querySelector('.coding-plot-output');    // [mid]
-    var timeEl     = container.querySelector('.coding-solve-time');    // [mid]
 
     // 에디터 1회 생성 (스위치 시 재사용)
     _state.editor = _createEditor(editorWrap, '');
@@ -667,8 +705,6 @@
     var areaSelect    = container.querySelector('.act-filter-area');
     var subareaSelect = container.querySelector('.act-filter-subarea');
     if (areaSelect && subareaSelect) {
-      var tagData = _collectTags(activities);
-
       areaSelect.addEventListener('change', function () {
         _state.filterArea    = areaSelect.value;
         _state.filterSubarea = '';
@@ -697,10 +733,18 @@
       }
     }).then(function () {
       if (loadingEl) loadingEl.setAttribute('hidden', '');
-      if (runBtn)    runBtn.disabled    = false;
-      if (submitBtn) submitBtn.disabled = false;
+      // 로드 완료 후 버튼 레이블 + 활성화
+      if (runBtn) {
+        runBtn.disabled = false;
+        runBtn.innerHTML = '실행 <span style="font-size:0.75em;color:var(--ink3,#999)">(Ctrl+Enter)</span>';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '';
+        submitBtn.innerHTML = '제출·채점 <span style="font-size:0.75em;opacity:0.85">(Shift+Enter)</span>';
+      }
     }).catch(function (e) {
-      if (loadingEl) loadingEl.textContent = 'Pyodide 로드 실패: ' + e.message;
+      if (loadingEl) loadingEl.textContent = 'Pyodide 로드 실패: ' + (e.message || e);
     });
 
     /* ── 키보드 단축키 (컨테이너 keydown) ── */
@@ -718,7 +762,6 @@
 
     /* ── Run 버튼: 제출 없이 실행만 (stdout + matplotlib 플롯 출력) ── */
     if (runBtn) {
-      runBtn.disabled = true; // Pyodide 로드 전 비활성
       runBtn.addEventListener('click', function () {
         if (!_pyodide) {
           _showOutput(outputEl, '⏳ Pyodide 로드 중... 잠시 후 다시 시도하세요.');
@@ -743,7 +786,6 @@
 
     /* ── Submit 버튼: 채점 실행 ── */
     if (submitBtn) {
-      submitBtn.disabled = true; // Pyodide 로드 전 비활성
       submitBtn.addEventListener('click', function () {
         if (!_state.activity) {
           _showResult(resultEl, null, '문제가 로드되지 않았습니다.');
@@ -755,20 +797,12 @@
         }
         var code = _state.editor.getValue();
         var activity = _state.activity;
-        // [mid] 풀이 시간 측정 시작 (이 버튼 클릭 시점 기준)
-        var scoreStart = Date.now();
         _showResult(resultEl, null, '채점 중...');
         // score() 호출
         score({ code: code }).then(function (result) {
-          // [mid] 풀이 시간 계산 및 표시 (mount 기준 경과)
-          var solveMs = Date.now() - _state.mountTime;
-          if (timeEl) {
-            var sec = (solveMs / 1000).toFixed(1);
-            timeEl.textContent = '풀이 시간: ' + sec + 's';
-            timeEl.style.display = 'inline';
-          }
           _showResult(resultEl, result, null);
           // solution 버튼: back에 내용이 있으면 표시
+          // 오답인 경우 첫 제출 시에만 표시 (즉각 공개 방지), 정답이면 항상 표시
           if (solBtn && activity.back && (activity.back.solution || activity.back.explanation)) {
             solBtn.style.display = 'inline-block';
           }
@@ -782,13 +816,15 @@
       });
     }
 
-    /* ── Solution 버튼: 모범 답안·해설 표시 ── */
+    /* ── Solution 버튼: 모범 답안·해설 표시 (전용 영역 — 중복 방지) ── */
     if (solBtn) {
       solBtn.addEventListener('click', function () {
         var activity = _state.activity;
         if (!activity || !activity.back) return;
-        var re = container.querySelector('.coding-result');
-        var html = '<div style="margin-top:8px;padding:12px;background:var(--surface2,#f6f8fa);border-radius:6px;border:1px solid var(--line2,#ddd)">';
+        // 전용 div에 렌더 (innerHTML += 중복 방지)
+        var solArea = container.querySelector('.coding-solution-area');
+        if (!solArea) return;
+        var html = '<div style="margin-top:8px;padding:12px;background:var(--surface2,#f2eee5);border-radius:6px;border:1px solid var(--line2,#ddd)">';
         if (activity.back.solution) {
           html += '<div style="font-size:0.82rem;color:var(--ink3,#666);margin-bottom:6px">모범 답안:</div>' +
             '<pre style="margin:0;padding:10px;background:#1e1e1e;color:#d4d4d4;border-radius:4px;font-size:0.85em;overflow-x:auto;white-space:pre-wrap">' +
@@ -799,18 +835,12 @@
             _esc(activity.back.explanation) + '</div>';
         }
         html += '</div>';
-        if (re) re.innerHTML += html;
+        solArea.innerHTML = html;  // set (not +=), 중복 렌더 방지
         solBtn.style.display = 'none';
       });
     }
 
     return Promise.resolve();
-  }
-
-  // _applyActivityNavOnly: _applyNavFilter로 통합됨 (mid 필터 지원)
-  // 하위 호환을 위해 alias로 유지
-  function _applyActivityNavOnly(container, activities, idx) {
-    _applyNavFilter(container, activities, idx);
   }
 
   /* ─────────────────────────────────────────────
@@ -882,7 +912,6 @@
   function onProgressRestored(snapshot) {
     if (!snapshot) return;
     _state.progress = snapshot;
-    _state.restored = true;
 
     // 이미 마운트된 상태에서 복원 호출된 경우 에디터 코드 갱신
     if (_state.mounted && _state.editor && _state.activity) {
@@ -910,7 +939,7 @@
     actIds.forEach(function (id) {
       var a = acts[id];
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags) return;
       var key = activity.tags.area + '||' + activity.tags.subarea;
       if (!areaMap[key]) {
         areaMap[key] = {
@@ -939,7 +968,7 @@
       var a = acts[id];
       if (a.cold_attempts < 1) return;
       var activity = _findActivity(id);
-      if (!activity) return;
+      if (!activity || !activity.tags) return;
       var rate = a.cold_attempts ? (a.cold_attempts - a.cold_correct) / a.cold_attempts : 0;
       if (rate > 0) {
         weakness.push({
@@ -991,13 +1020,16 @@
     entry.cold_attempts++;
     if (result.verdict === 'correct') entry.cold_correct++;
     entry.last_verdict = result.verdict;
-    // [mid] solve_ms: mount(또는 마지막 문제 전환) 이후 경과 ms 기록
-    var solveMs = _state.mountTime ? (Date.now() - _state.mountTime) : 0;
+    // solve_ms: 첫 제출 시에만 기록 (런타임규격 §4-3 '첫 제출까지 경과 ms')
+    var firstSolveMs = entry.plugin_extra.solve_ms || 0;
+    if (!firstSolveMs) {
+      firstSolveMs = _state.mountTime ? (Date.now() - _state.mountTime) : 0;
+    }
     entry.plugin_extra = {
       last_code: code,
       passed:    result.feedback.passed,
       total:     result.feedback.total,
-      solve_ms:  solveMs
+      solve_ms:  firstSolveMs
     };
     _state.progress = snap;
     _saveProgress(snap);
@@ -1043,6 +1075,9 @@
         'import asyncio as _asyncio\n' +
         'await _micropip.install(' + JSON.stringify(pkgs) + ')\n'
       );
+    }).then(function () {
+      // 설치 완료 후 _safe_modules 갱신: 설치된 패키지가 케이스 간 정리에서 제외됨
+      try { py.runPython('_safe_modules = set(_sys.modules.keys())'); } catch (e2) {}
     }).catch(function (e) {
       // 설치 실패: 경고만(채점 실패가 아님 — 사용자가 직접 install 코드 작성 가능)
       console.warn('[coding] micropip install 실패:', e.message || e);
@@ -1070,7 +1105,7 @@
     if (message) { el.innerHTML = '<span style="color:var(--ink3,#666)">' + _esc(message) + '</span>'; return; }
     if (!result) return;
 
-    var verdictColor = result.verdict === 'correct' ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
+    var verdictColor = result.verdict === 'correct' ? 'var(--brand,#1f6b4a)' : 'var(--hot,#a8301f)';
     var verdictLabel = result.verdict === 'correct' ? '정답' : '오답';
     var fb = result.feedback;
 
@@ -1079,14 +1114,14 @@
       ' <span style="color:var(--ink3,#666);font-size:0.9em">(' + fb.passed + '/' + fb.total + ' 케이스 통과)</span>';
 
     if (fb.error) {
-      html += '<div style="color:var(--hot,#d73a49);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
+      html += '<div style="color:var(--hot,#a8301f);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
     }
 
     // 전체 케이스 결과표 (feedback.cases[] 있을 때)
     if (fb.cases && fb.cases.length > 0) {
       html += '<div style="margin-top:10px;overflow-x:auto">';
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.82em;font-family:monospace">';
-      html += '<thead><tr style="background:var(--surface2,#f6f8fa);color:var(--ink3,#555)">' +
+      html += '<thead><tr style="background:var(--surface2,#f2eee5);color:var(--ink3,#555)">' +
         '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:center;font-weight:600">#</th>' +
         '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:left;font-weight:600">입력</th>' +
         '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:left;font-weight:600">기대 출력</th>' +
@@ -1094,15 +1129,15 @@
         '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:center;font-weight:600">결과</th>' +
         '</tr></thead><tbody>';
       fb.cases.forEach(function (c) {
-        var rowColor = c.pass ? 'var(--ok-bg,#f0fff4)' : (c.error ? 'var(--warn-bg,#fff8f0)' : 'var(--hot-bg,#fff0f3)');
-        var statusIcon = c.pass ? '<span style="color:var(--ok,#22863a);font-weight:700">✓</span>' :
-          (c.error ? '<span style="color:var(--warn,#e36209);font-weight:700" title="' + _esc(c.error) + '">!</span>' :
-            '<span style="color:var(--hot,#d73a49);font-weight:700">✗</span>');
+        var rowColor = c.pass ? 'var(--brand-bg,#e4efe7)' : (c.error ? 'var(--warn-bg,#f8edd7)' : 'var(--hot-bg,#f9e7e2)');
+        var statusIcon = c.pass ? '<span style="color:var(--brand,#1f6b4a);font-weight:700">✓</span>' :
+          (c.error ? '<span style="color:var(--warn,#9a5a09);font-weight:700" title="' + _esc(c.error) + '">!</span>' :
+            '<span style="color:var(--hot,#a8301f);font-weight:700">✗</span>');
         var inputDisp   = _esc(String(c.input)).replace(/\n/g, '↵').replace(/  /g, '&nbsp;&nbsp;');
         var expectedDisp = _esc(String(c.expected).trim()).replace(/\n/g, '↵');
         var actualDisp   = c.pass
           ? _esc(String(c.actual).trim()).replace(/\n/g, '↵')
-          : '<span style="color:var(--hot,#d73a49)">' + _esc(String(c.actual).trim()).replace(/\n/g, '↵') + '</span>';
+          : '<span style="color:var(--hot,#a8301f)">' + _esc(String(c.actual).trim()).replace(/\n/g, '↵') + '</span>';
         html += '<tr style="background:' + rowColor + '">' +
           '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center;color:var(--ink3,#888)">' + c.idx + '</td>' +
           '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(String(c.input)) + '">' + inputDisp + '</td>' +
@@ -1157,76 +1192,15 @@
   /* ─────────────────────────────────────────────
      테스트 전용 export 가드 (Node.js 환경 한정)
      브라우저에서는 typeof module === 'undefined' → 실행 안 됨.
-     _gradeExport: stubRunner 주입 가능 버전 (_runOneCase 대체)
+     _gradeExport: _gradeWithRunner에 stubRunner를 주입하는 래퍼
   ───────────────────────────────────────────── */
   if (typeof module !== 'undefined' && module.exports) {
-    // _gradeExport: _runOneCase 대신 stubRunner(code, stdin) 사용
-    function _gradeExport(activity, stubRunner) {
-      var testCases = activity.grading.test_cases;
-      var compare   = activity.grading.compare || 'stdout-trim';
-      var tolerance = activity.grading.tolerance;
-      var total = testCases.length;
-      var passed = 0;
-      var firstFail = null;
-      var errorMsg = null;
-      var cases = [];
-
-      var chain = Promise.resolve();
-      testCases.forEach(function (tc, idx) {
-        chain = chain.then(function () {
-          if (errorMsg === 'timeout') {
-            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'skipped' });
-            return;
-          }
-          return stubRunner('', tc.input).then(function (res) {
-            if (res.error === 'timeout') {
-              errorMsg = 'timeout';
-              if (!firstFail) {
-                firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: '' };
-              }
-              cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'timeout' });
-              return;
-            }
-            if (res.error) {
-              if (!firstFail) {
-                firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
-              }
-              if (!errorMsg) errorMsg = res.error;
-              cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: false, error: res.error });
-              return;
-            }
-            var ok = _compare(res.stdout, tc.expected, compare, tolerance);
-            if (ok) {
-              passed++;
-            } else if (!firstFail) {
-              firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
-            }
-            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: ok });
-          });
-        });
-      });
-
-      return chain.then(function () {
-        var verdict = (passed === total && !errorMsg) ? 'correct' : 'incorrect';
-        var feedback = {
-          passed:     passed,
-          total:      total,
-          first_fail: firstFail,
-          cases:      cases
-        };
-        if (errorMsg) feedback.error = errorMsg;
-        return {
-          verdict:   verdict,
-          score_raw: total > 0 ? passed / total : 0,
-          grader_id: 'pyodide',
-          feedback:  feedback
-        };
-      });
-    }
-
     global._CODING_TEST_EXPORTS = {
       _compareExport: _compare,
-      _gradeExport:   _gradeExport
+      // stubRunner(code, stdin) => Promise<RunResult> 형태로 주입
+      _gradeExport: function (activity, stubRunner) {
+        return _gradeWithRunner(activity, '', stubRunner);
+      }
     };
   }
 

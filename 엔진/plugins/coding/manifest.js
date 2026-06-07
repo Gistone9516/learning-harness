@@ -41,10 +41,9 @@
 
   registerManifest();
 
-  // MANIFEST 아직 없는 경우 안전망 (로드 순서 역전 대비)
-  if (!window.MANIFEST) {
-    window.addEventListener('DOMContentLoaded', registerManifest);
-  }
+  // 안전망: 로드 순서 역전 시에도 복구되도록 항상 등록
+  // registerManifest() 내부에서 window.MANIFEST 없으면 조용히 return되므로 중복 등록 무해
+  window.addEventListener('DOMContentLoaded', registerManifest);
 
   // 외부 참조용 전역 노출 (선택적 — 검증 편의)
   window.MANIFEST_CODING = CODING_MANIFEST;

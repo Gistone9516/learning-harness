@@ -102,9 +102,16 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
             except ClientError as role_exc:
                 role_code = role_exc.response["Error"]["Code"]
                 if role_code not in ("NoSuchEntity", "NoSuchEntityException"):
-                    raise
-            client.get_user(UserName=identifier)
-            return True, f"IAM 사용자 '{identifier}' 존재함"
+                    # AccessDenied, Throttling 등 — '리소스 없음'으로 오인 방지
+                    return False, f"IAM 조회 오류(권한/기타): {role_code}"
+            try:
+                client.get_user(UserName=identifier)
+                return True, f"IAM 사용자 '{identifier}' 존재함"
+            except ClientError as user_exc:
+                user_code = user_exc.response["Error"]["Code"]
+                if user_code not in ("NoSuchEntity", "NoSuchEntityException"):
+                    return False, f"IAM 조회 오류(권한/기타): {user_code}"
+                return False, f"IAM 역할/사용자 '{identifier}' 없음"
 
         elif service == "dynamodb":
             client.describe_table(TableName=identifier)
@@ -117,13 +124,9 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
 
         elif service == "sns":
             # identifier = 토픽 이름 (TopicName); list_topics 페이지네이션으로 확인
-            paginator = client.get_paginator("list_topics")
-            for page in paginator.paginate():
-                for topic in page.get("Topics", []):
-                    arn = topic.get("TopicArn", "")
-                    # ARN 마지막 세그먼트가 토픽 이름
-                    if arn.split(":")[-1] == identifier:
-                        return True, f"SNS 토픽 '{identifier}' 존재함 (ARN: {arn})"
+            topic_arn = _find_sns_topic_arn(client, identifier)
+            if topic_arn:
+                return True, f"SNS 토픽 '{identifier}' 존재함 (ARN: {topic_arn})"
             return False, f"SNS 토픽 '{identifier}' 없음"
 
         else:
@@ -133,6 +136,27 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
         code = exc.response["Error"]["Code"]
         msg  = exc.response["Error"].get("Message", "")
         return False, f"리소스 없음 (오류코드: {code} — {msg})"
+
+
+# ─────────────────────────────────────────────
+# 내부 헬퍼
+# ─────────────────────────────────────────────
+
+def _find_sns_topic_arn(client, topic_name: str) -> str | None:
+    """토픽 이름으로 SNS ARN을 탐색. 없으면 None.
+
+    FIFO 토픽(.fifo 접미사)도 매칭 — identifier에 접미사 유무 무관하게 허용.
+    3곳(resource-exists / sns_attributes / _fetch_resource_config)의 중복 로직을 단일화.
+    """
+    paginator = client.get_paginator("list_topics")
+    for page in paginator.paginate():
+        for topic in page.get("Topics", []):
+            arn = topic.get("TopicArn", "")
+            topic_suffix = arn.split(":")[-1]
+            # 정확 매칭 또는 FIFO 접미사 포함 매칭
+            if topic_suffix == topic_name or topic_suffix == topic_name + ".fifo":
+                return arn
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -166,14 +190,15 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
         "ec2_state", "ec2_tags", "sns_attributes",
     }
     exp_keys = set(expected.keys())
+    # 클라이언트를 한 번만 생성해 alias/dot-notation 양쪽에 전달 (중복 생성 제거)
+    client = make_client(service)
     if len(exp_keys) == 1 and exp_keys.issubset(alias_keys):
         alias_key = next(iter(exp_keys))
         exp_val   = expected[alias_key]
-        ok, msg   = _check_alias(service, identifier, alias_key, exp_val)
+        ok, msg   = _check_alias(client, service, identifier, alias_key, exp_val)
         return ok, msg
 
     # 일반 dot-notation 경로 처리
-    client = make_client(service)
     try:
         actual_root = _fetch_resource_config(client, service, identifier)
     except ClientError as exc:
@@ -199,15 +224,15 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     return False, f"'{identifier}' 속성 불일치 — {summary}"
 
 
-def _check_alias(service: str, identifier: str, alias_key: str, exp_val) -> tuple[bool, str]:
-    """축약키 별칭 핸들러."""
-    client = make_client(service)
+def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val) -> tuple[bool, str]:
+    """축약키 별칭 핸들러. client는 호출자(_config_equals)가 생성해 전달 — 중복 생성 방지."""
     try:
         if alias_key == "versioning":
             # S3 버전 관리 상태 확인
             resp = client.get_bucket_versioning(Bucket=identifier)
             resp.pop("ResponseMetadata", None)
-            # exp_val 예: {"Status": "Enabled"} 또는 단순 문자열 "Enabled"
+            # exp_val 예: {"Status": "Enabled"} — dict 형식이 정규(생성규칙.md §8-2 SoT)
+            # str 형식("Enabled")은 구형 호환 경로로만 유지 — deprecated, 신규 데이터 생성 금지
             if isinstance(exp_val, str):
                 actual = resp.get("Status", "")
                 ok     = actual == exp_val
@@ -307,11 +332,20 @@ def _check_alias(service: str, identifier: str, alias_key: str, exp_val) -> tupl
                 return False, "iam_policy_attached: expected는 dict이어야 함"
             policy_arn = exp_val.get("policy_arn", "")
             if "role" in exp_val:
-                resp = client.list_attached_role_policies(RoleName=exp_val["role"])
-                attached = [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+                # IAM 정책 수가 많을 때 Truncated 발생 — paginator로 전체 조회
+                paginator = client.get_paginator("list_attached_role_policies")
+                attached = [
+                    p["PolicyArn"]
+                    for page in paginator.paginate(RoleName=exp_val["role"])
+                    for p in page.get("AttachedPolicies", [])
+                ]
             elif "user" in exp_val:
-                resp = client.list_attached_user_policies(UserName=exp_val["user"])
-                attached = [p["PolicyArn"] for p in resp.get("AttachedPolicies", [])]
+                paginator = client.get_paginator("list_attached_user_policies")
+                attached = [
+                    p["PolicyArn"]
+                    for page in paginator.paginate(UserName=exp_val["user"])
+                    for p in page.get("AttachedPolicies", [])
+                ]
             else:
                 return False, "iam_policy_attached: expected에 'role' 또는 'user' 키 필요"
             ok = policy_arn in attached
@@ -351,16 +385,7 @@ def _check_alias(service: str, identifier: str, alias_key: str, exp_val) -> tupl
         elif alias_key == "sns_attributes":
             # exp_val: {"DisplayName": "..."} 등 토픽 속성 dict
             # identifier = 토픽 이름; ARN을 먼저 찾아야 함
-            topic_arn = None
-            paginator = client.get_paginator("list_topics")
-            for page in paginator.paginate():
-                for topic in page.get("Topics", []):
-                    arn = topic.get("TopicArn", "")
-                    if arn.split(":")[-1] == identifier:
-                        topic_arn = arn
-                        break
-                if topic_arn:
-                    break
+            topic_arn = _find_sns_topic_arn(client, identifier)
             if not topic_arn:
                 return False, f"SNS 토픽 '{identifier}' 없음"
             attrs_resp = client.get_topic_attributes(TopicArn=topic_arn)
@@ -435,16 +460,7 @@ def _fetch_resource_config(client, service: str, identifier: str) -> dict:
 
     elif service == "sns":
         # identifier = 토픽 이름; ARN 검색 후 속성 반환
-        topic_arn = None
-        paginator = client.get_paginator("list_topics")
-        for page in paginator.paginate():
-            for topic in page.get("Topics", []):
-                arn = topic.get("TopicArn", "")
-                if arn.split(":")[-1] == identifier:
-                    topic_arn = arn
-                    break
-            if topic_arn:
-                break
+        topic_arn = _find_sns_topic_arn(client, identifier)
         if not topic_arn:
             raise ClientError(
                 {"Error": {"Code": "NotFound", "Message": f"SNS 토픽 '{identifier}' 없음"}},

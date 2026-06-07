@@ -42,6 +42,7 @@ if (typeof module !== 'undefined' && module.exports && module.exports._pure) {
     if (typeof s !== 'string') return '';
     return s
       .toLowerCase()
+      .replace(/[‘’‚‛]/g, "'")
       .replace(/[.,!?;:'"()\[\]{}—\-]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -49,21 +50,9 @@ if (typeof module !== 'undefined' && module.exports && module.exports._pure) {
   function tokenize(s) {
     return normalize(s).split(' ').filter(function(t) { return t.length > 0; });
   }
-  function _lcsLength(a, b) {
-    var m = a.length, n = b.length;
-    if (m > 200) throw new Error('dictation-diff: expected 단어 수 200 초과 (' + m + ')');
-    var dp = [];
-    for (var i = 0; i <= m; i++) dp.push(new Array(n + 1).fill(0));
-    for (var i = 1; i <= m; i++) {
-      for (var j = 1; j <= n; j++) {
-        if (a[i-1] === b[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
-        else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
-      }
-    }
-    return dp[m][n];
-  }
   function _wordDiff(expected, actual) {
     var m = expected.length, n = actual.length;
+    if (m > 200) throw new Error('dictation-diff: expected 단어 수 200 초과 (' + m + ')');
     var dp = [];
     for (var i = 0; i <= m; i++) dp.push(new Array(n + 1).fill(0));
     for (var i = 1; i <= m; i++) {
@@ -127,8 +116,8 @@ if (typeof module !== 'undefined' && module.exports && module.exports._pure) {
     var actTokens = tokenize(userText);
     var lcsLen, diffDetail;
     try {
-      lcsLen = _lcsLength(expTokens, actTokens);
       diffDetail = _wordDiff(expTokens, actTokens);
+      lcsLen = diffDetail.filter(function(d) { return d.status === 'match'; }).length;
     } catch(e) {
       return { verdict: 'incorrect', score_raw: 0, grader_id: 'engine', feedback: { error: e.message } };
     }
@@ -158,8 +147,6 @@ if (typeof module !== 'undefined' && module.exports && module.exports._pure) {
         newInterval = 1;
       } else if (interval <= 1) {
         newInterval = 6;
-      } else if (interval <= 6) {
-        newInterval = 6;
       } else {
         newInterval = Math.round(interval * newEF);
       }
@@ -169,10 +156,10 @@ if (typeof module !== 'undefined' && module.exports && module.exports._pure) {
     return { sm2_interval: newInterval, sm2_efactor: newEF, due_at: dueAt };
   }
 
-  _pure = { normalize, tokenize, _lcsLength, _wordDiff, _scoreExact, _scoreKeyword, _scoreDictationDiff, _sm2Update };
+  _pure = { normalize, tokenize, _wordDiff, _scoreExact, _scoreKeyword, _scoreDictationDiff, _sm2Update };
 }
 
-var { normalize, tokenize, _lcsLength, _wordDiff, _scoreExact, _scoreKeyword, _scoreDictationDiff, _sm2Update } = _pure;
+var { normalize, tokenize, _wordDiff, _scoreExact, _scoreKeyword, _scoreDictationDiff, _sm2Update } = _pure;
 
 /* ─────────────────────────────────────────
    픽스처 (목업액티비티 인라인)
@@ -282,6 +269,9 @@ test('비문자열 입력 (number)', function() {
 });
 test('하이픈 제거', function() {
   eq(normalize('well-being'), 'wellbeing');
+});
+test('유니코드 어포스트로피(U+2019) → 제거 (STT 출력 대응)', function() {
+  eq(normalize('don’t'), 'dont');
 });
 
 /* ═══════════════════════════════════════
@@ -478,18 +468,23 @@ test('LCS 200단어 초과 에러', function() {
   var r = _scoreDictationDiff(act, 'hello');
   assert(r.feedback.error, 'error on 200+ words');
 });
-test('LCS 정확성: "a b c d" vs "a c d" → 3/4', function() {
+test('LCS 정확성: "a b c d" vs "a c d" → 3/4 (match count from _wordDiff)', function() {
   var exp = tokenize('a b c d');
   var act = tokenize('a c d');
-  var lcs = _lcsLength(exp, act);
+  var diff = _wordDiff(exp, act);
+  var lcs = diff.filter(function(d) { return d.status === 'match'; }).length;
   eq(lcs, 3);
 });
 test('LCS 빈 actual → 0', function() {
   var exp = tokenize('a b c');
-  eq(_lcsLength(exp, []), 0);
+  var diff = _wordDiff(exp, []);
+  var lcs = diff.filter(function(d) { return d.status === 'match'; }).length;
+  eq(lcs, 0);
 });
 test('LCS 빈 expected → 0', function() {
-  eq(_lcsLength([], tokenize('a b c')), 0);
+  var diff = _wordDiff([], tokenize('a b c'));
+  var lcs = diff.filter(function(d) { return d.status === 'match'; }).length;
+  eq(lcs, 0);
 });
 test('wordDiff: miss 토큰 확인', function() {
   var exp = tokenize('the cat sat on the mat');
@@ -532,9 +527,11 @@ test('interval=1 정답 → interval=6 (두 번째 correct)', function() {
   var r = _sm2Update({ sm2_interval: 1, sm2_efactor: 2.5 }, 'correct');
   eq(r.sm2_interval, 6);
 });
-test('interval=6 정답 → interval=6 (세 번째 correct 단계, 6 보존)', function() {
+test('interval=6 정답 → EF 곱으로 확장 (SM-2 n≥3, dead branch 제거)', function() {
+  // 수정 전: <= 6 분기가 EF를 무시하고 6 고정. 수정 후: Math.round(6 * EF) 적용.
+  // EF=2.5 → newEF=2.6 → Math.round(6 * 2.6) = 16
   var r = _sm2Update({ sm2_interval: 6, sm2_efactor: 2.5 }, 'correct');
-  eq(r.sm2_interval, 6);
+  assert(r.sm2_interval > 6, 'interval should expand beyond 6 via EF: got ' + r.sm2_interval);
 });
 test('interval=7 정답 → interval>6 (EF 적용 확장)', function() {
   var r = _sm2Update({ sm2_interval: 7, sm2_efactor: 2.5 }, 'correct');

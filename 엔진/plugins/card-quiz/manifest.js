@@ -24,11 +24,12 @@
 
   // window.MANIFEST[subject].plugins 배열에 자신을 등록.
   // manifest.js(생성물)가 먼저 로드되어 있어야 함.
-  // 아직 로드 안 된 경우 DOMContentLoaded 이전에 실행되더라도
-  // window.MANIFEST 자체는 생성물 manifest.js가 등록해 줌.
   function registerManifest() {
     var reg = window.MANIFEST;
-    if (!reg) return;
+    if (!reg) {
+      console.warn('[card-quiz] window.MANIFEST 없음 — 플러그인 등록 실패');
+      return;
+    }
     Object.keys(reg).forEach(function (subjectId) {
       var subj = reg[subjectId];
       if (!Array.isArray(subj.plugins)) subj.plugins = [];
@@ -43,8 +44,14 @@
   // 생성물 manifest.js 이후 로드되므로 즉시 실행 가능
   registerManifest();
 
-  // 혹시 MANIFEST가 아직 없는 경우 대비 (로드 순서 안전망)
+  // DOMContentLoaded 이미 발화된 경우에도 동작하도록 readyState 확인 후 등록
+  // (동적 script 삽입, async 로드 등 DOMContentLoaded 발화 후 이 파일이 실행될 때 대비)
   if (!window.MANIFEST) {
-    window.addEventListener('DOMContentLoaded', registerManifest);
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', registerManifest);
+    } else {
+      // 이미 DOMContentLoaded 발화됨 → 즉시 재시도 (MANIFEST가 뒤늦게 생긴 경우)
+      registerManifest();
+    }
   }
 })();

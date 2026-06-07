@@ -20,7 +20,7 @@ window.MANIFEST_EXCEL = {
   label:                   '엑셀 실습',
   version:                 '1.0.0',
   infra:                   'static',      // Univer CDN, 서버·키 불요 (런타임규격 §1)
-  entry_url:               undefined,
+  entry_url:               null,
   byok:                    null,
   capabilities:            ['sheet'],
   scoring_mode:            'auto',

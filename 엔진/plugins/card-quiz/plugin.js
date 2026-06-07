@@ -40,15 +40,20 @@
       correctCount: 0,
       incorrectCards: []  // [{card_id, prompt}]
     },
-    // mid: 일시정지 카드 목록 (localStorage 키: clf:plugin_extra:disabled_cards)
-    disabledCards: null   // Set<card_id>, 로드 후 초기화
+    // mid: 일시정지 카드 목록 (localStorage 키: clf:plugin_extra:disabled_cards:<subject>)
+    disabledCards: null,  // Set<card_id>, 로드 후 초기화
+    // self 모드: btn-reveal 후 O/X 클릭 전까지 다음 카드 이동 막는 플래그
+    _selfPendingVerdict: false
   };
 
-  var DISABLED_CARDS_KEY = 'clf:plugin_extra:disabled_cards';
+  function _disabledCardsKey() {
+    var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
+    return 'clf:plugin_extra:disabled_cards:' + subject;
+  }
 
   function _loadDisabledCards() {
     try {
-      var raw = localStorage.getItem(DISABLED_CARDS_KEY);
+      var raw = localStorage.getItem(_disabledCardsKey());
       _state.disabledCards = raw ? new Set(JSON.parse(raw)) : new Set();
     } catch (e) {
       _state.disabledCards = new Set();
@@ -57,7 +62,7 @@
 
   function _saveDisabledCards() {
     try {
-      localStorage.setItem(DISABLED_CARDS_KEY, JSON.stringify(Array.from(_state.disabledCards)));
+      localStorage.setItem(_disabledCardsKey(), JSON.stringify(Array.from(_state.disabledCards)));
     } catch (e) { /* quota 실패 무시 */ }
   }
 
@@ -72,13 +77,13 @@
   function _buildHTML() {
     return [
       /* 단원 집중 필터 패널 */
-      '<div id="unit-filter-panel" style="margin-bottom:10px;padding:8px 12px;background:#f0f4ff;border-radius:6px;font-size:0.85em;display:none;" aria-label="단원 필터">',
-      '  <strong style="display:block;margin-bottom:6px;">단원 필터 <span id="unit-filter-active-badge" style="display:none;color:#1976d2;font-size:0.9em;">(적용 중)</span></strong>',
+      '<div id="unit-filter-panel" style="margin-bottom:10px;padding:8px 12px;background:var(--brand-bg,#e4efe7);border-radius:var(--r,10px);font-size:var(--fs-sm,12.5px);display:none;" aria-label="단원 필터">',
+      '  <strong style="display:block;margin-bottom:6px;">단원 필터 <span id="unit-filter-active-badge" style="display:none;color:var(--brand-deep,#124e35);font-size:0.9em;">(적용 중)</span></strong>',
       '  <div id="unit-filter-checkboxes" style="display:flex;flex-wrap:wrap;gap:6px;"></div>',
       '  <div style="margin-top:6px;display:flex;gap:6px;">',
-      '    <button type="button" id="btn-unit-filter-all" style="padding:2px 8px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;font-size:0.9em;">전체 선택</button>',
-      '    <button type="button" id="btn-unit-filter-none" style="padding:2px 8px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;font-size:0.9em;">전체 해제</button>',
-      '    <button type="button" id="btn-unit-filter-apply" style="padding:2px 10px;border:1px solid #1976d2;border-radius:4px;background:#1976d2;color:#fff;cursor:pointer;font-size:0.9em;">적용</button>',
+      '    <button type="button" id="btn-unit-filter-all" class="btn-quiz-aux">전체 선택</button>',
+      '    <button type="button" id="btn-unit-filter-none" class="btn-quiz-aux">전체 해제</button>',
+      '    <button type="button" id="btn-unit-filter-apply" style="padding:2px 10px;border:1px solid var(--brand,#1f6b4a);border-radius:var(--r,10px);background:var(--brand,#1f6b4a);color:#fff;cursor:pointer;font-size:var(--fs-sm,12.5px);">적용</button>',
       '  </div>',
       '</div>',
 
@@ -91,14 +96,8 @@
       '       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progress-track-el" style="flex:1;min-width:80px;">',
       '    <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>',
       '  </div>',
-      '  <button type="button" id="btn-dday-toggle" aria-pressed="false"',
-      '          style="font-size:0.75em;padding:2px 8px;border:1px solid #aaa;border-radius:4px;background:#f5f5f5;cursor:pointer;" aria-label="D-day 모드 토글">',
-      '    D-day OFF',
-      '  </button>',
-      '  <button type="button" id="btn-unit-filter-toggle" aria-expanded="false"',
-      '          style="font-size:0.75em;padding:2px 8px;border:1px solid #aaa;border-radius:4px;background:#f5f5f5;cursor:pointer;" aria-label="단원 필터 토글">',
-      '    단원 필터',
-      '  </button>',
+      '  <button type="button" id="btn-dday-toggle" class="btn-dday-toggle" aria-pressed="false" aria-label="D-day 모드 토글">D-day OFF</button>',
+      '  <button type="button" id="btn-unit-filter-toggle" class="btn-quiz-aux" aria-expanded="false" aria-label="단원 필터 토글">단원 필터</button>',
       '</div>',
 
       /* 카드 무대 */
@@ -108,21 +107,19 @@
       '    <p class="card-front__prompt" id="card-front-prompt"></p>',
       '    <!-- 힌트 토글 (front.hint) -->',
       '    <div id="hint-area" hidden style="margin-top:8px;">',
-      '      <button type="button" id="btn-hint-toggle" style="font-size:0.8em;padding:2px 8px;border:1px solid #ccc;border-radius:4px;background:#fafafa;cursor:pointer;" aria-expanded="false">',
-      '        힌트 보기',
-      '      </button>',
-      '      <div id="hint-text" hidden style="margin-top:6px;padding:6px 10px;background:#fffde7;border-left:3px solid #f9a825;font-size:0.9em;border-radius:3px;"></div>',
+      '      <button type="button" id="btn-hint-toggle" class="btn-quiz-aux" aria-expanded="false">힌트 보기</button>',
+      '      <div id="hint-text" hidden style="margin-top:6px;padding:6px 10px;background:var(--warn-bg,#f8edd7);border-left:3px solid var(--warn-line,#e6c587);font-size:var(--fs-sm,12.5px);border-radius:var(--r,10px);"></div>',
       '    </div>',
       '    <!-- judge 객관식 선택지 -->',
-      '    <div id="options-area" hidden style="margin-top:10px;" role="group" aria-label="선택지"></div>',
-      '    <a href="#" data-quiz="concept-link" class="concept-link" id="concept-link-btn" hidden aria-label="연결 개념서 섹션 보기">📖 개념서 보기</a>',
+      '    <div id="options-area" hidden style="margin-top:10px;" role="radiogroup" aria-label="선택지"></div>',
+      '    <button type="button" data-quiz="concept-link" class="concept-link" id="concept-link-btn" hidden aria-label="연결 개념서 섹션 보기"><span aria-hidden="true">📖</span> 개념서 보기</button>',
       '  </div>',
       '  <div data-quiz="card-back" class="card-back" id="card-back" hidden role="region" aria-label="카드 뒷면">',
       '    <div class="card-back__detail prose" id="card-back-detail"></div>',
       '    <div class="card-back__note" id="card-back-note"></div>',
       '    <!-- back.why 근거 -->',
-      '    <div id="back-why-area" hidden style="margin-top:8px;padding:8px 12px;background:#e8f4fd;border-left:3px solid #1976d2;font-size:0.9em;border-radius:3px;">',
-      '      <strong style="font-size:0.85em;color:#1565c0;">정답 근거</strong>',
+      '    <div id="back-why-area" hidden style="margin-top:8px;padding:8px 12px;background:var(--blue-bg,#e6eef8);border-left:3px solid var(--blue,#1d4f86);font-size:var(--fs-sm,12.5px);border-radius:var(--r,10px);">',
+      '      <strong style="font-size:var(--fs-xs,11px);color:var(--blue,#1d4f86);">정답 근거</strong>',
       '      <div id="back-why-text" style="margin-top:4px;"></div>',
       '    </div>',
       '  </div>',
@@ -173,28 +170,18 @@
       '<div class="answer-area" id="nav-area" hidden style="display:flex;flex-direction:column;gap:var(--space-2);">',
       '  <button type="button" class="btn-next" id="btn-next" aria-label="다음 카드">다음 카드 →</button>',
       '  <button type="button" class="btn-skip" id="btn-skip-card" aria-label="이 카드 넘기기">넘기기</button>',
-      '  <button type="button" id="btn-pause-card" style="font-size:0.8em;padding:3px 8px;border:1px solid #e57373;border-radius:4px;background:#fff3f3;color:#c62828;cursor:pointer;" aria-label="이 카드 일시정지">이 카드 보류</button>',
+      '  <button type="button" id="btn-pause-card" class="btn-pause-card" aria-label="이 카드 일시정지">이 카드 보류</button>',
       '</div>',
 
-      /* 진도 내보내기/가져오기 */
-      '<div id="progress-io-area" style="margin-top:16px;padding:10px 12px;background:#f5f5f5;border-radius:6px;font-size:0.85em;">',
-      '  <strong>진도 백업</strong>',
-      '  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center;">',
-      '    <button type="button" id="btn-progress-export" style="padding:3px 10px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;">내보내기</button>',
-      '    <label style="padding:3px 10px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;">',
-      '      가져오기',
-      '      <input type="file" id="input-progress-import" accept=".json" style="display:none;" />',
-      '    </label>',
-      '    <span id="progress-io-msg" style="color:#666;font-size:0.9em;"></span>',
-      '  </div>',
-      '</div>',
+      /* 진도 내보내기/가져오기 입력 (숨김 — 이벤트 바인딩용, UI는 설정 화면에 위임) */
+      '<input type="file" id="input-progress-import" accept=".json" style="display:none;" aria-hidden="true" />',
 
       '</div>', /* /#quiz-active */
 
       /* 세션 완료 요약 위젯 */
-      '<div id="session-summary" hidden style="margin-top:12px;padding:12px 14px;background:#f5f5f5;border-radius:8px;font-size:0.9em;" aria-live="polite">',
-      '  <strong style="font-size:1em;">세션 완료</strong>',
-      '  <div id="session-summary-stats" style="margin-top:6px;color:#444;"></div>',
+      '<div id="session-summary" hidden style="margin-top:12px;padding:12px 14px;background:var(--surface2,#f2eee5);border-radius:var(--r,10px);font-size:var(--fs-sm,12.5px);" aria-live="polite">',
+      '  <strong style="font-size:var(--fs-md,14px);">세션 완료</strong>',
+      '  <div id="session-summary-stats" style="margin-top:6px;color:var(--ink2s,#5a554a);"></div>',
       '  <div id="session-summary-incorrect" style="margin-top:8px;"></div>',
       '</div>',
 
@@ -268,26 +255,25 @@
     var active = $('quiz-active');
     var noD = $('empty-no-deck');
     var allF = $('empty-all-future');
-    if (active) active.style.display = 'none';
+    if (which === null) {
+      // null = quiz-active 복구
+      if (active) active.style.display = '';
+    } else {
+      if (active) active.style.display = 'none';
+    }
     if (noD) noD.setAttribute('hidden', '');
     if (allF) allF.setAttribute('hidden', '');
     if (which && $(which)) $(which).removeAttribute('hidden');
   }
 
-  function showQuizActive() {
-    var active = $('quiz-active');
-    var noD = $('empty-no-deck');
-    var allF = $('empty-all-future');
-    if (active) active.style.display = '';
-    if (noD) noD.setAttribute('hidden', '');
-    if (allF) allF.setAttribute('hidden', '');
-  }
+  function showQuizActive() { showEmpty(null); }
 
   function showStorageError(msg) {
     var el = $('storage-error-area');
     var msgEl = $('storage-error-msg');
     if (msgEl) msgEl.textContent = msg || '로컬 저장소 오류';
     if (el) el.removeAttribute('hidden');
+    // quota 오류 시 설정 화면에서 백업 가능 — 배너 내 링크 버튼으로 안내
   }
 
   function _showIOMsg(msg) {
@@ -309,14 +295,14 @@
       row.style.cssText = 'display:flex;align-items:center;gap:6px;';
       var label = document.createElement('span');
       label.textContent = (i + 1) + '.';
-      label.style.cssText = 'min-width:20px;color:#666;font-size:0.9em;';
+      label.style.cssText = 'min-width:20px;color:var(--ink3);font-size:var(--fs-sm);';
       var inp = document.createElement('input');
       inp.type = 'text';
       inp.setAttribute('data-seq-index', String(i));
       inp.setAttribute('aria-label', '단계 ' + (i + 1));
       inp.setAttribute('autocomplete', 'off');
       inp.setAttribute('spellcheck', 'false');
-      inp.style.cssText = 'flex:1;padding:4px 8px;border:1px solid #ccc;border-radius:4px;';
+      inp.style.cssText = 'flex:1;padding:4px 8px;border:1px solid var(--line2);border-radius:var(--r);';
       inp.placeholder = '단계 ' + (i + 1);
       row.appendChild(label);
       row.appendChild(inp);
@@ -334,24 +320,28 @@
     opts.forEach(function (optText, idx) {
       var btn = document.createElement('button');
       btn.type = 'button';
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', 'false');
       btn.setAttribute('data-option-idx', String(idx));
       btn.setAttribute('data-option-text', optText);
       btn.textContent = optText;
-      btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 12px;margin-bottom:4px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:0.95em;';
-      btn.addEventListener('mouseover', function () { btn.style.background = '#e3f2fd'; });
+      btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 12px;margin-bottom:4px;border:1px solid var(--line2,#cfc7b4);border-radius:var(--r,10px);background:var(--surface,#fbfaf6);cursor:pointer;font-size:var(--fs-md,14px);';
+      btn.addEventListener('mouseover', function () { if (btn.getAttribute('aria-checked') !== 'true') btn.style.background = 'var(--brand-bg,#e4efe7)'; });
       btn.addEventListener('mouseout', function () {
-        if (!btn.getAttribute('data-selected')) btn.style.background = '#fff';
+        if (btn.getAttribute('aria-checked') !== 'true') btn.style.background = 'var(--surface,#fbfaf6)';
       });
       btn.addEventListener('click', function () {
         // 다른 버튼 선택 해제
         qsa('[data-option-idx]', area).forEach(function (b) {
           b.removeAttribute('data-selected');
-          b.style.background = '#fff';
-          b.style.border = '1px solid #ccc';
+          b.setAttribute('aria-checked', 'false');
+          b.style.background = 'var(--surface,#fbfaf6)';
+          b.style.border = '1px solid var(--line2,#cfc7b4)';
         });
         btn.setAttribute('data-selected', '1');
-        btn.style.background = '#bbdefb';
-        btn.style.border = '1px solid #1976d2';
+        btn.setAttribute('aria-checked', 'true');
+        btn.style.background = 'var(--brand-bg,#e4efe7)';
+        btn.style.border = '1px solid var(--brand,#1f6b4a)';
         // exact input에 선택된 텍스트 동기화 (collectAnswer가 읽음)
         var ef = $('input-exact-field');
         if (ef) ef.value = optText;
@@ -409,7 +399,9 @@
         if (mode === 'cloze') renderClozeInputs(card);
       } else {
         console.warn('[E_GRADE_MODE]', mode);
+        // 알 수 없는 mode → self 폴백: 버튼 텍스트도 '정답 보기'로 설정
         if (inputSelf) inputSelf.removeAttribute('hidden');
+        if (btnReveal) btnReveal.textContent = '정답 보기';
       }
     }
   }
@@ -420,7 +412,9 @@
     var spec = card.answer_spec || {};
     var blanks = spec.blanks || [];
     var text = (card.front && card.front.text) || '';
-    var parts = text.split(/\{\{\d+\}\}/);
+    // 규격 §2.4 마커 = {{숫자}} (0-base) 또는 generate.py가 {{정답|별칭}} 형태로 저장할 수도 있음
+    // → {{…}} 내 임의 텍스트를 모두 매칭해 빈칸 분리
+    var parts = text.split(/\{\{[^}]+\}\}/);
     var n = 0;
     parts.forEach(function (seg, i) {
       area.appendChild(document.createTextNode(seg));
@@ -469,8 +463,7 @@
     if (cl) {
       if (card.links && card.links.concept_ref) {
         cl.removeAttribute('hidden');
-        cl.onclick = function (e) {
-          e.preventDefault();
+        cl.onclick = function () {
           _state.conceptTarget = card.links.concept_ref;
           // 셸에 navigation-request 이벤트 emit (concept 화면으로 + 딥링크 ref 전달)
           if (_state.ctx && _state.ctx.emit) {
@@ -583,15 +576,22 @@
     if (verdictDisplay) verdictDisplay.textContent = verdict === 'correct' ? '✓ 정답입니다' : '✕ 다시 확인하세요';
     var detail = '';
     if (verdict === 'incorrect') {
-      // exact 복수정답 피드백: answer_spec.accepted[] 표시 (mid)
       var spec = card.answer_spec || {};
-      var accepted = Array.isArray(spec.accepted) ? spec.accepted : [];
-      if (accepted.length > 0) {
-        detail = '정답 표기: ' + accepted.join(' / ');
-      }
-      // keyword: 놓친 키워드
-      if (!detail && scoreResult && scoreResult.feedback && scoreResult.feedback.highlightMissed && scoreResult.feedback.highlightMissed.length) {
-        detail = '놓친 부분: ' + scoreResult.feedback.highlightMissed.join(', ');
+      if (card.grade_mode === 'cloze') {
+        // cloze 오답: missed 인덱스를 "빈칸 N번" 형식으로 표시
+        if (scoreResult && scoreResult.missed && scoreResult.missed.length) {
+          detail = '오답 빈칸: ' + scoreResult.missed.map(function (idx) { return (parseInt(idx, 10) + 1) + '번'; }).join(', ');
+        }
+      } else {
+        // exact 복수정답 피드백: answer_spec.accepted[] 표시 (mid)
+        var accepted = Array.isArray(spec.accepted) ? spec.accepted : [];
+        if (accepted.length > 0) {
+          detail = '정답 표기: ' + accepted.join(' / ');
+        }
+        // keyword: 놓친 키워드 문자열만 (인덱스 아님)
+        if (!detail && scoreResult && scoreResult.feedback && scoreResult.feedback.highlightMissed && scoreResult.feedback.highlightMissed.length) {
+          detail = '놓친 부분: ' + scoreResult.feedback.highlightMissed.join(', ');
+        }
       }
     }
     if (feedbackDetail) feedbackDetail.textContent = detail;
@@ -601,6 +601,8 @@
   }
 
   function commitAttempt(card, verdict) {
+    // cold 여부: processAttempt 호출 전에 캡처 (이후 seen_card_ids에 추가됨)
+    var isCold = !(_state.session && _state.session.seen_card_ids && _state.session.seen_card_ids.has(card.card_id));
     try {
       window.APP.processAttempt(card.card_id, verdict, _state.session, _state.progressStore, Date.now(), _state.leitnerCfg);
       // §9: getProgressSnapshot/onProgressRestored = 기존 loadProgress/saveProgress 래핑
@@ -611,10 +613,8 @@
       if (e && e.name === 'StorageQuotaError') showStorageError(e.message);
       else console.error('[attempt]', e);
     }
-    // mid: 세션 완료 요약 통계 누적
-    if (verdict === 'correct' || verdict === 'incorrect') {
-      // cold 첫 시도만 집계 (재큐 warm 제외) → seen 여부로 판정
-      // processAttempt 이후 seen_card_ids에 들어갔으므로 이전 크기로 판별 불가 → 항상 누적
+    // mid: 세션 완료 요약 통계 누적 — cold 첫 시도만 집계
+    if (isCold && (verdict === 'correct' || verdict === 'incorrect')) {
       if (verdict === 'correct') {
         _state.sessionStats.correctCount++;
       } else {
@@ -662,7 +662,7 @@
         incorrectEl.textContent = '오답 없음 — 완벽합니다!';
         incorrectEl.style.color = '#388e3c';
       } else {
-        var html = '<strong style="color:#c62828;">오답 카드 (' + stats.incorrectCards.length + '개):</strong><ul style="margin:4px 0 0 16px;padding:0;">';
+        var html = '<strong style="color:var(--hot,#a8301f);">오답 카드 (' + stats.incorrectCards.length + '개):</strong><ul style="margin:4px 0 0 16px;padding:0;">';
         stats.incorrectCards.forEach(function (ic) {
           html += '<li style="margin-bottom:2px;">' + ic.prompt.replace(/</g, '&lt;').slice(0, 60) + (ic.prompt.length > 60 ? '…' : '') + '</li>';
         });
@@ -716,9 +716,23 @@
         else { if (bwa) bwa.setAttribute('hidden', ''); }
         var cb = $('card-back'); if (cb) cb.removeAttribute('hidden');
         var br = $('btn-reveal'); if (br) br.setAttribute('hidden', '');
-        // self: nav-area도 표시 (다음 카드로 넘어갈 수 있도록)
-        var na = $('nav-area'); if (na) na.removeAttribute('hidden');
+        // self: O/X 클릭 대기 상태로 전환 (nav-area는 O/X 클릭 후에만 열림)
+        _state._selfPendingVerdict = true;
+        var inputSelf = $('input-self'); if (inputSelf) inputSelf.removeAttribute('hidden');
         return;
+      }
+      // judge 객관식: 미선택 시 안내
+      if (card.type === 'judge' && card.front && Array.isArray(card.front.options) && card.front.options.length) {
+        var selectedOpt = document.querySelector('#options-area [data-option-idx][data-selected]');
+        if (!selectedOpt) {
+          var feedbackEl = $('feedback-detail');
+          if (feedbackEl) {
+            feedbackEl.textContent = '선택지를 선택해 주세요';
+            var fa = $('feedback-area');
+            if (fa) fa.removeAttribute('hidden');
+          }
+          return;
+        }
       }
       var userAnswer = collectAnswer(card);
       var result;
@@ -734,13 +748,21 @@
       _on(btn, 'click', function () {
         var card = _state.current; if (!card) return;
         var v = btn.getAttribute('data-self-verdict') === 'o' ? 'correct' : 'incorrect';
+        _state._selfPendingVerdict = false;
+        // O/X 버튼 숨기기 (중복 클릭 방지)
+        var inputSelf = $('input-self'); if (inputSelf) inputSelf.setAttribute('hidden', '');
+        // revealBack이 feedbackArea/verdictDisplay/navArea 처리
         revealBack(card, v, null);
         commitAttempt(card, v);
       });
     });
 
     // 다음 카드
-    _on($('btn-next'), 'click', advance);
+    _on($('btn-next'), 'click', function () {
+      // self 모드에서 O/X 없이 다음 카드로 넘어가는 경로 차단
+      if (_state._selfPendingVerdict) return;
+      advance();
+    });
 
     // 넘기기
     _on($('btn-skip-card'), 'click', function () {
@@ -788,8 +810,7 @@
         var btn = $('btn-unit-filter-toggle');
         if (btn) btn.setAttribute('aria-expanded', 'false');
       } else {
-        _buildUnitFilterUI();
-        panel.style.display = '';
+        _buildUnitFilterUI(true);
         var btn2 = $('btn-unit-filter-toggle');
         if (btn2) btn2.setAttribute('aria-expanded', 'true');
       }
@@ -840,10 +861,10 @@
       var btn = $('btn-dday-toggle');
       var isOn = btn && btn.getAttribute('aria-pressed') === 'true';
       if (isOn) {
-        if (btn) { btn.textContent = 'D-day OFF'; btn.setAttribute('aria-pressed', 'false'); btn.style.background = '#f5f5f5'; btn.style.borderColor = '#aaa'; btn.style.color = ''; }
+        if (btn) { btn.textContent = 'D-day OFF'; btn.setAttribute('aria-pressed', 'false'); }
         _bootQuiz({ dDayMode: false });
       } else {
-        if (btn) { btn.textContent = 'D-day ON'; btn.setAttribute('aria-pressed', 'true'); btn.style.background = '#ff8f00'; btn.style.borderColor = '#e65100'; btn.style.color = '#fff'; }
+        if (btn) { btn.textContent = 'D-day ON'; btn.setAttribute('aria-pressed', 'true'); }
         _bootQuiz({ dDayMode: true });
       }
     });
@@ -868,7 +889,8 @@
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // 다운로드 대화상자가 비동기이므로 즉시 revoke하면 실패할 수 있음 → 지연 revoke
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
         _showIOMsg('내보내기 완료');
       } catch (e) {
         _showIOMsg('내보내기 오류: ' + e.message);
@@ -907,9 +929,9 @@
 
     // 키보드 단축키
     _on(document, 'keydown', function (e) {
-      // 입력 포커스 중이면 무시
+      // 입력/버튼 포커스 중이면 무시 (BUTTON: Space가 버튼 click + 단축키 이중발화 방지)
       var tag = document.activeElement && document.activeElement.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'SELECT') return;
 
       var btnReveal = $('btn-reveal');
       var navArea = $('nav-area');
@@ -1043,8 +1065,8 @@
         // filteredDeck으로 getNextCard 사용 (단원 필터 적용 시에도 원본 deck 유지 for UI)
         _state.deck = { namespace: deckId3, cards: filteredCards, _fullDeck: deck3 };
         _state.synonyms = (window.SYNONYMS && window.SYNONYMS[subject]) || undefined;
-        // mid: 단원 필터 UI 빌드 (항상 재빌드 — 체크 상태 반영)
-        _buildUnitFilterUI();
+        // mid: 단원 필터 UI 빌드 (체크 상태 반영, 패널은 열지 않음)
+        _buildUnitFilterUI(false);
         if (!queue3.length) { showEmpty('empty-all-future'); return; }
         _state.total = queue3.length;
         _state.done = 0;
@@ -1061,7 +1083,8 @@
   /* ─────────────────────────────────────────────
      단원 필터 UI 헬퍼
   ───────────────────────────────────────────── */
-  function _buildUnitFilterUI() {
+  // openPanel=true이면 패널을 열고, false/생략이면 체크박스만 갱신 (패널 표시 상태 유지)
+  function _buildUnitFilterUI(openPanel) {
     var panel = $('unit-filter-panel'); if (!panel) return;
     // 항상 전체 덱 기준으로 단원 목록 수집 (_fullDeck = 필터 경로에서 원본 덱 보존)
     var deck = (_state.deck && _state.deck._fullDeck) ? { cards: _state.deck._fullDeck.cards } : _state.deck;
@@ -1085,7 +1108,8 @@
       label.appendChild(document.createTextNode(u));
       cbArea.appendChild(label);
     });
-    panel.style.display = '';
+    // openPanel 명시 시에만 패널 표시 (UI 빌드와 패널 오픈 분리)
+    if (openPanel) panel.style.display = '';
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -1140,6 +1164,11 @@
       _state.session = null;
       _state.progressStore = null;
       _state.deck = null;
+      // subject 전환 시 오염 방지: disabledCards/unitFilter/sessionStats/self플래그 초기화
+      _state.disabledCards = null;
+      _state.unitFilter = null;
+      _state.sessionStats = { totalAttempted: 0, correctCount: 0, incorrectCards: [] };
+      _state._selfPendingVerdict = false;
     },
 
     /**

@@ -130,6 +130,15 @@
   /* ─────────────────────────────────────────────
      전체 레이아웃 빌드 (사이드바 + 뷰어)
   ───────────────────────────────────────────── */
+
+  /** 사이드바 헤더 + 항목 HTML 단일 생성 헬퍼 — 3곳 중복 제거 */
+  function _buildSidebarHTML(activities) {
+    return '<div style="font-size:0.78em;font-weight:700;color:var(--ink3,#888);' +
+      'padding:0 12px 8px;text-transform:uppercase;letter-spacing:0.05em">' +
+      '과제 목록 (' + activities.length + ')' +
+      '</div>' + _buildSidebarItems(activities);
+  }
+
   function _buildLayout(container, backendOnline, offlineReason) {
     var activities = _state.activities;
 
@@ -138,13 +147,9 @@
         '<div class="aws-sidebar" style="' +
           'width:200px;min-width:160px;flex-shrink:0;' +
           'border-right:1px solid var(--line2,#e0e0e0);' +
-          'background:var(--surface2,#f6f8fa);overflow-y:auto;' +
+          'background:var(--surface2,#f2eee5);overflow-y:auto;' +
           'padding:10px 0">' +
-          '<div style="font-size:0.78em;font-weight:700;color:var(--ink3,#888);' +
-            'padding:0 12px 8px;text-transform:uppercase;letter-spacing:0.05em">' +
-            '과제 목록 (' + activities.length + ')' +
-          '</div>' +
-          _buildSidebarItems(activities) +
+          _buildSidebarHTML(activities) +
         '</div>' +
         '<div class="aws-viewer" style="flex:1;padding:16px 18px;overflow-y:auto;min-width:0">' +
           (backendOnline ? '' : _offlineBannerHTML(offlineReason || '')) +
@@ -174,8 +179,8 @@
         verdict = snap.activities[act.activity_id].last_verdict;
       }
       var icon = '';
-      if (verdict === 'correct')   icon = '<span style="color:var(--ok,#22863a);margin-right:4px">✓</span>';
-      else if (verdict === 'incorrect') icon = '<span style="color:var(--hot,#d73a49);margin-right:4px">✗</span>';
+      if (verdict === 'correct')   icon = '<span style="color:var(--brand,#1f6b4a);margin-right:4px">✓</span>';
+      else if (verdict === 'incorrect') icon = '<span style="color:var(--hot,#a8301f);margin-right:4px">✗</span>';
       else icon = '<span style="color:var(--ink3,#bbb);margin-right:4px">○</span>';
 
       var isActive = (idx === _state.currentIdx);
@@ -202,10 +207,7 @@
     // 사이드바 하이라이트 갱신
     var sidebar = container.querySelector('.aws-sidebar');
     if (sidebar) {
-      sidebar.innerHTML = '<div style="font-size:0.78em;font-weight:700;color:var(--ink3,#888);' +
-        'padding:0 12px 8px;text-transform:uppercase;letter-spacing:0.05em">' +
-        '과제 목록 (' + _state.activities.length + ')' +
-        '</div>' + _buildSidebarItems(_state.activities);
+      sidebar.innerHTML = _buildSidebarHTML(_state.activities);
     }
     // 뷰어 갱신
     var viewer = container.querySelector('.aws-activity-content');
@@ -252,7 +254,7 @@
 
     // 과제 설명
     parts.push('<div class="aws-prompt" style="' +
-      'background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);' +
+      'background:var(--surface2,#f2eee5);border:1px solid var(--line2,#ddd);' +
       'border-radius:8px;padding:14px 16px;margin-bottom:16px;' +
       'font-size:0.95em;line-height:1.7;color:var(--ink,#111)">' +
       _esc(prompt) + '</div>');
@@ -286,7 +288,7 @@
     if (cliHint) {
       parts.push('<div class="aws-hint-section" style="margin-bottom:16px">');
       parts.push('<button type="button" class="aws-hint-btn" style="' +
-        'font-size:0.85em;padding:5px 12px;border-radius:6px;' +
+        'font-size:var(--fs-sm,12.5px);padding:5px 12px;border-radius:var(--r,10px);' +
         'border:1px solid var(--line2,#ddd);background:var(--surface,#fff);' +
         'color:var(--ink3,#555);cursor:pointer">힌트 보기</button>');
       parts.push('<pre class="aws-hint-body" hidden style="' +
@@ -300,7 +302,7 @@
     // 검증 버튼
     var btnDisabled = backendOnline ? '' : ' disabled';
     var btnStyle =
-      'padding:9px 24px;border-radius:8px;border:none;font-weight:700;font-size:0.95em;cursor:pointer;' +
+      'padding:9px 24px;border-radius:var(--r,10px);border:none;font-weight:700;font-size:0.95em;cursor:pointer;' +
       (backendOnline
         ? 'background:#ff9900;color:#fff;'
         : 'background:var(--line2,#ddd);color:var(--ink3,#999);cursor:not-allowed;');
@@ -316,19 +318,19 @@
     if (solution || explanation) {
       parts.push('<div class="aws-solution-section" style="margin-top:8px">');
       parts.push('<button type="button" class="aws-solution-btn" style="' +
-        'font-size:0.85em;padding:5px 12px;border-radius:6px;' +
+        'font-size:var(--fs-sm,12.5px);padding:5px 12px;border-radius:var(--r,10px);' +
         'border:1px solid var(--line2,#ddd);background:var(--surface,#fff);' +
         'color:var(--ink3,#555);cursor:pointer">풀이 보기</button>');
       parts.push('<div class="aws-solution-body" hidden style="margin-top:10px">');
       if (solution) {
-        parts.push('<pre style="background:#1e1e2e;color:#cdd6f4;border-radius:8px;' +
+        parts.push('<pre style="background:#1e1e2e;color:#cdd6f4;border-radius:var(--r,10px);' +
           'padding:12px 14px;font-size:0.83em;white-space:pre-wrap;overflow-x:auto;line-height:1.5">' +
           _esc(solution) + '</pre>');
       }
       if (explanation) {
         parts.push('<div style="margin-top:10px;padding:12px 14px;' +
-          'background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);' +
-          'border-radius:8px;font-size:0.9em;line-height:1.7;color:var(--ink,#111)">' +
+          'background:var(--surface2,#f2eee5);border:1px solid var(--line2,#cfc7b4);' +
+          'border-radius:var(--r,10px);font-size:0.9em;line-height:1.7;color:var(--ink,#111)">' +
           _esc(explanation) + '</div>');
       }
       parts.push('</div></div>');
@@ -439,8 +441,8 @@
         ? snap.activities[activityId].last_verdict
         : null;
       var icon;
-      if (verdict === 'correct')        icon = '<span style="color:var(--ok,#22863a);margin-right:4px">✓</span>';
-      else if (verdict === 'incorrect') icon = '<span style="color:var(--hot,#d73a49);margin-right:4px">✗</span>';
+      if (verdict === 'correct')        icon = '<span style="color:var(--brand,#1f6b4a);margin-right:4px">✓</span>';
+      else if (verdict === 'incorrect') icon = '<span style="color:var(--hot,#a8301f);margin-right:4px">✗</span>';
       else                              icon = '<span style="color:var(--ink3,#bbb);margin-right:4px">○</span>';
       // 아이콘(첫 child)만 교체
       var firstChild = item.firstChild;
@@ -472,7 +474,7 @@
     }
 
     var isCorrect    = result.verdict === 'correct';
-    var verdictColor = isCorrect ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
+    var verdictColor = isCorrect ? 'var(--brand,#1f6b4a)' : 'var(--hot,#a8301f)';
     var verdictLabel = isCorrect ? '통과' : '미통과';
 
     var html = '<div style="margin-top:4px">' +
@@ -481,7 +483,7 @@
       (fb.passed != null ? fb.passed : '?') + ' / ' + (fb.total != null ? fb.total : '?') + ' 체크 통과)</span>';
 
     if (fb.error) {
-      html += '<div style="color:var(--hot,#d73a49);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
+      html += '<div style="color:var(--hot,#a8301f);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
     }
 
     var details = fb.details || [];
@@ -489,7 +491,7 @@
       html += '<ul style="margin:8px 0 0 0;padding-left:18px;font-size:0.85em;line-height:1.7">';
       details.forEach(function (d) {
         var icon  = d.ok ? '✓' : '✗';
-        var color = d.ok ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
+        var color = d.ok ? 'var(--brand,#1f6b4a)' : 'var(--hot,#a8301f)';
         html += '<li style="color:' + color + '">' +
           '<strong>' + icon + '</strong> ' + _esc(d.message || (d.service + ':' + d.identifier)) +
           '</li>';
@@ -499,15 +501,21 @@
     html += '</div>';
     el.innerHTML = html;
 
-    // 정답 시 해설 자동 노출 (back.explanation 포함 섹션)
+    // 정답 시: 해설 자동 노출 대신 소프트 넛지만 표시
+    // (자동 노출은 인출 강도를 방해 — 학습자가 스스로 성찰 후 토글하도록 유도)
     if (isCorrect) {
       var wrap = el.closest('.aws-wrap') || el.parentNode;
       if (wrap) {
-        var solBody = wrap.querySelector('.aws-solution-body');
-        var solBtn  = wrap.querySelector('.aws-solution-btn');
-        if (solBody && solBody.hasAttribute('hidden')) {
-          solBody.removeAttribute('hidden');
-          if (solBtn) solBtn.textContent = '풀이 숨기기';
+        var solBtn = wrap.querySelector('.aws-solution-btn');
+        if (solBtn) {
+          var nudge = wrap.querySelector('.aws-solution-nudge');
+          if (!nudge) {
+            nudge = document.createElement('span');
+            nudge.className = 'aws-solution-nudge';
+            nudge.style.cssText = 'font-size:0.82em;color:var(--ink3,#888);margin-left:8px';
+            nudge.textContent = '← 풀이를 확인하려면 클릭하세요';
+            solBtn.parentNode.insertBefore(nudge, solBtn.nextSibling);
+          }
         }
       }
     }
@@ -517,6 +525,12 @@
      진도 캐시 업데이트
   ───────────────────────────────────────────── */
   function _updateProgress(activityId, result) {
+    // pending = 백엔드 미연결 오류케이스 → 채점 시도가 아니므로 cold_attempts 미증가
+    // last_verdict만 갱신해 사이드바 아이콘 반영은 허용
+    if (result.verdict === 'pending') {
+      // 기존 진도 유지, last_verdict만 갱신하지 않음 (pending은 volatile 상태)
+      return;
+    }
     var snap = getProgressSnapshot();
     if (!snap.activities[activityId]) {
       snap.activities[activityId] = {
@@ -547,13 +561,19 @@
     var resultEl = viewerEl.querySelector('.aws-result');
     if (resultEl && saved.last_verdict && saved.last_verdict !== 'pending') {
       var details = (saved.plugin_extra && saved.plugin_extra.last_check_details) || [];
+      // details가 비어있으면 passed/total을 cold_correct/cold_attempts로 대체
+      // (0/0 표시 방지 — 복원 데이터에 상세 없을 때 misleading 통계 노출 차단)
+      var passed = details.length > 0
+        ? details.filter(function (d) { return d.ok; }).length
+        : (saved.last_verdict === 'correct' ? saved.cold_correct : 0);
+      var total = details.length > 0 ? details.length : saved.cold_attempts;
       _showResult(resultEl, {
         verdict:   saved.last_verdict,
         score_raw: saved.cold_attempts > 0 ? saved.cold_correct / saved.cold_attempts : 0,
         grader_id: 'external',
         feedback:  {
-          passed:  details.filter(function (d) { return d.ok; }).length,
-          total:   details.length,
+          passed:  passed,
+          total:   total,
           details: details
         }
       }, null);
@@ -610,20 +630,24 @@
 
     var entryUrl = _getEntryUrl();
 
-    _healthCheck(entryUrl,
-      function onOnline() {
-        _state.backendOnline = true;
-        _buildLayout(container, true, null);
-        _navigateTo(container, _state.currentIdx);
-      },
-      function onOffline(reason) {
-        _state.backendOnline = false;
-        _buildLayout(container, false, reason);
-        _navigateTo(container, _state.currentIdx);
-      }
-    );
-
-    return Promise.resolve();
+    // Promise는 헬스체크 완료(UI 렌더링 후) resolve — 셸이 await mount()로 준비완료 판단 가능
+    // (기존 즉시 resolve는 경쟁 조건: 빈 컨테이너 상태로 셸이 다음 단계 진행할 위험)
+    return new Promise(function (resolve) {
+      _healthCheck(entryUrl,
+        function onOnline() {
+          _state.backendOnline = true;
+          _buildLayout(container, true, null);
+          _navigateTo(container, _state.currentIdx);
+          resolve();
+        },
+        function onOffline(reason) {
+          _state.backendOnline = false;
+          _buildLayout(container, false, reason);
+          _navigateTo(container, _state.currentIdx);
+          resolve();
+        }
+      );
+    });
   }
 
   /* ─────────────────────────────────────────────
@@ -699,15 +723,23 @@
           } else {
             result = _pendingResult('grade HTTP ' + xhr.status);
           }
+          // _updateProgress 호출 — pending이면 내부에서 카운트 스킵
           _updateProgress(activityId, result);
-          if (_state.ctx) {
-            _state.ctx.emit({ type: 'activity-completed', result: result });
-          }
+          // emit은 gradeBtn click handler에서만 수행 (이중 emit 방지)
           resolve(result);
         };
 
-        xhr.ontimeout = function () { resolve(_pendingResult('grade 요청 타임아웃')); };
-        xhr.onerror   = function () { resolve(_pendingResult('네트워크 오류 — 백엔드 연결 끊김')); };
+        // 타임아웃/네트워크 오류도 _updateProgress 호출 — pending은 카운트 스킵됨
+        xhr.ontimeout = function () {
+          var r = _pendingResult('grade 요청 타임아웃');
+          _updateProgress(activityId, r);
+          resolve(r);
+        };
+        xhr.onerror = function () {
+          var r = _pendingResult('네트워크 오류 — 백엔드 연결 끊김');
+          _updateProgress(activityId, r);
+          resolve(r);
+        };
         xhr.send(JSON.stringify({ activity_id: activityId, checks: checks }));
       } catch (e) {
         resolve(_pendingResult(e.message || '요청 실패'));
@@ -750,11 +782,7 @@
       // 사이드바 아이콘 전체 갱신
       var sidebar = _state.host.querySelector('.aws-sidebar');
       if (sidebar) {
-        sidebar.innerHTML =
-          '<div style="font-size:0.78em;font-weight:700;color:var(--ink3,#888);' +
-          'padding:0 12px 8px;text-transform:uppercase;letter-spacing:0.05em">' +
-          '과제 목록 (' + _state.activities.length + ')' +
-          '</div>' + _buildSidebarItems(_state.activities);
+        sidebar.innerHTML = _buildSidebarHTML(_state.activities);
       }
       // 현재 뷰어 진도 반영
       var viewer = _state.host.querySelector('.aws-activity-content');
@@ -778,9 +806,12 @@
       var a        = acts[id];
       var activity = _findActivity(id);
       if (!activity) return;
-      var key = activity.tags.area + '||' + activity.tags.subarea;
+      // tags 필드 누락 방어 (잘못된 ActivitySpec 하나가 전체 대시보드를 TypeError로 파괴하지 않도록)
+      var area    = (activity.tags && activity.tags.area)    || '(미분류)';
+      var subarea = (activity.tags && activity.tags.subarea) || '';
+      var key = area + '||' + subarea;
       if (!areaMap[key]) {
-        areaMap[key] = { area: activity.tags.area, subarea: activity.tags.subarea, correct: 0, total: 0 };
+        areaMap[key] = { area: area, subarea: subarea, correct: 0, total: 0 };
       }
       areaMap[key].total++;
       if (a.last_verdict === 'correct') areaMap[key].correct++;
@@ -797,8 +828,11 @@
       if (!a.cold_attempts) return;
       var activity = _findActivity(id);
       if (!activity) return;
+      var area    = (activity.tags && activity.tags.area)    || '(미분류)';
+      var subarea = (activity.tags && activity.tags.subarea) || '';
+      var unit    = (activity.tags && activity.tags.unit)    || '';
       var rate = (a.cold_attempts - a.cold_correct) / a.cold_attempts;
-      if (rate > 0) weakness.push({ area: activity.tags.area, subarea: activity.tags.subarea, unit: activity.tags.unit, wrong_rate: rate });
+      if (rate > 0) weakness.push({ area: area, subarea: subarea, unit: unit, wrong_rate: rate });
     });
     weakness.sort(function (a, b) { return b.wrong_rate - a.wrong_rate; });
 

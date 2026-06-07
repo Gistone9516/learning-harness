@@ -354,12 +354,12 @@ test('[sumif-001] first_fail is FIRST fail only (B11 wrong but B10 ok → first_
 ────────────────────────────────────────── */
 console.log('\n[§4 edge cases]');
 
-test('empty expected array → score_raw=0, verdict=correct (0/0 === all passed)', function () {
-  // When total=0, passed===total → 'correct', score_raw = 0/0 → 0 (NaN guard in code: total>0 ? passed/total : 0)
+test('empty expected array → verdict=incorrect (런타임규격 §2-1 minItems:1 위반)', function () {
+  // grading.expected=[]는 spec 금지 입력 → incorrect로 탐지
   var activity = { activity_id: 'empty', grading: { expected: [] } };
   var api = makeMockAPI({});
   var r = _runScore(activity, api);
-  assertEqual(r.verdict, 'correct');
+  assertEqual(r.verdict, 'incorrect');
   assertEqual(r.score_raw, 0);
 });
 

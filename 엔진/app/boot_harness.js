@@ -224,17 +224,11 @@ step('decks/ss_unit1.js', FILES.decks, () => {});  // deck 없으면 그냥 skip
 // Step 0b: 생성물 없으면 mock 보장
 ensureGeneratedMocks();
 
-// Step 1: app.js 엔진 코어 (DOM 의존 깊음 → stub으로 대체)
-const appJsPath = path.join(BASE, 'app', 'app.js');
-if (fs.existsSync(appJsPath)) {
-  // app.js는 로드 시 DOM 조작 가능성 있음. 안전하게 stub 주입으로 대체.
-  console.log('[HARNESS] app.js — DOM 의존 우회, APP stub 직접 주입');
-  stubAppCore();
-  bootLog.push({ label: 'app.js(stub)', ok: true });
-} else {
-  stubAppCore();
-  bootLog.push({ label: 'app.js(stub-no-file)', ok: true });
-}
+// Step 1: app.js 엔진 코어 — stub 대체 (DOM 의존 우회)
+// 실제 app.js는 브라우저 환경에서만 올바르게 동작.
+// 하니스 검증 범위: 등록·인터페이스 계약만. DOM/mount/렌더 경로는 브라우저 E2E 테스트 필요.
+stubAppCore();
+bootLog.push({ label: 'app.js(stub)', ok: true });
 
 // Step 2: 플러그인 manifest + plugin 순서대로 로드 (§7 SoT)
 step('card-quiz/manifest.js', FILES.cq_manifest);
@@ -437,6 +431,14 @@ bootOrderIssues.forEach(msg => {
 // 전역명 이슈
 globalIssues.forEach(msg => {
   issues.push({ severity: 'warn', where: 'window globals', problem: msg, fixed: false });
+});
+
+// 하니스 커버리지 한계 명시
+issues.push({
+  severity: 'info',
+  where: 'harness scope',
+  problem: 'DOM 의존 경로(mount/unmount/CSS 전환/렌더)는 하니스 미검증 — 브라우저 실환경 또는 E2E(Playwright/Puppeteer) 테스트 필요',
+  fixed: false
 });
 
 const allRegistered = EXPECTED.every(pid => !!REGISTRY[pid]);

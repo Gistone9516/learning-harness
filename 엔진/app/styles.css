@@ -12,13 +12,17 @@
   /* ── 색 (UI규격 §2.1) ── */
   --paper:#f4f1ea;--paper2:#ece7dc;
   --surface:#fbfaf6;--surface2:#f2eee5;
-  --ink:#23211c;--ink2s:#5a554a;--ink3:#938c7d;
+  --ink:#23211c;--ink2s:#5a554a;--ink3:#7a7168;
   --line:#ded7c8;--line2:#cfc7b4;
   --brand:#1f6b4a;--brand-deep:#124e35;--brand-bg:#e4efe7;--brand-line:#a9d3bc;
   --hot:#a8301f;--hot-bg:#f9e7e2;--hot-line:#e4b3a6;
   --warn:#9a5a09;--warn-bg:#f8edd7;--warn-line:#e6c587;
   --blue:#1d4f86;--blue-bg:#e6eef8;--blue-line:#aac6e6;
   --slate:#4a5560;--slate-bg:#eaecef;
+  /* 비규격 참조 호환 별칭 (플러그인 --accent 참조 → --brand로 연결) */
+  --accent:var(--brand);--accent-bg:var(--brand-bg);
+  /* ok 별칭 (플러그인 --ok 참조 → --brand로 연결) */
+  --ok:var(--brand);--ok-bg:var(--brand-bg);
 
   /* box 분포(동일계열 명도 그라데이션) */
   --c-box1:var(--brand-line);--c-box2:var(--brand);--c-box3:var(--brand-deep);
@@ -57,8 +61,12 @@ button{font-family:inherit;cursor:pointer}
 input,textarea{font-family:inherit}
 a{color:inherit;text-decoration:none}
 
+/* ── 포커스 표시 (WCAG 2.4.7 AA) ── */
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+/* input/textarea: 기존 box-shadow 방식 유지 */
+
 /* 읽기 진행바 (§3.4) */
-#read-bar{position:fixed;top:0;left:0;height:3px;width:0;background:linear-gradient(90deg,var(--brand),#2f9468);z-index:300;transition:width .1s linear;opacity:0}
+#read-bar{position:fixed;top:0;left:0;height:3px;width:0;background:linear-gradient(90deg,var(--brand),var(--brand-deep));z-index:300;transition:width .1s linear;opacity:0}
 body[data-route="concept"] #read-bar{opacity:1}
 
 /* ============================================================
@@ -87,7 +95,7 @@ body[data-route="concept"] #read-bar{opacity:1}
 .overall-top{display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-xs);color:var(--ink2s);margin-bottom:5px}
 .overall-pct{font-family:var(--mono);font-weight:600;color:var(--brand-deep)}
 .bar{height:6px;background:var(--paper2);border-radius:6px;overflow:hidden;border:1px solid var(--line)}
-.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),#34a472);border-radius:6px;transition:width .4s cubic-bezier(.2,.7,.3,1)}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand-deep));border-radius:6px;transition:width .4s cubic-bezier(.2,.7,.3,1)}
 
 .nav{padding:var(--space-3) var(--space-3) 0}
 .nav-group{margin-bottom:2px}
@@ -176,7 +184,7 @@ body[data-route="concept"] #read-bar{opacity:1}
 .quiz-progress{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-6)}
 #progress-current{font-family:var(--mono);font-size:var(--fs-xs);color:var(--ink2s);white-space:nowrap;flex-shrink:0;min-width:54px}
 .progress-bar-track{flex:1;height:6px;background:var(--paper2);border-radius:6px;overflow:hidden;border:1px solid var(--line)}
-.progress-bar-fill{height:100%;width:0;background:linear-gradient(90deg,var(--brand),#34a472);border-radius:6px;transition:width .4s cubic-bezier(.2,.7,.3,1)}
+.progress-bar-fill{height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand-deep));border-radius:6px;transition:width .4s cubic-bezier(.2,.7,.3,1)}
 
 /* 카드 무대 */
 .card-container{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
@@ -268,6 +276,31 @@ body[data-route="concept"] #read-bar{opacity:1}
 .btn-settings-action{padding:10px 22px;border:1px solid var(--line2);border-radius:var(--r);background:var(--surface);color:var(--ink2s);font-weight:600;transition:.15s}
 .btn-settings-action:hover{border-color:var(--brand-line);color:var(--brand-deep)}
 
+/* ── 플러그인 공통 배지 (card-quiz .card-type-badge 기준, 5종 통일) ── */
+.plugin-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;
+  font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:20px;
+  background:var(--slate-bg);color:var(--slate);border:1px solid #cdd2d7}
+
+/* ── 플러그인 공통 결과 (verdict) 래퍼 ── */
+.verdict-correct{background:var(--brand-bg);border-left:3px solid var(--brand);border-radius:var(--r);padding:10px 14px}
+.verdict-incorrect{background:var(--hot-bg);border-left:3px solid var(--hot);border-radius:var(--r);padding:10px 14px}
+.verdict-correct,.verdict-incorrect{margin-top:8px;font-size:var(--fs-sm);line-height:1.65}
+
+/* ── D-day 활성 상태 (JS inline style 제거) ── */
+.btn-dday-toggle{font-size:var(--fs-xs);padding:2px 8px;border:1px solid var(--line2);border-radius:var(--r);
+  background:var(--surface);cursor:pointer}
+.btn-dday-toggle[aria-pressed="true"]{background:var(--warn);border-color:var(--warn);color:#fff}
+
+/* ── 퀴즈 보조 컨트롤(단원 필터 토글 등) 공통 ── */
+.btn-quiz-aux{font-size:var(--fs-xs);padding:2px 8px;border:1px solid var(--line2);border-radius:var(--r);
+  background:var(--surface);cursor:pointer;color:var(--ink2s)}
+.btn-quiz-aux:hover{border-color:var(--brand-line);color:var(--brand-deep)}
+.btn-quiz-aux[aria-expanded="true"]{background:var(--brand-bg);border-color:var(--brand-line);color:var(--brand-deep)}
+
+/* ── 카드 퀴즈 보류 버튼 ── */
+.btn-pause-card{font-size:var(--fs-xs);padding:3px 8px;border:1px solid var(--hot-line);border-radius:var(--r);
+  background:var(--hot-bg);color:var(--hot);cursor:pointer}
+
 /* 스토리지 오류 배너 */
 .storage-error-banner{margin:var(--space-6) auto;max-width:640px;background:var(--hot-bg);border:1px solid var(--hot-line);
   border-left:3px solid var(--hot);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:6px;color:var(--ink)}
@@ -338,8 +371,10 @@ body[data-route="concept"] #read-bar{opacity:1}
 /* 섹션 카드 (REF) */
 .section-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
   margin:var(--space-4) 0;scroll-margin-top:84px;box-shadow:var(--shadow);overflow:hidden}
-.sec-head{display:flex;align-items:center;gap:var(--space-3);padding:16px 20px;user-select:none;
-  border-bottom:1px solid transparent;transition:.15s}
+/* sec-head: button 요소로 변경 — 키보드 접근성 확보 */
+.sec-head{display:flex;align-items:center;gap:var(--space-3);padding:16px 20px;
+  width:100%;text-align:left;background:inherit;border:none;border-bottom:1px solid transparent;
+  font-family:inherit;cursor:pointer;transition:.15s}
 .section-card.open .sec-head{border-bottom-color:var(--line)}
 .sec-head:hover{background:var(--surface2)}
 .sec-id{font-family:var(--mono);font-size:var(--fs-sm);font-weight:600;color:var(--brand-deep);
