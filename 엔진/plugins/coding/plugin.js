@@ -171,6 +171,8 @@
 
     return Promise.race([runPromise, timeoutPromise]).catch(function (e) {
       if (e === TIMEOUT_SENTINEL) {
+        // LIMIT: Pyodide는 메인 스레드 동기 실행이라 Promise.race 후에도 실제 Python 실행은
+        // 취소되지 않음. 워커 전면 이전 없이는 진정한 강제 중단 불가 — 설계상 한계.
         return { stdout: '', error: 'timeout', plot_b64: null };
       }
       return { stdout: '', error: String(e.message || e).split('\n')[0], plot_b64: null };
@@ -780,7 +782,12 @@
         if (plotEl) { plotEl.innerHTML = ''; plotEl.style.display = 'none'; }
         // F-02: .catch 추가 — 실행 오류 표시, 출력창 무한 로딩 방지
         _runOneCase(code, '', capturePlot).then(function (res) {
-          _showOutput(outputEl, res.error ? ('오류: ' + res.error) : (res.stdout || '(출력 없음)'));
+          var outMsg = res.error
+            ? (res.error === 'timeout'
+                ? '실행 시간 초과 — 무한 루프/과도한 연산 가능. 코드를 확인하세요.'
+                : '오류: ' + res.error)
+            : (res.stdout || '(출력 없음)');
+          _showOutput(outputEl, outMsg);
           // [mid] 플롯이 캡처됐으면 img 태그로 표시
           if (plotEl && res.plot_b64) {
             plotEl.innerHTML = '<img src="data:image/png;base64,' + res.plot_b64 +
@@ -1151,7 +1158,10 @@
       ' <span style="color:var(--ink3,#666);font-size:0.9em">(' + fb.passed + '/' + fb.total + ' 케이스 통과)</span>';
 
     if (fb.error) {
-      html += '<div style="color:var(--hot,#a8301f);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
+      var errMsg = fb.error === 'timeout'
+        ? '실행 시간 초과 — 무한 루프/과도한 연산 가능. 코드를 확인하세요.'
+        : fb.error;
+      html += '<div style="color:var(--hot,#a8301f);font-size:0.85em;margin-top:4px">오류: ' + _esc(errMsg) + '</div>';
     }
 
     // 전체 케이스 결과표 (feedback.cases[] 있을 때)
@@ -1167,8 +1177,11 @@
         '</tr></thead><tbody>';
       fb.cases.forEach(function (c) {
         var rowColor = c.pass ? 'var(--brand-bg,#e4efe7)' : (c.error ? 'var(--warn-bg,#f8edd7)' : 'var(--hot-bg,#f9e7e2)');
+        var caseErrMsg = c.error === 'timeout'
+          ? '실행 시간 초과 — 무한 루프/과도한 연산 가능. 코드를 확인하세요.'
+          : (c.error === 'skipped' ? '이전 케이스 오류로 건너뜀' : c.error);
         var statusIcon = c.pass ? '<span style="color:var(--brand,#1f6b4a);font-weight:700">✓</span>' :
-          (c.error ? '<span style="color:var(--warn,#9a5a09);font-weight:700" title="' + _esc(c.error) + '">!</span>' :
+          (c.error ? '<span style="color:var(--warn,#9a5a09);font-weight:700" title="' + _esc(caseErrMsg) + '">!</span>' :
             '<span style="color:var(--hot,#a8301f);font-weight:700">✗</span>');
         var inputDisp   = _esc(String(c.input)).replace(/\n/g, '↵').replace(/  /g, '&nbsp;&nbsp;');
         var expectedDisp = _esc(String(c.expected).trim()).replace(/\n/g, '↵');

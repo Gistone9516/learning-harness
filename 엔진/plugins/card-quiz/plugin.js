@@ -1146,41 +1146,82 @@
     },
 
     /**
-     * getProgressSnapshot() — §3
-     * 기존 loadProgress/saveProgress 래핑.
-     * 현재 메모리 progressStore 그대로 반환.
+     * getProgressSnapshot() — §3  진도 브리지 (아키텍처 §DEFER-A)
+     * shell은 clf:card-quiz:progress 에 저장/임포트하지만
+     * app.js 엔진은 clf:<deckId>:progress 키로 읽는다.
+     * 브리지: manifest의 각 deck에 대해 window.APP.loadProgress(deckId)를
+     * 모아 단일 봉투로 반환 → shell이 그대로 저장/복원 가능.
+     *
+     * 반환 형식:
+     *   { plugin_id: 'card-quiz', schema_version: 1,
+     *     decks: { <deckId>: ProgressStore, ... } }
      */
     getProgressSnapshot: function () {
       var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
-      var ps = _state.progressStore;
-      if (!ps) {
-        // F-13 robust: progressStore 미초기화 시 localStorage에서 로드 — SchemaVersionError 차단
-        try {
-          var manifest = window.MANIFEST && window.MANIFEST[subject];
-          var deckIds = (manifest && manifest.decks) || [];
-          var d0 = deckIds[0];
-          var deckId = (typeof d0 === 'string') ? d0 : (d0 && d0.deck_id);
-          if (deckId) ps = window.APP.loadProgress(deckId);
-        } catch (e) {
-          // SchemaVersionError 등 전파 차단 — ps는 null 유지
-          console.warn('[getProgressSnapshot] loadProgress 실패:', e && e.name);
+      var decks = {};
+      try {
+        var manifest = window.MANIFEST && window.MANIFEST[subject];
+        var deckEntries = (manifest && manifest.decks) || [];
+        for (var i = 0; i < deckEntries.length; i++) {
+          var d = deckEntries[i];
+          var deckId = (typeof d === 'string') ? d : (d && d.deck_id);
+          if (!deckId) continue;
+          try {
+            decks[deckId] = window.APP.loadProgress(deckId);
+          } catch (e) {
+            // SchemaVersionError 등 — 해당 deck만 건너뜀
+            console.warn('[getProgressSnapshot] loadProgress 실패 deck=' + deckId + ':', e && e.name);
+          }
         }
+      } catch (e) {
+        console.warn('[getProgressSnapshot] manifest 접근 실패:', e && e.name);
+      }
+      // manifest/deck 없는 환경 보호: 인메모리 progressStore 폴백
+      if (!Object.keys(decks).length && _state.progressStore) {
+        var ns = _state.progressStore.deck_namespace;
+        if (ns) decks[ns] = _state.progressStore;
       }
       return {
         plugin_id: 'card-quiz',
         schema_version: 1,
-        activities: ps ? ps.cards : {}
+        decks: decks
       };
     },
 
     /**
-     * onProgressRestored(snapshot) — §3
-     * 외부에서 진도 스냅샷을 복원할 때 호출됨.
-     * (현재는 APP.init가 localStorage에서 직접 로드하므로 no-op에 가까움)
+     * onProgressRestored(snapshot) — §3  진도 브리지 (아키텍처 §DEFER-A)
+     * shell import가 getProgressSnapshot 봉투를 복원할 때 호출.
+     * 봉투를 풀어 각 deck마다 window.APP.saveProgress(deckStore)로 fan-out →
+     * app.js가 읽는 clf:<deckId>:progress 키에 실제 반영.
      */
     onProgressRestored: function (snapshot) {
-      if (!snapshot || !snapshot.activities) return;
-      if (_state.progressStore) {
+      if (!snapshot) return;
+      // 신형 봉투 (decks 맵)
+      if (snapshot.decks && typeof snapshot.decks === 'object') {
+        var deckIds = Object.keys(snapshot.decks);
+        for (var i = 0; i < deckIds.length; i++) {
+          var deckId = deckIds[i];
+          var deckStore = snapshot.decks[deckId];
+          if (!deckStore) continue;
+          // deck_namespace 보장 (봉투 구성 시 항상 포함되나 방어적으로)
+          if (!deckStore.deck_namespace) deckStore.deck_namespace = deckId;
+          try {
+            window.APP.saveProgress(deckStore);
+          } catch (e) {
+            console.warn('[onProgressRestored] saveProgress 실패 deck=' + deckId + ':', e && e.name);
+          }
+        }
+        // 인메모리 progressStore도 갱신 (활성 deck과 일치하는 것만)
+        if (_state.progressStore) {
+          var ns = _state.progressStore.deck_namespace;
+          if (ns && snapshot.decks[ns]) {
+            _state.progressStore.cards = snapshot.decks[ns].cards || {};
+          }
+        }
+        return;
+      }
+      // 구형 봉투 (activities 맵) — 하위호환: 인메모리 progressStore에 직접 적용
+      if (snapshot.activities && _state.progressStore) {
         _state.progressStore.cards = snapshot.activities;
       }
     },

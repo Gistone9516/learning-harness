@@ -528,6 +528,47 @@
       .replace(/'/g, '&#39;');
   }
 
+  /**
+   * _sanitizeWidgetHtml — extra_widgets 삽입 전 경량 안전망 (shell-side).
+   * 계약 §5에서 플러그인이 _esc 책임이나, 향후 서드파티 플러그인 대비 2차 방어선.
+   * 제거 대상: <script> 블록, on* 이벤트 핸들러 속성, javascript: URL.
+   * 허용: 일반 표시용 HTML 태그 (div/span/p/b/i/br/ul/li/table 등).
+   */
+  function _sanitizeWidgetHtml(html) {
+    if (!html || typeof html !== 'string') return '';
+    // DOMParser로 파싱 후 위험 노드/속성 제거
+    var doc;
+    try {
+      doc = new DOMParser().parseFromString(html, 'text/html');
+    } catch (e) {
+      // DOMParser 미지원 환경 — 문자열 정규식 fallback
+      return html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+        .replace(/javascript\s*:/gi, 'void:');
+    }
+    // <script> 요소 전체 제거
+    var scripts = doc.body.querySelectorAll('script');
+    for (var si = 0; si < scripts.length; si++) scripts[si].parentNode.removeChild(scripts[si]);
+    // on* 이벤트 핸들러 속성 및 javascript: href/src 제거 (전체 노드 트리 순회)
+    var allNodes = doc.body.querySelectorAll('*');
+    for (var ni = 0; ni < allNodes.length; ni++) {
+      var node = allNodes[ni];
+      var attrs = Array.prototype.slice.call(node.attributes);
+      for (var ai = 0; ai < attrs.length; ai++) {
+        var attrName = attrs[ai].name.toLowerCase();
+        var attrVal = attrs[ai].value;
+        if (/^on/.test(attrName)) {
+          node.removeAttribute(attrs[ai].name);
+        } else if ((attrName === 'href' || attrName === 'src' || attrName === 'action') &&
+                   /^\s*javascript\s*:/i.test(attrVal)) {
+          node.removeAttribute(attrs[ai].name);
+        }
+      }
+    }
+    return doc.body.innerHTML;
+  }
+
   function _renderDashboardData(data) {
     if (!data) return;
 
@@ -644,8 +685,8 @@
       extraWidgets.forEach(function (w) {
         var wDiv = document.createElement('div');
         wDiv.className = 'extra-widget';
-        // 위젯 html은 플러그인이 _esc 책임 (계약 §5)
-        if (w && w.html) wDiv.innerHTML = w.html;
+        // 계약 §5: 플러그인이 _esc 1차 책임. 셸 2차 안전망으로 sanitize 통과.
+        if (w && w.html) wDiv.innerHTML = _sanitizeWidgetHtml(w.html);
         ewArea.appendChild(wDiv);
       });
     }

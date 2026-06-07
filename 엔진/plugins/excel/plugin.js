@@ -281,7 +281,16 @@
    * @param {object} activity
    * @param {object} univerAPI
    * @returns {Promise<ScoreResult>}  타임아웃 시 verdict='timeout' ScoreResult 반환
+   *
+   * 비수식 값 false-negative 방어 (DEFER-A):
+   *   리터럴 값 입력 시 Univer calculationEnd 이벤트가 발화하지 않아
+   *   5초 타임아웃으로 "시간초과" 오판이 발생하는 버그를 수정.
+   *   calculationEnd 구독 후 NON_FORMULA_FALLBACK_MS 이내에 state===3이
+   *   미발화하면 현재 셀 스냅샷으로 직접 채점(_runScore)하여 폴백.
+   *   수식 채점 경로(state===3 발화)는 기존 그대로 보존.
    */
+  var NON_FORMULA_FALLBACK_MS = 400;  // 비수식 폴백 대기 시간 (ms)
+
   function _scoreAfterCalc(activity, univerAPI) {
     return new Promise(function (resolve) {
       var formulaEngine = null;
@@ -298,10 +307,14 @@
       // F-09: settled를 클로저 외부로 올려 unsubscribe 핸들과 함께 중복 구독/resolve 방지
       var settled = false;
       var unsubscribe = null;
+      var fallbackTimer = null;
+      var hardTimer = null;
 
       function _settle(scoreResult) {
         if (settled) return;
         settled = true;
+        if (fallbackTimer !== null) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+        if (hardTimer !== null)     { clearTimeout(hardTimer);     hardTimer = null; }
         if (typeof unsubscribe === 'function') {
           try { unsubscribe(); } catch (e) {}
         }
@@ -325,9 +338,22 @@
         return;
       }
 
-      // 5초 타임아웃 방어 — state===3 미발화 시 "수식 계산 실패" 안내 반환
+      // ── 비수식 폴백 타이머 (DEFER-A) ──────────────────────────
+      // 리터럴 값 입력 시 calculationEnd state===3이 발화하지 않으므로
+      // NON_FORMULA_FALLBACK_MS 후에도 미정산이면 현재 셀값으로 직접 채점.
+      // 수식이 실제로 계산 중일 때는 state===3이 이 타이머보다 먼저 발화해
+      // _settle()이 호출되므로 폴백 타이머는 clearTimeout으로 취소됨.
+      fallbackTimer = setTimeout(function () {
+        fallbackTimer = null;
+        if (settled) return;
+        _settle(_runScore(activity, univerAPI));
+      }, NON_FORMULA_FALLBACK_MS);
+
+      // ── 5초 하드 타임아웃 방어 ──────────────────────────────────
+      // state===3 미발화이고 폴백도 실패한 극단 상황 대비.
       // verdict:'pending' + feedback.timeout:true (계약 §4 enum 준수)
-      setTimeout(function () {
+      hardTimer = setTimeout(function () {
+        hardTimer = null;
         _settle({
           verdict:   'pending',
           score_raw: 0,
