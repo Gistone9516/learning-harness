@@ -37,7 +37,8 @@
     activityIndex: 0   // 현재 활성 문제 인덱스
   };
 
-  var PROGRESS_KEY = 'clf:english:progress';
+  var PROGRESS_KEY    = 'clf:english:progress';
+  var WRONG_NOTES_KEY = 'clf:wrong_notes:english';
 
   /* ─────────────────────────────────────────────
      진도 localStorage 헬퍼
@@ -51,6 +52,17 @@
 
   function _saveProgress(snap) {
     try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(snap)); } catch (e) {}
+  }
+
+  function _loadWrongNotes() {
+    try {
+      var raw = localStorage.getItem(WRONG_NOTES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+
+  function _saveWrongNotes(notes) {
+    try { localStorage.setItem(WRONG_NOTES_KEY, JSON.stringify(notes)); } catch (e) {}
   }
 
   /* ─────────────────────────────────────────────
@@ -75,8 +87,9 @@
      lcsLen = diff.filter(match).length (별도 _lcsLength 불요 — DP 1회)
   */
   function _wordDiff(expected, actual) {
+    // 200단어 상한 방어 (런타임규격 §4-3) — actual도 동일 상한 clamp (극단 입력 DP OOM 방지)
+    if (actual.length > 200) { actual = actual.slice(0, 200); }
     var m = expected.length, n = actual.length;
-    // 200단어 상한 방어 (런타임규격 §4-3)
     if (m > 200) { throw new Error('dictation-diff: expected 단어 수 200 초과 (' + m + ')'); }
     // DP 경로 역추적
     var dp = [];
@@ -449,16 +462,17 @@
       sm2Fields = _sm2Update(entry.plugin_extra, result.verdict);
     }
 
-    // mid: 오답 노트 — incorrect 시 back.explanation 누적 (최대 20개, snap 레벨 전역 목록)
-    if (!Array.isArray(snap.wrong_notes)) snap.wrong_notes = [];
+    // mid: 오답 노트 — incorrect 시 back.explanation 누적 (최대 20개)
+    // 계약 §4 준수: PluginProgressSnapshot 루트에 비계약 필드 금지 → 별도 키(WRONG_NOTES_KEY)로 분리
     if (result.verdict === 'incorrect') {
       var wrongActivity = _findActivity(activityId);
       var explanation = wrongActivity && wrongActivity.back && wrongActivity.back.explanation;
       if (explanation) {
-        // 중복 activity_id 제거 후 최신으로 갱신, 최대 20개
-        snap.wrong_notes = snap.wrong_notes.filter(function (n) { return n.activity_id !== activityId; });
-        snap.wrong_notes.unshift({ activity_id: activityId, modality: modality, explanation: explanation, ts: Date.now() });
-        if (snap.wrong_notes.length > 20) snap.wrong_notes = snap.wrong_notes.slice(0, 20);
+        var wrongNotes = _loadWrongNotes();
+        wrongNotes = wrongNotes.filter(function (n) { return n.activity_id !== activityId; });
+        wrongNotes.unshift({ activity_id: activityId, modality: modality, explanation: explanation, ts: Date.now() });
+        if (wrongNotes.length > 20) wrongNotes = wrongNotes.slice(0, 20);
+        _saveWrongNotes(wrongNotes);
       }
     }
 
@@ -1193,8 +1207,8 @@
       };
     });
 
-    // mid: 오답 노트 위젯 — snap.wrong_notes[] 전역 목록에서 TOP5
-    var allWrongNotes = Array.isArray(snap.wrong_notes) ? snap.wrong_notes : [];
+    // mid: 오답 노트 위젯 — 별도 키(WRONG_NOTES_KEY)에서 TOP5 읽기 (계약 §4 준수)
+    var allWrongNotes = _loadWrongNotes();
     // 이미 중복 제거·최신순 정렬된 상태(_updateProgress에서 관리); 앞 5개만 사용
     var top5WrongNotes = allWrongNotes.slice(0, 5);
 

@@ -38,6 +38,7 @@
   var _activePluginId = null;
   var _activePluginInstance = null;
   var _activeMountOk = false;  // mount 성공 여부 추적
+  var _mountSeq = 0;           // XHR 경쟁 방지용 마운트 시퀀스 번호
 
   /* ─────────────────────────────────────────────
      알림 배너 컨테이너 (app-level, plugin-host 외부)
@@ -317,6 +318,9 @@
     // 이미 성공적으로 마운트된 경우만 skip
     if (_activePluginId === pluginId && _activePluginInstance && _activeMountOk) return;
 
+    // XHR 경쟁 방지: 이 마운트 요청의 시퀀스 번호를 확보
+    var seq = ++_mountSeq;
+
     if (_activePluginInstance && _activePluginInstance.unmount) {
       try { _activePluginInstance.unmount(); } catch (e) {}
     }
@@ -332,7 +336,7 @@
 
     var inst = window.PLUGIN_REGISTRY[pluginId];
     if (!inst) {
-      host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">플러그인 [' + pluginId + '] 미등록</div>';
+      host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">플러그인 [' + _esc(pluginId) + '] 미등록</div>';
       return;
     }
 
@@ -357,11 +361,13 @@
 
     var infra = pManifest ? (pManifest.infra || 'static') : 'static';
     if (infra !== 'static') {
-      // 헬스체크 후 마운트
+      // 헬스체크 후 마운트 (seq 캡처: onReady 호출 시점에 더 새로운 마운트가 시작됐으면 중단)
       _checkInfra(pManifest, function () {
+        if (seq !== _mountSeq) return; // 경쟁 감지 — 이미 다른 플러그인 마운트 진행 중
         _doMount(pluginId, inst, host);
       }, function (reason) {
-        host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + pluginId + '] 백엔드 연결 실패: ' + reason + '</div>';
+        if (seq !== _mountSeq) return;
+        host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + _esc(pluginId) + '] 백엔드 연결 실패: ' + _esc(reason) + '</div>';
       });
     } else {
       _doMount(pluginId, inst, host);
@@ -378,7 +384,7 @@
       _activeMountOk = true;
     } catch (e) {
       console.error('[SHELL] mount 동기 실패', pluginId, e);
-      host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + pluginId + '] 플러그인 로드 실패: ' + (e.message || e) + '</div>';
+      host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + _esc(pluginId) + '] 플러그인 로드 실패: ' + _esc(e.message || String(e)) + '</div>';
       // 상태 리셋 — 다음 시도 시 재마운트 허용
       _activePluginId = null;
       _activePluginInstance = null;
@@ -390,7 +396,7 @@
       mountResult.catch(function (e) {
         console.error('[SHELL] mount Promise 실패', pluginId, e);
         // F-03: 에러 배너 표시 + 활성 상태 리셋
-        host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + pluginId + '] 플러그인 로드 실패: ' + (e && (e.message || String(e))) + '</div>';
+        host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + _esc(pluginId) + '] 플러그인 로드 실패: ' + _esc(e && (e.message || String(e))) + '</div>';
         _activePluginId = null;
         _activePluginInstance = null;
         _activeMountOk = false;
@@ -416,12 +422,67 @@
     });
 
     if (contribs.length === 0) {
-      console.warn('[SHELL] 대시보드 데이터 없음 — 플러그인 미마운트이거나 getDashboardContrib 미지원');
+      // 빈 상태 메시지 표시 (플러그인 미마운트 또는 getDashboardContrib 미지원)
+      var dHost = $('plugin-host') || document.querySelector('.dashboard-wrap');
+      var emptyEl = $('dash-empty-state');
+      if (!emptyEl && dHost) {
+        emptyEl = document.createElement('p');
+        emptyEl.id = 'dash-empty-state';
+        emptyEl.className = 'text-muted';
+        emptyEl.style.cssText = 'padding:32px;text-align:center';
+        emptyEl.textContent = '아직 학습 데이터가 없습니다';
+        dHost.appendChild(emptyEl);
+      }
       return;
     }
 
-    // TODO: 복수 플러그인 contrib merge (현재 첫 번째만 사용 — card-quiz 단일 플러그인 전제)
-    var merged = contribs[0];
+    // 기존 빈 상태 메시지 제거
+    var prevEmpty = $('dash-empty-state');
+    if (prevEmpty) prevEmpty.remove();
+
+    // 전체 contribs 실제 merge (§5 합산 준수)
+    // by_area: 키 병합(area+subarea 기준, 중복 없이 수집)
+    // weakness / pass_path / completion: concat 후 중복은 첫 등장 우선
+    // extra_widgets: 전부 concat
+    var merged = {
+      plugin_id: contribs.map(function (c) { return c.plugin_id; }).join('+'),
+      by_area: [],
+      weakness: [],
+      pass_path: [],
+      completion: [],
+      extra_widgets: []
+    };
+
+    var byAreaSeen = {};
+    var weaknessSeen = {};
+    var passPathSeen = {};
+    var completionSeen = {};
+
+    contribs.forEach(function (c) {
+      // by_area — area+subarea 키 기준 병합(첫 등장 우선)
+      (c.by_area || []).forEach(function (r) {
+        var key = (r.area || '') + '|' + (r.subarea || '');
+        if (!byAreaSeen[key]) { byAreaSeen[key] = true; merged.by_area.push(r); }
+      });
+      // weakness — area+subarea+unit 키 기준 concat(중복 없이)
+      (c.weakness || []).forEach(function (w) {
+        var key = (w.area || '') + '|' + (w.subarea || '') + '|' + (w.unit || '');
+        if (!weaknessSeen[key]) { weaknessSeen[key] = true; merged.weakness.push(w); }
+      });
+      // pass_path — area+subarea 기준
+      (c.pass_path || []).forEach(function (p) {
+        var key = (p.area || '') + '|' + (p.subarea || '');
+        if (!passPathSeen[key]) { passPathSeen[key] = true; merged.pass_path.push(p); }
+      });
+      // completion — area+subarea 기준
+      (c.completion || []).forEach(function (cp) {
+        var key = (cp.area || '') + '|' + (cp.subarea || '');
+        if (!completionSeen[key]) { completionSeen[key] = true; merged.completion.push(cp); }
+      });
+      // extra_widgets — 전부 concat
+      (c.extra_widgets || []).forEach(function (w) { merged.extra_widgets.push(w); });
+    });
+
     _renderDashboardData(merged);
   }
 
@@ -645,8 +706,8 @@
       var refId = (card.links && card.links.concept_ref) || card.card_id;
       var title = frontText(card) || card.card_id;
       var head = document.createElement('button'); head.type = 'button'; head.className = 'sec-head';
-      head.innerHTML = '<span class="sec-id">' + refId + '</span>' +
-        '<span class="sec-title">' + title + '</span>' +
+      head.innerHTML = '<span class="sec-id">' + _esc(refId) + '</span>' +
+        '<span class="sec-title">' + _esc(title) + '</span>' +
         '<span class="freq ' + freqCls + '"><span class="s">' + stars + '</span></span>' +
         '<svg class="sec-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>';
       head.addEventListener('click', function () { sec.classList.toggle('open'); });
@@ -767,7 +828,7 @@
       var grp = document.createElement('div'); grp.className = 'nav-group' + (i === 0 ? ' open' : '');
       var head = document.createElement('button'); head.className = 'nav-grp-head'; head.type = 'button';
       head.innerHTML = '<span class="grp-no">' + (i + 1) + '</span>' +
-        '<span class="grp-name">' + (a.label || a.subarea) + '</span>' +
+        '<span class="grp-name">' + _esc(a.label || a.subarea) + '</span>' +
         '<span class="grp-pct">' + areaDecks.length + '덱</span>' +
         '<svg class="grp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>';
       head.addEventListener('click', function () { grp.classList.toggle('open'); });
@@ -778,7 +839,7 @@
         var link = document.createElement('a'); link.className = 'nav-link';
         // 클릭 시: _conceptDeckId 설정 후 concept으로 이동
         link.href = 'javascript:void(0)';
-        link.innerHTML = '<span class="nl-id">' + (d.card_count || '') + '</span><span>' + (d.title || deckIdVal) + '</span>';
+        link.innerHTML = '<span class="nl-id">' + _esc(String(d.card_count || '')) + '</span><span>' + _esc(d.title || deckIdVal) + '</span>';
         link.addEventListener('click', function () {
           qsa('.nav-link').forEach(function (l) { l.classList.remove('active'); });
           link.classList.add('active');

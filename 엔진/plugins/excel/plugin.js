@@ -127,12 +127,13 @@
   /**
    * @param {HTMLElement}              container
    * @param {Array<Array<string|number>>} initialGrid
+   * @param {object}                   [snapshotData]  IWorkbookData 직접 주입 시 (fallback 복원 전용)
    * @returns {{ univerAPI: object }}
    */
-  function _mountUniver(container, initialGrid) {
+  function _mountUniver(container, initialGrid, snapshotData) {
     var createUniver         = UniverPresets.createUniver;
     var LocaleType           = UniverCore.LocaleType;
-    var mergeLocales         = UniverCore.mergeLocales || UniverCore.merge;
+    var mergeLocales         = UniverCore.mergeLocales || UniverCore.merge || function (x) { return x; };
     var UniverSheetsCorePreset = UniverPresetSheetsCore.UniverSheetsCorePreset;
 
     var localeData = {};
@@ -151,25 +152,29 @@
 
     var univerAPI = result.univerAPI;
 
-    // initial_grid 주입
-    var cellData = _gridToCellData(initialGrid);
-    var rowCount    = Math.max(initialGrid.length + 10, 20);
-    var colCount    = Math.max((initialGrid[0] ? initialGrid[0].length : 0) + 5, 10);
-
-    var workbookData = {
-      id:         'sheet-task-wb',
-      name:       '실습 시트',
-      sheetOrder: ['sheet1'],
-      sheets: {
-        sheet1: {
-          id:          'sheet1',
-          name:        'Sheet1',
-          rowCount:    rowCount,
-          columnCount: colCount,
-          cellData:    cellData
+    // workbookData 결정: snapshotData 직접 주입이 있으면 그대로, 없으면 initialGrid 변환
+    var workbookData;
+    if (snapshotData) {
+      workbookData = snapshotData;
+    } else {
+      var cellData = _gridToCellData(initialGrid);
+      var rowCount    = Math.max(initialGrid.length + 10, 20);
+      var colCount    = Math.max((initialGrid[0] ? initialGrid[0].length : 0) + 5, 10);
+      workbookData = {
+        id:         'sheet-task-wb',
+        name:       '실습 시트',
+        sheetOrder: ['sheet1'],
+        sheets: {
+          sheet1: {
+            id:          'sheet1',
+            name:        'Sheet1',
+            rowCount:    rowCount,
+            columnCount: colCount,
+            cellData:    cellData
+          }
         }
-      }
-    };
+      };
+    }
 
     // createWorkbook (Facade API 공식) — 일부 버전은 createUniverSheet 별칭
     _createWorkbook(univerAPI, workbookData);
@@ -321,9 +326,10 @@
       }
 
       // 5초 타임아웃 방어 — state===3 미발화 시 "수식 계산 실패" 안내 반환
+      // verdict:'pending' + feedback.timeout:true (계약 §4 enum 준수)
       setTimeout(function () {
         _settle({
-          verdict:   'timeout',
+          verdict:   'pending',
           score_raw: 0,
           grader_id: 'engine',
           feedback:  {
@@ -872,8 +878,8 @@
     }
 
     return _scoreAfterCalc(activity, univerAPI).then(function (result) {
-      // timeout은 사용자 시도가 아니므로 진도 갱신 건너뜀 (런타임규격 §5-3 last_verdict 계약 준수)
-      if (result.verdict !== 'timeout') {
+      // pending(타임아웃)은 사용자 시도가 아니므로 진도 갱신 건너뜀 (런타임규격 §5-3 last_verdict 계약 준수)
+      if (result.verdict !== 'pending') {
         _updateProgress(activity.activity_id, result);
       }
       return result;
@@ -933,21 +939,17 @@
       } else if (_state.univerAPI && typeof _state.univerAPI.loadData === 'function') {
         _state.univerAPI.loadData(savedSnapshot);
       } else {
-        // fallback: dispose 후 createWorkbook으로 교체 (중복 생성 방지)
+        // fallback: dispose 후 savedSnapshot을 _mountUniver에 직접 전달하여 단일 생성
         if (typeof _state.univerAPI.dispose === 'function') {
           _state.univerAPI.dispose();
         }
         _state.univerAPI = null;
-        // univerContainer가 있으면 새 Univer 인스턴스 재생성
         if (_state.univerContainer) {
           _state.univerContainer.innerHTML = '';
           if (_checkUniver()) {
-            var result = _mountUniver(_state.univerContainer,
-              (savedSnapshot.sheets
-                ? [] // 스냅샷에 cellData 있음 — 아래에서 createWorkbook으로 주입
-                : [['']]) );
-            _state.univerAPI = result.univerAPI;
-            _createWorkbook(_state.univerAPI, savedSnapshot);
+            // savedSnapshot을 workbookData로 직접 넘겨 _mountUniver 내부 단일 createWorkbook 호출
+            var mountResult = _mountUniver(_state.univerContainer, [], savedSnapshot);
+            _state.univerAPI = mountResult.univerAPI;
           }
         }
       }

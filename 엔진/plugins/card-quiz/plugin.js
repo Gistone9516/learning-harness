@@ -182,15 +182,9 @@
 
       /* 진도 내보내기/가져오기 입력 (숨김 — 이벤트 바인딩용, UI는 설정 화면에 위임) */
       '<input type="file" id="input-progress-import" accept=".json" style="display:none;" aria-hidden="true" />',
+      '<div id="progress-io-msg" aria-live="polite" style="font-size:var(--fs-sm,12.5px);color:var(--ink2,#6b6456);min-height:1.2em;"></div>',
 
       '</div>', /* /#quiz-active */
-
-      /* 세션 완료 요약 위젯 */
-      '<div id="session-summary" hidden style="margin-top:12px;padding:12px 14px;background:var(--surface2,#f2eee5);border-radius:var(--r,10px);font-size:var(--fs-sm,12.5px);" aria-live="polite">',
-      '  <strong style="font-size:var(--fs-md,14px);">세션 완료</strong>',
-      '  <div id="session-summary-stats" style="margin-top:6px;color:var(--ink2s,#5a554a);"></div>',
-      '  <div id="session-summary-incorrect" style="margin-top:8px;"></div>',
-      '</div>',
 
       /* 빈상태 #1 EMPTY_NO_DECK */
       '<div id="empty-no-deck" class="empty-state" hidden aria-live="polite">',
@@ -940,9 +934,8 @@
     var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
     var dDayMode = !!(extraOpts && extraOpts.dDayMode);
 
-    // mid: 세션 완료 요약 통계 리셋 + 이전 요약 숨김
+    // mid: 세션 완료 요약 통계 리셋
     _state.sessionStats = { totalAttempted: 0, correctCount: 0, incorrectCards: [] };
-    var prevSummary = $('session-summary'); if (prevSummary) prevSummary.setAttribute('hidden', '');
 
     // mid: 일시정지 카드 목록 로드
     _loadDisabledCards();
@@ -968,7 +961,7 @@
         onEmpty: function () {
           var manifest = (window.MANIFEST && window.MANIFEST[subject]) || null;
           var hasDeck = manifest && manifest.decks && manifest.decks.length;
-          _emitSessionDone();
+          if (_state.sessionStats.totalAttempted > 0) _emitSessionDone();
           showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
         },
         onError: function (err) {

@@ -363,7 +363,8 @@
     progress:       null,   // PluginProgressSnapshot (메모리 캐시)
     mountTime:      0,      // [mid] 풀이 시간: mount() 호출 시각 (Date.now())
     filterArea:     '',     // [mid] 태그 필터: 현재 선택 area (''=전체)
-    filterSubarea:  ''      // [mid] 태그 필터: 현재 선택 subarea (''=전체)
+    filterSubarea:  '',     // [mid] 태그 필터: 현재 선택 subarea (''=전체)
+    scoreInFlight:  false   // 채점 중 중복 클릭 방어
   };
 
   /* ─────────────────────────────────────────────
@@ -794,6 +795,8 @@
     /* ── Submit 버튼: 채점 실행 ── */
     if (submitBtn) {
       submitBtn.addEventListener('click', function () {
+        // 채점 중 중복 클릭 방어 (더블클릭 시 cold_attempts/emit 이중 방지)
+        if (_state.scoreInFlight) return;
         if (!_state.activity) {
           _showResult(resultEl, null, '문제가 로드되지 않았습니다.');
           return;
@@ -804,6 +807,8 @@
         }
         var code = _state.editor.getValue();
         var activity = _state.activity;
+        _state.scoreInFlight = true;
+        submitBtn.disabled = true;
         _showResult(resultEl, null, '채점 중...');
         // score() 호출
         score({ code: code }).then(function (result) {
@@ -819,6 +824,9 @@
           _applyNavFilter(container, activities, _state.activityIndex);
         }).catch(function (e) {
           _showResult(resultEl, null, '채점 오류: ' + e.message);
+        }).then(function () {
+          _state.scoreInFlight = false;
+          submitBtn.disabled = false;
         });
       });
     }
@@ -864,6 +872,7 @@
     _state.mountTime      = 0;       // [mid]
     _state.filterArea     = '';      // [mid]
     _state.filterSubarea  = '';      // [mid]
+    _state.scoreInFlight  = false;
   }
 
   /* ─────────────────────────────────────────────
