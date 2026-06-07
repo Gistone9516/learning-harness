@@ -200,29 +200,26 @@ function score(input) {
 
   // ── exact 모드 ──
   if (mode === "exact") {
-    if (typeof userAnswer !== "string") {
-      throw new ScoreInputError(`exact 모드 userAnswer는 string이어야 함`);
-    }
-    const normUser = norm(userAnswer);
-    const accepted = (answerSpec && Array.isArray(answerSpec.accepted))
-      ? answerSpec.accepted
-      : [];
-    // recall_seq: answerSpec.sequence 기반 순서 채점 (§3.3, SoT §9)
-    // grade_mode == "exact" + answerSpec.sequence 존재 → 순서배열 완전일치
+    // recall_seq: answerSpec.sequence 기반 순서 채점 (엔진규격 §3.3, SoT §9)
+    // 카드규격 §10: recall_seq grade() 입력 = string[] (UI 레이어 소유)
     if (answerSpec && Array.isArray(answerSpec.sequence)) {
-      // userAnswer 파싱: "," 또는 줄바꿈 구분
-      // UI 레이어에서 string[]을 join해 전달할 수도 있으나,
-      // 엔진은 userAnswer가 string인 경우 단일값으로 처리.
-      // recall_seq 채점은 UI규격 §8 getNextCard에서 answer_spec.sequence를 노출하므로
-      // UI가 배열을 join(",")해 전달 → 여기서 분리.
-      const userSteps = normUser.split(",").map(s => s.trim());
+      // userAnswer = string[] (UI가 멀티입력 칸에서 수집한 배열)
+      // 하위호환: string 단일값이 들어오면 "," 분리로 처리
+      let userSteps;
+      if (Array.isArray(userAnswer)) {
+        userSteps = userAnswer.map(s => norm(s));
+      } else if (typeof userAnswer === "string") {
+        userSteps = userAnswer.split(",").map(s => norm(s.trim()));
+      } else {
+        throw new ScoreInputError(`recall_seq exact 모드 userAnswer는 string[] 또는 string이어야 함`);
+      }
       const seqSteps = answerSpec.sequence.map(s => norm(s));
       if (userSteps.length !== seqSteps.length) {
         return {
           verdict: "incorrect",
           matched: [],
           missed: seqSteps,
-          normalizedUser: normUser,
+          normalizedUser: userSteps,
           feedback: { highlightMissed: seqSteps }
         };
       }
@@ -231,11 +228,18 @@ function score(input) {
         verdict: allMatch ? "correct" : "incorrect",
         matched: allMatch ? seqSteps : [],
         missed: allMatch ? [] : seqSteps,
-        normalizedUser: normUser,
+        normalizedUser: userSteps,
         feedback: { highlightMissed: allMatch ? [] : seqSteps }
       };
     }
-    // 일반 exact: accepted[] OR 일치
+    // 일반 exact: string 단일값
+    if (typeof userAnswer !== "string") {
+      throw new ScoreInputError(`exact 모드 userAnswer는 string이어야 함`);
+    }
+    const normUser = norm(userAnswer);
+    const accepted = (answerSpec && Array.isArray(answerSpec.accepted))
+      ? answerSpec.accepted
+      : [];
     const normAccepted = accepted.map(a => norm(a));
     const matchedAns = normAccepted.find(a => a === normUser);
     const isCorrect = matchedAns !== undefined;

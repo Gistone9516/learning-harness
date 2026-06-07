@@ -42,13 +42,17 @@
     return [
       '<div class="quiz-wrap" id="quiz-active" role="region" aria-label="퀴즈 카드">',
 
-      /* 세션 진행 */
-      '<div data-quiz="progress" class="quiz-progress" aria-label="세션 진행">',
+      /* 세션 진행 + D-day 토글 */
+      '<div data-quiz="progress" class="quiz-progress" aria-label="세션 진행" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
       '  <span id="progress-current" aria-live="polite">0 / 0</span>',
       '  <div class="progress-bar-track" role="progressbar"',
-      '       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progress-track-el">',
+      '       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progress-track-el" style="flex:1;min-width:80px;">',
       '    <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>',
       '  </div>',
+      '  <button type="button" id="btn-dday-toggle" aria-pressed="false"',
+      '          style="font-size:0.75em;padding:2px 8px;border:1px solid #aaa;border-radius:4px;background:#f5f5f5;cursor:pointer;" aria-label="D-day 모드 토글">',
+      '    D-day OFF',
+      '  </button>',
       '</div>',
 
       /* 카드 무대 */
@@ -56,11 +60,25 @@
       '  <div data-quiz="card-front" class="card-front" id="card-front" role="region" aria-label="카드 앞면">',
       '    <span class="card-type-badge" id="card-type-badge"></span>',
       '    <p class="card-front__prompt" id="card-front-prompt"></p>',
+      '    <!-- 힌트 토글 (front.hint) -->',
+      '    <div id="hint-area" hidden style="margin-top:8px;">',
+      '      <button type="button" id="btn-hint-toggle" style="font-size:0.8em;padding:2px 8px;border:1px solid #ccc;border-radius:4px;background:#fafafa;cursor:pointer;" aria-expanded="false">',
+      '        힌트 보기',
+      '      </button>',
+      '      <div id="hint-text" hidden style="margin-top:6px;padding:6px 10px;background:#fffde7;border-left:3px solid #f9a825;font-size:0.9em;border-radius:3px;"></div>',
+      '    </div>',
+      '    <!-- judge 객관식 선택지 -->',
+      '    <div id="options-area" hidden style="margin-top:10px;" role="group" aria-label="선택지"></div>',
       '    <a href="#" data-quiz="concept-link" class="concept-link" id="concept-link-btn" hidden aria-label="연결 개념서 섹션 보기">📖 개념서 보기</a>',
       '  </div>',
       '  <div data-quiz="card-back" class="card-back" id="card-back" hidden role="region" aria-label="카드 뒷면">',
       '    <div class="card-back__detail prose" id="card-back-detail"></div>',
       '    <div class="card-back__note" id="card-back-note"></div>',
+      '    <!-- back.why 근거 -->',
+      '    <div id="back-why-area" hidden style="margin-top:8px;padding:8px 12px;background:#e8f4fd;border-left:3px solid #1976d2;font-size:0.9em;border-radius:3px;">',
+      '      <strong style="font-size:0.85em;color:#1565c0;">정답 근거</strong>',
+      '      <div id="back-why-text" style="margin-top:4px;"></div>',
+      '    </div>',
       '  </div>',
       '</div>',
 
@@ -79,6 +97,12 @@
       '<div data-quiz="answer-input" data-grade-mode="cloze" class="answer-area" id="input-cloze" hidden>',
       '  <span class="answer-label">빈칸 채우기</span>',
       '  <div class="cloze-text-wrap" id="cloze-render-area" aria-label="빈칸 채우기 영역"></div>',
+      '</div>',
+
+      /* recall_seq 전용 입력 영역 */
+      '<div id="input-recall-seq" class="answer-area" hidden>',
+      '  <label class="answer-label">단계를 순서대로 입력하세요 (한 줄에 하나씩)</label>',
+      '  <div id="recall-seq-inputs" style="display:flex;flex-direction:column;gap:4px;"></div>',
       '</div>',
 
       '<div data-quiz="self-grade" class="self-grade" id="input-self" hidden role="group" aria-label="자가 채점 O X">',
@@ -103,6 +127,19 @@
       '<div class="answer-area" id="nav-area" hidden style="display:flex;flex-direction:column;gap:var(--space-2);">',
       '  <button type="button" class="btn-next" id="btn-next" aria-label="다음 카드">다음 카드 →</button>',
       '  <button type="button" class="btn-skip" id="btn-skip-card" aria-label="이 카드 넘기기">넘기기</button>',
+      '</div>',
+
+      /* 진도 내보내기/가져오기 */
+      '<div id="progress-io-area" style="margin-top:16px;padding:10px 12px;background:#f5f5f5;border-radius:6px;font-size:0.85em;">',
+      '  <strong>진도 백업</strong>',
+      '  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center;">',
+      '    <button type="button" id="btn-progress-export" style="padding:3px 10px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;">내보내기</button>',
+      '    <label style="padding:3px 10px;border:1px solid #aaa;border-radius:4px;background:#fff;cursor:pointer;">',
+      '      가져오기',
+      '      <input type="file" id="input-progress-import" accept=".json" style="display:none;" />',
+      '    </label>',
+      '    <span id="progress-io-msg" style="color:#666;font-size:0.9em;"></span>',
+      '  </div>',
       '</div>',
 
       '</div>', /* /#quiz-active */
@@ -199,15 +236,101 @@
     if (el) el.removeAttribute('hidden');
   }
 
+  function _showIOMsg(msg) {
+    var el = $('progress-io-msg');
+    if (el) {
+      el.textContent = msg;
+      setTimeout(function () { if (el) el.textContent = ''; }, 3000);
+    }
+  }
+
+  function renderRecallSeqInputs(card) {
+    var area = $('recall-seq-inputs'); if (!area) return;
+    area.innerHTML = '';
+    var spec = card.answer_spec || {};
+    var seq = spec.sequence || [];
+    var count = seq.length || 3; // sequence 없으면 3칸 기본
+    for (var i = 0; i < count; i++) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+      var label = document.createElement('span');
+      label.textContent = (i + 1) + '.';
+      label.style.cssText = 'min-width:20px;color:#666;font-size:0.9em;';
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.setAttribute('data-seq-index', String(i));
+      inp.setAttribute('aria-label', '단계 ' + (i + 1));
+      inp.setAttribute('autocomplete', 'off');
+      inp.setAttribute('spellcheck', 'false');
+      inp.style.cssText = 'flex:1;padding:4px 8px;border:1px solid #ccc;border-radius:4px;';
+      inp.placeholder = '단계 ' + (i + 1);
+      row.appendChild(label);
+      row.appendChild(inp);
+      area.appendChild(row);
+    }
+  }
+
+  function renderJudgeOptions(card) {
+    var area = $('options-area'); if (!area) return;
+    area.innerHTML = '';
+    var opts = (card.front && Array.isArray(card.front.options)) ? card.front.options : [];
+    if (!opts.length) { area.setAttribute('hidden', ''); return; }
+    area.removeAttribute('hidden');
+    // 선택지 버튼 렌더
+    opts.forEach(function (optText, idx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-option-idx', String(idx));
+      btn.setAttribute('data-option-text', optText);
+      btn.textContent = optText;
+      btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 12px;margin-bottom:4px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:0.95em;';
+      btn.addEventListener('mouseover', function () { btn.style.background = '#e3f2fd'; });
+      btn.addEventListener('mouseout', function () {
+        if (!btn.getAttribute('data-selected')) btn.style.background = '#fff';
+      });
+      btn.addEventListener('click', function () {
+        // 다른 버튼 선택 해제
+        qsa('[data-option-idx]', area).forEach(function (b) {
+          b.removeAttribute('data-selected');
+          b.style.background = '#fff';
+          b.style.border = '1px solid #ccc';
+        });
+        btn.setAttribute('data-selected', '1');
+        btn.style.background = '#bbdefb';
+        btn.style.border = '1px solid #1976d2';
+        // exact input에 선택된 텍스트 동기화 (collectAnswer가 읽음)
+        var ef = $('input-exact-field');
+        if (ef) ef.value = optText;
+      });
+      area.appendChild(btn);
+    });
+  }
+
   function showInputFor(card) {
     ['exact', 'keyword', 'cloze'].forEach(function (m) {
       var el = document.querySelector('[data-quiz="answer-input"][data-grade-mode="' + m + '"]');
       if (el) el.setAttribute('hidden', '');
     });
     var inputSelf = $('input-self');
+    var inputRecallSeq = $('input-recall-seq');
+    var optionsArea = $('options-area');
     if (inputSelf) inputSelf.setAttribute('hidden', '');
+    if (inputRecallSeq) inputRecallSeq.setAttribute('hidden', '');
+    if (optionsArea) optionsArea.setAttribute('hidden', '');
     var mode = card.grade_mode;
     var btnReveal = $('btn-reveal');
+
+    // recall_seq/exact 조합: 전용 멀티입력 UI 사용
+    if (card.type === 'recall_seq' && mode === 'exact') {
+      var recallEl = $('input-recall-seq');
+      if (recallEl) {
+        recallEl.removeAttribute('hidden');
+        renderRecallSeqInputs(card);
+      }
+      if (btnReveal) btnReveal.textContent = '정답 확인';
+      return;
+    }
+
     if (mode === 'self') {
       if (inputSelf) inputSelf.removeAttribute('hidden');
       if (btnReveal) btnReveal.textContent = '정답 보기';
@@ -216,7 +339,18 @@
       var el = document.querySelector('[data-quiz="answer-input"][data-grade-mode="' + mode + '"]');
       if (el) {
         el.removeAttribute('hidden');
-        if (mode === 'exact') { var f = $('input-exact-field'); if (f) f.value = ''; }
+        if (mode === 'exact') {
+          var f = $('input-exact-field'); if (f) f.value = '';
+          // judge 객관식: options 버튼 렌더
+          if (card.type === 'judge' && card.front && Array.isArray(card.front.options) && card.front.options.length) {
+            renderJudgeOptions(card);
+            // judge options 있으면 text input 숨기고 options만 보임
+            if (f) f.parentElement && f.parentElement.setAttribute('hidden', '');
+            // 단, input-exact 컨테이너 자체를 숨기고 options-area만 노출
+            el.setAttribute('hidden', '');
+            if (optionsArea) optionsArea.removeAttribute('hidden');
+          }
+        }
         if (mode === 'keyword') { var kf = $('input-keyword-field'); if (kf) kf.value = ''; }
         if (mode === 'cloze') renderClozeInputs(card);
       } else {
@@ -304,13 +438,41 @@
     if (navArea) navArea.setAttribute('hidden', '');
     if (btnReveal) btnReveal.removeAttribute('hidden');
 
+    // 힌트 초기화 (카드 전환 시 숨김 상태로 리셋)
+    var hintArea = $('hint-area');
+    var hintText = $('hint-text');
+    var btnHintToggle = $('btn-hint-toggle');
+    var hint = card.front && card.front.hint;
+    if (hint) {
+      if (hintArea) hintArea.removeAttribute('hidden');
+      if (hintText) { hintText.textContent = hint; hintText.setAttribute('hidden', ''); }
+      if (btnHintToggle) { btnHintToggle.textContent = '힌트 보기'; btnHintToggle.setAttribute('aria-expanded', 'false'); }
+    } else {
+      if (hintArea) hintArea.setAttribute('hidden', '');
+    }
+
+    // back.why 초기화
+    var backWhyArea = $('back-why-area');
+    if (backWhyArea) backWhyArea.setAttribute('hidden', '');
+
     showInputFor(card);
     updateProgressUI();
   }
 
   function collectAnswer(card) {
     var mode = card.grade_mode;
+
+    // recall_seq/exact: 멀티입력 칸에서 string[] 수집
+    if (card.type === 'recall_seq' && mode === 'exact') {
+      return qsa('#recall-seq-inputs input[data-seq-index]')
+        .sort(function (a, b) { return +a.getAttribute('data-seq-index') - +b.getAttribute('data-seq-index'); })
+        .map(function (i) { return i.value; });
+    }
+
     if (mode === 'exact') {
+      // judge 객관식: options-area에서 선택된 텍스트 반환
+      var selectedOpt = document.querySelector('#options-area [data-option-idx][data-selected]');
+      if (selectedOpt) return selectedOpt.getAttribute('data-option-text') || '';
       var ef = $('input-exact-field'); return ef ? ef.value : '';
     }
     if (mode === 'keyword') {
@@ -336,6 +498,16 @@
 
     if (cardBackDetail) renderMarkdown(cardBackDetail, (card.back && card.back.detail) || '');
     if (cardBackNote) cardBackNote.textContent = (card.back && card.back.note) || '';
+    // back.why 렌더 (judge 정답근거)
+    var backWhyArea = $('back-why-area');
+    var backWhyText = $('back-why-text');
+    var why = card.back && card.back.why;
+    if (why) {
+      if (backWhyText) backWhyText.textContent = why;
+      if (backWhyArea) backWhyArea.removeAttribute('hidden');
+    } else {
+      if (backWhyArea) backWhyArea.setAttribute('hidden', '');
+    }
     if (cardBack) cardBack.removeAttribute('hidden');
 
     if (feedbackArea) {
@@ -417,8 +589,14 @@
       if (card.grade_mode === 'self') {
         renderMarkdown($('card-back-detail'), (card.back && card.back.detail) || '');
         var n = $('card-back-note'); if (n) n.textContent = (card.back && card.back.note) || '';
+        // back.why 렌더 (self 모드에도)
+        var bwa = $('back-why-area'), bwt = $('back-why-text'), why = card.back && card.back.why;
+        if (why) { if (bwt) bwt.textContent = why; if (bwa) bwa.removeAttribute('hidden'); }
+        else { if (bwa) bwa.setAttribute('hidden', ''); }
         var cb = $('card-back'); if (cb) cb.removeAttribute('hidden');
         var br = $('btn-reveal'); if (br) br.setAttribute('hidden', '');
+        // self: nav-area도 표시 (다음 카드로 넘어갈 수 있도록)
+        var na = $('nav-area'); if (na) na.removeAttribute('hidden');
         return;
       }
       var userAnswer = collectAnswer(card);
@@ -462,6 +640,91 @@
           _state.ctx.emit({ type: 'navigation-request', target: 'settings' });
         }
       });
+    });
+
+    // ── 힌트 토글 ──
+    _on($('btn-hint-toggle'), 'click', function () {
+      var hintText = $('hint-text');
+      var btn = $('btn-hint-toggle');
+      if (!hintText) return;
+      var isHidden = hintText.hasAttribute('hidden');
+      if (isHidden) {
+        hintText.removeAttribute('hidden');
+        if (btn) { btn.textContent = '힌트 숨기기'; btn.setAttribute('aria-expanded', 'true'); }
+      } else {
+        hintText.setAttribute('hidden', '');
+        if (btn) { btn.textContent = '힌트 보기'; btn.setAttribute('aria-expanded', 'false'); }
+      }
+    });
+
+    // ── D-day 토글 ──
+    _on($('btn-dday-toggle'), 'click', function () {
+      var btn = $('btn-dday-toggle');
+      var isOn = btn && btn.getAttribute('aria-pressed') === 'true';
+      if (isOn) {
+        if (btn) { btn.textContent = 'D-day OFF'; btn.setAttribute('aria-pressed', 'false'); btn.style.background = '#f5f5f5'; btn.style.borderColor = '#aaa'; btn.style.color = ''; }
+        _bootQuiz({ dDayMode: false });
+      } else {
+        if (btn) { btn.textContent = 'D-day ON'; btn.setAttribute('aria-pressed', 'true'); btn.style.background = '#ff8f00'; btn.style.borderColor = '#e65100'; btn.style.color = '#fff'; }
+        _bootQuiz({ dDayMode: true });
+      }
+    });
+
+    // ── 진도 내보내기 ──
+    _on($('btn-progress-export'), 'click', function () {
+      try {
+        var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
+        var manifest = window.MANIFEST && window.MANIFEST[subject];
+        var deckIds = (manifest && manifest.decks) || [];
+        var d0 = deckIds[0];
+        var deckId = (typeof d0 === 'string') ? d0 : (d0 && d0.deck_id);
+        var ps = _state.progressStore;
+        if (!ps && deckId) ps = window.APP.loadProgress(deckId);
+        if (!ps) { _showIOMsg('진도 데이터 없음'); return; }
+        var json = JSON.stringify(ps, null, 2);
+        var blob = new Blob([json], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'clf-progress-' + (deckId || subject) + '-' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        _showIOMsg('내보내기 완료');
+      } catch (e) {
+        _showIOMsg('내보내기 오류: ' + e.message);
+        console.error('[progress-export]', e);
+      }
+    });
+
+    // ── 진도 가져오기 ──
+    _on($('input-progress-import'), 'change', function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        try {
+          var parsed = JSON.parse(ev.target.result);
+          if (!parsed || typeof parsed !== 'object' || !parsed.deck_namespace) {
+            _showIOMsg('올바른 진도 파일이 아닙니다');
+            return;
+          }
+          if (typeof parsed.schema_version === 'number' && parsed.schema_version > 1) {
+            _showIOMsg('파일 버전이 현재 앱보다 높습니다');
+            return;
+          }
+          window.APP.saveProgress(parsed);
+          _showIOMsg('가져오기 완료 — 다시 시작합니다');
+          setTimeout(function () { _bootQuiz({}); }, 800);
+        } catch (err) {
+          _showIOMsg('파일 읽기 오류: ' + err.message);
+          console.error('[progress-import]', err);
+        }
+        e.target.value = '';
+      };
+      reader.onerror = function () { _showIOMsg('파일 읽기 실패'); };
+      reader.readAsText(file, 'utf-8');
     });
 
     // 키보드 단축키

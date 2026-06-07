@@ -162,22 +162,25 @@
   }
 
   /* ─────────────────────────────────────────────
-     compareValue — 런타임규격 §4-2
+     compareValue — 런타임규격 §4-2 + float 허용오차
+     grading.tolerance (절대 오차) 또는 compare='value-tol' 지원
   ───────────────────────────────────────────── */
   /**
    * @param {*}               actual
    * @param {string|number}   expected
+   * @param {number}          [tolerance=0]  절대 허용오차 (grading.tolerance)
    * @returns {boolean}
    */
-  function _compareValue(actual, expected) {
-    // 1. 둘 다 number → numeric 비교
+  function _compareValue(actual, expected, tolerance) {
+    var eps = (typeof tolerance === 'number' && tolerance >= 0) ? tolerance : 0;
+    // 1. 둘 다 number → epsilon 허용 numeric 비교
     if (typeof expected === 'number' && typeof actual === 'number') {
-      return actual === expected;
+      return Math.abs(actual - expected) <= eps;
     }
-    // 2. expected number, actual string(수식결과가 문자열로 왔을 때) → 숫자 파싱 시도
+    // 2. expected number, actual string(수식결과가 문자열로 왔을 때) → 숫자 파싱 후 epsilon 비교
     if (typeof expected === 'number' && typeof actual === 'string') {
       var parsed = Number(actual.trim());
-      if (!isNaN(parsed)) return parsed === expected;
+      if (!isNaN(parsed)) return Math.abs(parsed - expected) <= eps;
     }
     // 3. 그 외 → String 변환 후 trim 비교
     return String(actual).trim() === String(expected).trim();
@@ -204,15 +207,18 @@
       };
     }
 
-    var expected = activity.grading.expected;
+    var expected  = activity.grading.expected;
+    var tolerance = (activity.grading && typeof activity.grading.tolerance === 'number')
+      ? activity.grading.tolerance : 0;
     var total    = expected.length;
     var passed   = 0;
     var firstFail = null;
+    var cellResults = [];  // 다중셀 결과표용
 
     expected.forEach(function (entry) {
       var fRange    = fWorksheet.getRange(entry.cell);
       var actualVal = fRange ? fRange.getValue() : null;
-      var ok        = _compareValue(actualVal, entry.value);
+      var ok        = _compareValue(actualVal, entry.value, tolerance);
       if (ok) {
         passed++;
       } else if (!firstFail) {
@@ -222,6 +228,7 @@
           actual:   actualVal
         };
       }
+      cellResults.push({ cell: entry.cell, expected: entry.value, actual: actualVal, ok: ok });
     });
 
     return {
@@ -229,9 +236,10 @@
       score_raw: total > 0 ? passed / total : 0,
       grader_id: 'engine',
       feedback:  {
-        passed:     passed,
-        total:      total,
-        first_fail: firstFail
+        passed:      passed,
+        total:       total,
+        first_fail:  firstFail,
+        cell_results: cellResults  // 다중셀 결과표용 전체 배열
       }
     };
   }
@@ -242,7 +250,7 @@
   /**
    * @param {object} activity
    * @param {object} univerAPI
-   * @returns {Promise<ScoreResult>}
+   * @returns {Promise<ScoreResult>}  타임아웃 시 verdict='timeout' ScoreResult 반환
    */
   function _scoreAfterCalc(activity, univerAPI) {
     return new Promise(function (resolve) {
@@ -272,13 +280,25 @@
         return;
       }
 
-      // 안전망: 3초 후에도 state===3 콜백 미수신이면 즉시 채점
+      // 5초 타임아웃 방어 — state===3 미발화 시 "수식 계산 실패" 안내 반환
       setTimeout(function () {
         if (!settled) {
           settled = true;
-          resolve(_runScore(activity, univerAPI));
+          resolve({
+            verdict:   'timeout',
+            score_raw: 0,
+            grader_id: 'engine',
+            feedback:  {
+              passed:      0,
+              total:       (activity.grading && activity.grading.expected)
+                             ? activity.grading.expected.length : 0,
+              first_fail:  null,
+              cell_results: [],
+              timeout:     true   // _showResult 타임아웃 분기용 플래그
+            }
+          });
         }
-      }, 3000);
+      }, 5000);
     });
   }
 
@@ -293,34 +313,132 @@
       .replace(/"/g, '&quot;');
   }
 
-  function _showResult(el, result, message) {
+  /**
+   * 채점 결과 렌더 — 다중셀 결과표 + 해설 패널 토글 포함
+   * @param {HTMLElement}  el        .excel-result 영역
+   * @param {ScoreResult|null} result
+   * @param {string|null}  message   단순 메시지 표시용
+   * @param {object|null}  back      ActivitySpec.back (solution/explanation)
+   */
+  function _showResult(el, result, message, back) {
     if (!el) return;
+
+    // 단순 메시지 (채점 중... / 오류)
     if (message) {
       el.innerHTML = '<span style="color:var(--ink3,#666)">' + _esc(message) + '</span>';
       return;
     }
     if (!result) return;
 
-    var verdictColor = result.verdict === 'correct'
-      ? 'var(--ok,#22863a)'
-      : 'var(--hot,#d73a49)';
-    var verdictLabel = result.verdict === 'correct' ? '정답' : '오답';
-    var fb = result.feedback;
+    var fb = result.feedback || {};
 
-    var html = '<div style="margin-top:8px">' +
-      '<strong style="color:' + verdictColor + '">' + verdictLabel + '</strong>' +
-      ' <span style="color:var(--ink3,#666);font-size:0.9em">(' +
-        fb.passed + '/' + fb.total + ' 셀 일치)</span>';
+    // ── 타임아웃 분기 ──
+    if (result.verdict === 'timeout' || fb.timeout) {
+      el.innerHTML =
+        '<div style="margin-top:8px;padding:10px 14px;border-radius:7px;' +
+        'background:#fff8e1;border:1px solid #ffe082;color:#7a5800;font-size:0.88em">' +
+        '⚠️ 수식 계산 실패 — 수식을 확인하거나 페이지를 새로고침하세요.' +
+        '</div>';
+      return;
+    }
 
-    if (fb.first_fail) {
+    var isCorrect    = result.verdict === 'correct';
+    var verdictColor = isCorrect ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
+    var verdictLabel = isCorrect ? '✓ 정답' : '✗ 오답';
+    var passed       = fb.passed != null ? fb.passed : 0;
+    var total        = fb.total  != null ? fb.total  : 0;
+
+    // ── 판정 헤더 ──
+    var html = '<div style="margin-top:8px">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">';
+    html += '<strong style="font-size:1em;color:' + verdictColor + '">' + verdictLabel + '</strong>';
+
+    // score_raw 진척바 (다중셀일 때 의미있음)
+    if (total > 1) {
+      var pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+      html += '<span style="font-size:0.85em;color:var(--ink3,#666)">' + passed + '/' + total + ' 셀 일치</span>';
+      html += '<div style="flex:1;max-width:140px;height:6px;background:var(--line2,#eee);border-radius:4px;overflow:hidden">';
+      html += '<div style="width:' + pct + '%;height:100%;background:' + verdictColor + ';transition:width 0.3s"></div>';
+      html += '</div>';
+    } else {
+      html += '<span style="font-size:0.85em;color:var(--ink3,#666)">(' + passed + '/' + total + ' 셀 일치)</span>';
+    }
+    html += '</div>';
+
+    // ── 다중셀 결과표 (셀 3개 이상이거나 오답 있을 때 항상 표시) ──
+    var cellResults = fb.cell_results || [];
+    if (cellResults.length > 0) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82em;margin-bottom:8px">';
+      html += '<thead><tr style="background:var(--surface2,#f6f8fa)">';
+      html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">셀</th>';
+      html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">기대값</th>';
+      html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">입력값</th>';
+      html += '<th style="padding:4px 8px;text-align:center;border:1px solid var(--line2,#ddd)">결과</th>';
+      html += '</tr></thead><tbody>';
+      cellResults.forEach(function (cr) {
+        var rowBg = cr.ok ? '#f0fff4' : '#fff5f5';
+        var icon  = cr.ok ? '<span style="color:#22863a">✓</span>' : '<span style="color:#d73a49">✗</span>';
+        html += '<tr style="background:' + rowBg + '">';
+        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(cr.cell) + '</code></td>';
+        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.expected)) + '</code></td>';
+        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.actual != null ? cr.actual : '(빈 셀)')) + '</code></td>';
+        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center">' + icon + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    } else if (fb.first_fail) {
+      // cellResults 없는 구버전 fallback
       html += '<div style="font-size:0.85em;margin-top:6px;color:var(--ink3,#666)">' +
         '첫 불일치 · 셀: <code>' + _esc(fb.first_fail.cell) + '</code>' +
         ' / 기대: <code>' + _esc(String(fb.first_fail.expected)) + '</code>' +
         ' / 실제: <code>' + _esc(String(fb.first_fail.actual)) + '</code>' +
         '</div>';
     }
+
+    // ── 해설 패널 (back.solution / back.explanation) ──
+    if (back && (back.solution || back.explanation)) {
+      var panelId = 'excel-explanation-' + Date.now();
+      html += '<div style="margin-top:8px">';
+      // 토글 버튼
+      html += '<button type="button" class="excel-btn-explanation" data-panel="' + panelId + '"' +
+        ' style="font-size:0.82em;padding:5px 12px;border-radius:5px;border:1px solid var(--line2,#ccc);' +
+        'background:var(--surface2,#f6f8fa);cursor:pointer;color:var(--ink2,#444)">해설 보기 ▸</button>';
+      // 해설 패널 (초기 숨김)
+      html += '<div id="' + panelId + '" style="display:none;margin-top:8px;padding:12px 14px;' +
+        'border:1px solid var(--line2,#ddd);border-radius:7px;background:#fafbff;font-size:0.87em;line-height:1.7">';
+      if (back.solution) {
+        html += '<div style="margin-bottom:8px">';
+        html += '<span style="font-weight:600;color:var(--accent,#0550ae);font-size:0.9em">모범 수식</span>';
+        html += '<pre style="margin:4px 0 0;padding:8px 10px;background:var(--surface2,#f6f8fa);' +
+          'border-radius:5px;white-space:pre-wrap;word-break:break-all;font-size:0.95em">' +
+          _esc(back.solution) + '</pre>';
+        html += '</div>';
+      }
+      if (back.explanation) {
+        html += '<div>';
+        html += '<span style="font-weight:600;color:var(--ink2,#444);font-size:0.9em">풀이 설명</span>';
+        html += '<div style="margin-top:4px;color:var(--ink2,#555);white-space:pre-wrap">' +
+          _esc(back.explanation) + '</div>';
+        html += '</div>';
+      }
+      html += '</div>';  // 해설 패널 닫기
+      html += '</div>';  // 래퍼 닫기
+    }
+
     html += '</div>';
     el.innerHTML = html;
+
+    // 해설 토글 이벤트 바인딩
+    var toggleBtn = el.querySelector('.excel-btn-explanation');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', function () {
+        var panelEl = document.getElementById(toggleBtn.getAttribute('data-panel'));
+        if (!panelEl) return;
+        var hidden = panelEl.style.display === 'none';
+        panelEl.style.display = hidden ? 'block' : 'none';
+        toggleBtn.textContent  = hidden ? '해설 닫기 ▾' : '해설 보기 ▸';
+      });
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -556,9 +674,10 @@
           _showResult(resultEl, null, 'Univer 초기화 실패 — 페이지를 새로고침하세요.');
           return;
         }
-        _showResult(resultEl, null, '채점 중...');
+        _showResult(resultEl, null, '채점 중...', null);
         score().then(function (scoreResult) {
-          _showResult(resultEl, scoreResult, null);
+          var back = (_state.activity && _state.activity.back) || null;
+          _showResult(resultEl, scoreResult, null, back);
           ctx.emit({ type: 'activity-completed', result: scoreResult });
           // 채점 후 네비게이션 배지 갱신 (정답 시 배지 반영)
           _updateNavBadges(container, activities, _state.activityIndex);

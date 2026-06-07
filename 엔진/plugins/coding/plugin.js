@@ -125,9 +125,49 @@
   }
 
   /* ─────────────────────────────────────────────
+     비교 헬퍼 (런타임규격 §3-3)
+     compare = "stdout-trim"       : trim 후 exact match
+     compare = "stdout-float-tol"  : 숫자 토큰별 tolerance 비교
+       tolerance: activity.grading.tolerance (기본 1e-6)
+  ───────────────────────────────────────────── */
+  /**
+   * @param {string} actual
+   * @param {string} expected
+   * @param {string} compare      "stdout-trim" | "stdout-float-tol"
+   * @param {number} [tolerance]  stdout-float-tol 전용, 기본 1e-6
+   * @returns {boolean}
+   */
+  function _compare(actual, expected, compare, tolerance) {
+    var a = actual.trim();
+    var e = expected.trim();
+    if (compare === 'stdout-float-tol') {
+      var tol = (tolerance != null) ? tolerance : 1e-6;
+      var aLines = a.split('\n');
+      var eLines = e.split('\n');
+      if (aLines.length !== eLines.length) return false;
+      for (var li = 0; li < eLines.length; li++) {
+        var aToks = aLines[li].trim().split(/\s+/);
+        var eToks = eLines[li].trim().split(/\s+/);
+        if (aToks.length !== eToks.length) return false;
+        for (var ti = 0; ti < eToks.length; ti++) {
+          var af2 = parseFloat(aToks[ti]);
+          var ef2 = parseFloat(eToks[ti]);
+          if (isNaN(af2) || isNaN(ef2)) {
+            if (aToks[ti] !== eToks[ti]) return false;
+          } else {
+            if (Math.abs(af2 - ef2) > tol) return false;
+          }
+        }
+      }
+      return true;
+    }
+    // 기본: stdout-trim (exact match after trim)
+    return a === e;
+  }
+
+  /* ─────────────────────────────────────────────
      채점 (런타임규격 §3-1, §3-3, §3-4)
-     stdout-trim: trim(actual) === trim(expected)
-     float tolerance: numeric 비교 허용 (1e-6)
+     ScoreResult.feedback.cases[] — 전체 케이스 결과 배열
   ───────────────────────────────────────────── */
   /**
    * @param {object} activity  ActivitySpec (code-problem)
@@ -136,45 +176,47 @@
    */
   function _grade(activity, code) {
     var testCases = activity.grading.test_cases;
+    var compare   = activity.grading.compare || 'stdout-trim';
+    var tolerance = activity.grading.tolerance;
     var total = testCases.length;
     var passed = 0;
     var firstFail = null;
     var errorMsg = null;
+    var cases = [];  // 전체 케이스 결과 배열 (feedback.cases[])
 
     // 순차 실행 (케이스 간 전역 상태 정리 포함)
     var chain = Promise.resolve();
     testCases.forEach(function (tc, idx) {
       chain = chain.then(function () {
-        if (errorMsg === 'timeout') return; // 타임아웃 후 나머지 스킵
+        if (errorMsg === 'timeout') {
+          // 타임아웃 후 나머지: skipped로 기록
+          cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'skipped' });
+          return;
+        }
         return _runOneCase(code, tc.input).then(function (res) {
           if (res.error === 'timeout') {
             errorMsg = 'timeout';
             if (!firstFail) {
-              firstFail = { input: tc.input, expected: tc.expected, actual: '' };
+              firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: '' };
             }
+            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: '', pass: false, error: 'timeout' });
             return;
           }
           if (res.error) {
-            // 예외 발생 케이스
             if (!firstFail) {
-              firstFail = { input: tc.input, expected: tc.expected, actual: res.stdout };
+              firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
             }
             if (!errorMsg) errorMsg = res.error;
+            cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: false, error: res.error });
             return;
           }
-          // float tolerance 비교
-          var actualTrim = res.stdout.trim();
-          var expectedTrim = tc.expected.trim();
-          var ok = actualTrim === expectedTrim;
-          if (!ok) {
-            var af = parseFloat(actualTrim), ef = parseFloat(expectedTrim);
-            if (!isNaN(af) && !isNaN(ef) && Math.abs(af - ef) < 1e-6) ok = true;
-          }
+          var ok = _compare(res.stdout, tc.expected, compare, tolerance);
           if (ok) {
             passed++;
           } else if (!firstFail) {
-            firstFail = { input: tc.input, expected: tc.expected, actual: res.stdout };
+            firstFail = { idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout };
           }
+          cases.push({ idx: idx, input: tc.input, expected: tc.expected, actual: res.stdout, pass: ok });
         });
       });
     });
@@ -182,18 +224,19 @@
     return chain.then(function () {
       var verdict = (passed === total && !errorMsg) ? 'correct' : 'incorrect';
       var feedback = {
-        passed: passed,
-        total: total,
-        first_fail: firstFail
+        passed:     passed,
+        total:      total,
+        first_fail: firstFail,
+        cases:      cases        // 전체 케이스 결과 배열
       };
       if (errorMsg) feedback.error = errorMsg;
 
       /** @type {ScoreResult} */
       return {
-        verdict: verdict,
+        verdict:   verdict,
         score_raw: total > 0 ? passed / total : 0,
         grader_id: 'pyodide',
-        feedback: feedback
+        feedback:  feedback
       };
     });
   }
@@ -477,9 +520,16 @@
       })(actBtns[bi]);
     }
 
-    // Pyodide 백그라운드 프리로드
+    // Pyodide 백그라운드 프리로드 + allowed_packages 사전 설치
     if (loadingEl) loadingEl.removeAttribute('hidden');
     _ensurePyodide().then(function () {
+      // micropip 화이트리스트: 현재 activity의 allowed_packages 수집
+      // (모든 activity의 패키지 합집합 — 어느 문제로 이동해도 즉시 실행 가능)
+      var pkgs = _collectAllowedPackages(activities);
+      if (pkgs.length > 0) {
+        return _installPackages(pkgs, loadingEl);
+      }
+    }).then(function () {
       if (loadingEl) loadingEl.setAttribute('hidden', '');
       if (runBtn)    runBtn.disabled    = false;
       if (submitBtn) submitBtn.disabled = false;
@@ -777,6 +827,52 @@
     _saveProgress(snap);
   }
 
+  /**
+   * activities 배열 전체에서 allowed_packages 합집합 수집
+   * @param {Array} activities
+   * @returns {string[]}  중복 제거된 패키지명 배열
+   */
+  function _collectAllowedPackages(activities) {
+    var seen = {};
+    var result = [];
+    (activities || []).forEach(function (act) {
+      var pkgs = act && act.grading && act.grading.allowed_packages;
+      if (Array.isArray(pkgs)) {
+        pkgs.forEach(function (pkg) {
+          if (pkg && !seen[pkg]) {
+            seen[pkg] = true;
+            result.push(pkg);
+          }
+        });
+      }
+    });
+    return result;
+  }
+
+  /**
+   * micropip.install()로 패키지 목록 사전 설치
+   * Pyodide 로드 완료 후 호출 (window._pyodide 존재 전제)
+   * @param {string[]} pkgs
+   * @param {HTMLElement} [loadingEl]  진행 상태 표시용
+   * @returns {Promise<void>}
+   */
+  function _installPackages(pkgs, loadingEl) {
+    var py = _pyodide;
+    if (!py || !pkgs || !pkgs.length) return Promise.resolve();
+    if (loadingEl) loadingEl.textContent = '📦 패키지 설치 중: ' + pkgs.join(', ') + '...';
+    // micropip는 Pyodide에 기본 포함 (0.26+)
+    return py.loadPackagesFromImports('import micropip').then(function () {
+      return py.runPythonAsync(
+        'import micropip as _micropip\n' +
+        'import asyncio as _asyncio\n' +
+        'await _micropip.install(' + JSON.stringify(pkgs) + ')\n'
+      );
+    }).catch(function (e) {
+      // 설치 실패: 경고만(채점 실패가 아님 — 사용자가 직접 install 코드 작성 가능)
+      console.warn('[coding] micropip install 실패:', e.message || e);
+    });
+  }
+
   /** window.ACTIVITIES['coding']에서 activityId 검색 */
   function _findActivity(activityId) {
     var list = (window.ACTIVITIES && window.ACTIVITIES['coding']) || [];
@@ -792,7 +888,7 @@
     el.textContent = text;
   }
 
-  /** 채점 결과 렌더 */
+  /** 채점 결과 렌더 — 전체 케이스 결과표 포함 */
   function _showResult(el, result, message) {
     if (!el) return;
     if (message) { el.innerHTML = '<span style="color:var(--ink3,#666)">' + _esc(message) + '</span>'; return; }
@@ -801,6 +897,7 @@
     var verdictColor = result.verdict === 'correct' ? 'var(--ok,#22863a)' : 'var(--hot,#d73a49)';
     var verdictLabel = result.verdict === 'correct' ? '정답' : '오답';
     var fb = result.feedback;
+
     var html = '<div style="margin-top:8px">' +
       '<strong style="color:' + verdictColor + '">' + verdictLabel + '</strong>' +
       ' <span style="color:var(--ink3,#666);font-size:0.9em">(' + fb.passed + '/' + fb.total + ' 케이스 통과)</span>';
@@ -808,13 +905,46 @@
     if (fb.error) {
       html += '<div style="color:var(--hot,#d73a49);font-size:0.85em;margin-top:4px">오류: ' + _esc(fb.error) + '</div>';
     }
-    if (fb.first_fail) {
+
+    // 전체 케이스 결과표 (feedback.cases[] 있을 때)
+    if (fb.cases && fb.cases.length > 0) {
+      html += '<div style="margin-top:10px;overflow-x:auto">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82em;font-family:monospace">';
+      html += '<thead><tr style="background:var(--surface2,#f6f8fa);color:var(--ink3,#555)">' +
+        '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:center;font-weight:600">#</th>' +
+        '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:left;font-weight:600">입력</th>' +
+        '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:left;font-weight:600">기대 출력</th>' +
+        '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:left;font-weight:600">실제 출력</th>' +
+        '<th style="padding:5px 8px;border:1px solid var(--line2,#ddd);text-align:center;font-weight:600">결과</th>' +
+        '</tr></thead><tbody>';
+      fb.cases.forEach(function (c) {
+        var rowColor = c.pass ? 'var(--ok-bg,#f0fff4)' : (c.error ? 'var(--warn-bg,#fff8f0)' : 'var(--hot-bg,#fff0f3)');
+        var statusIcon = c.pass ? '<span style="color:var(--ok,#22863a);font-weight:700">✓</span>' :
+          (c.error ? '<span style="color:var(--warn,#e36209);font-weight:700" title="' + _esc(c.error) + '">!</span>' :
+            '<span style="color:var(--hot,#d73a49);font-weight:700">✗</span>');
+        var inputDisp   = _esc(String(c.input)).replace(/\n/g, '↵').replace(/  /g, '&nbsp;&nbsp;');
+        var expectedDisp = _esc(String(c.expected).trim()).replace(/\n/g, '↵');
+        var actualDisp   = c.pass
+          ? _esc(String(c.actual).trim()).replace(/\n/g, '↵')
+          : '<span style="color:var(--hot,#d73a49)">' + _esc(String(c.actual).trim()).replace(/\n/g, '↵') + '</span>';
+        html += '<tr style="background:' + rowColor + '">' +
+          '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center;color:var(--ink3,#888)">' + c.idx + '</td>' +
+          '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(String(c.input)) + '">' + inputDisp + '</td>' +
+          '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)">' + expectedDisp + '</td>' +
+          '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)">' + actualDisp + '</td>' +
+          '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center">' + statusIcon + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    } else if (fb.first_fail) {
+      // cases[] 없으면 first_fail fallback (하위 호환)
       html += '<div style="font-size:0.85em;margin-top:6px;color:var(--ink3,#666)">' +
         '첫 실패 케이스 · 입력: <code>' + _esc(fb.first_fail.input) + '</code>' +
-        ' / 기대: <code>' + _esc(fb.first_fail.expected.trim()) + '</code>' +
-        ' / 실제: <code>' + _esc(fb.first_fail.actual.trim()) + '</code>' +
+        ' / 기대: <code>' + _esc(String(fb.first_fail.expected).trim()) + '</code>' +
+        ' / 실제: <code>' + _esc(String(fb.first_fail.actual).trim()) + '</code>' +
         '</div>';
     }
+
     html += '</div>';
     el.innerHTML = html;
   }

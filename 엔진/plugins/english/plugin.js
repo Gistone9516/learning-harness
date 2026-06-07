@@ -259,7 +259,10 @@
 
     var total    = expTokens.length;
     var scoreRaw = total > 0 ? lcsLen / total : 0;
-    var threshold = 0.9;  // 런타임규격 §4-3 기본값
+    // 런타임규격 §4-3 기본값 0.9, 문항별 grading.dictation_threshold로 재정의 가능 (core ①)
+    var threshold = (activity.grading && typeof activity.grading.dictation_threshold === 'number')
+      ? activity.grading.dictation_threshold
+      : 0.9;
     return {
       verdict:   scoreRaw >= threshold ? 'correct' : 'incorrect',
       score_raw: scoreRaw,
@@ -292,16 +295,20 @@
       });
     }
     // 키 있는 경우: OpenAI-compatible POST /chat/completions
-    // v1 파킹 — 키 확인까지만 구현
-    var rubric = (activity.grading && activity.grading.rubric) || '';
-    return fetch('https://api.openai.com/v1/chat/completions', {
+    // llm_endpoint / llm_model byok 키로 유연화 (core ②)
+    var rubric    = (activity.grading && activity.grading.rubric) || '';
+    var endpoint  = (ctx && ctx.getKey ? ctx.getKey('llm_endpoint') : null) ||
+                    'https://api.openai.com/v1/chat/completions';
+    var modelName = (ctx && ctx.getKey ? ctx.getKey('llm_model') : null) ||
+                    'gpt-4o-mini';
+    return fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
         'Authorization': 'Bearer ' + key
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: modelName,
         messages: [
           {
             role:    'system',
@@ -365,6 +372,43 @@
   }
 
   /* ─────────────────────────────────────────────
+     SM-2 스케줄러 (core ③)
+     SuperMemo SM-2 알고리즘: 정답 간격 확장, 오답 간격 단축.
+     q(quality): correct=5, incorrect=1 (0-5 scale 단순화)
+  ───────────────────────────────────────────── */
+  function _sm2Update(extra, verdict) {
+    var now      = Date.now();
+    var interval = (extra && typeof extra.sm2_interval === 'number') ? extra.sm2_interval : 1;
+    var efactor  = (extra && typeof extra.sm2_efactor === 'number')  ? extra.sm2_efactor  : 2.5;
+
+    var q = verdict === 'correct' ? 5 : 1;
+
+    // EF 업데이트: EF' = EF + (0.1 - (5-q)(0.08 + (5-q)*0.02))
+    var newEF = efactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+    if (newEF < 1.3) newEF = 1.3;
+
+    var newInterval;
+    if (verdict !== 'correct') {
+      // 오답: 간격 초기화 (1일)
+      newInterval = 1;
+    } else {
+      // 정답: SM-2 간격 확장
+      if (interval <= 1) {
+        newInterval = 1;
+      } else if (interval <= 6) {
+        newInterval = 6;
+      } else {
+        newInterval = Math.round(interval * newEF);
+      }
+    }
+
+    // due_at: 지금으로부터 newInterval 일 후 (ms)
+    var dueAt = now + newInterval * 24 * 60 * 60 * 1000;
+
+    return { sm2_interval: newInterval, sm2_efactor: newEF, due_at: dueAt };
+  }
+
+  /* ─────────────────────────────────────────────
      진도 스냅샷 업데이트 헬퍼
   ───────────────────────────────────────────── */
   function _updateProgress(activityId, modality, lastAnswer, result) {
@@ -384,11 +428,28 @@
       if (result.verdict === 'correct') entry.cold_correct++;
     }
     entry.last_verdict = result.verdict;
-    entry.plugin_extra = {
-      modality:    modality,
-      last_answer: typeof lastAnswer === 'string' ? lastAnswer : null,
-      score_raw:   result.score_raw
-    };
+
+    // SM-2: vocab/grammar 모달에만 적용 (core ③)
+    var sm2Fields = {};
+    if ((modality === 'vocab' || modality === 'grammar') && result.verdict !== 'pending') {
+      sm2Fields = _sm2Update(entry.plugin_extra, result.verdict);
+    } else if (entry.plugin_extra) {
+      // 다른 모달은 기존 SM-2 필드 보존
+      sm2Fields = {
+        sm2_interval: entry.plugin_extra.sm2_interval,
+        sm2_efactor:  entry.plugin_extra.sm2_efactor,
+        due_at:       entry.plugin_extra.due_at
+      };
+    }
+
+    entry.plugin_extra = Object.assign(
+      {
+        modality:    modality,
+        last_answer: typeof lastAnswer === 'string' ? lastAnswer : null,
+        score_raw:   result.score_raw
+      },
+      sm2Fields
+    );
     _state.progress = snap;
     _saveProgress(snap);
   }
@@ -721,13 +782,28 @@
     _state.ctx     = ctx;
     _state.mounted = true;
 
-    var activities = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+    var activitiesRaw = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
 
-    if (!activities.length) {
+    if (!activitiesRaw.length) {
       container.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">' +
                             'english 플러그인: 문제 데이터(window.ACTIVITIES[\'english\'])가 없습니다.</div>';
       return Promise.resolve();
     }
+
+    // SM-2 due_at 기준 정렬 (core ③ — mount 진입점 결합)
+    // due_at이 작은(더 급한) 항목 먼저. due_at 없는 항목은 맨 뒤.
+    var now = Date.now();
+    var snap = _state.progress || _loadProgress();
+    if (snap) _state.progress = snap;
+
+    var activities = activitiesRaw.slice().sort(function (a, b) {
+      var ea = snap && snap.activities && snap.activities[a.activity_id];
+      var eb = snap && snap.activities && snap.activities[b.activity_id];
+      var da = (ea && ea.plugin_extra && typeof ea.plugin_extra.due_at === 'number') ? ea.plugin_extra.due_at : Infinity;
+      var db = (eb && eb.plugin_extra && typeof eb.plugin_extra.due_at === 'number') ? eb.plugin_extra.due_at : Infinity;
+      // SM-2 적용 대상(vocab/grammar)만 due_at 정렬; 나머지는 원래 순서 유지 위해 Infinity 처리됨
+      return da - db;
+    });
 
     // 초기 인덱스: URL 해시 또는 0
     var hashParts = window.location.hash.split('/');

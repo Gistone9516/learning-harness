@@ -31,6 +31,18 @@ window.MANIFEST_ENGLISH = {
         label: "Azure Speech 키 (speaking 발음 채점용)",
         where: "header",
         help:  "Azure Cognitive Services Speech API 키. speaking 모달 pronunciation 채점에 사용. 지역(region)은 설정 화면에서 별도 입력."
+      },
+      {
+        id:    "llm_endpoint",
+        label: "LLM 엔드포인트 URL",
+        where: "url",
+        help:  "OpenAI-compatible chat/completions 엔드포인트 URL. 기본값: https://api.openai.com/v1/chat/completions. ollama·vLLM·Anthropic-proxy 등 커스텀 엔드포인트 지원."
+      },
+      {
+        id:    "llm_model",
+        label: "LLM 모델명",
+        where: "body",
+        help:  "LLM 요청 시 사용할 모델 식별자. 기본값: gpt-4o-mini. 예) claude-3-haiku-20240307, llama3, mistral."
       }
     ]
   },

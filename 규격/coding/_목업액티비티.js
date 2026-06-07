@@ -66,15 +66,12 @@
        B. 부동소수 출력 픽스처 (stdout-float-tol 계약변경 시 검증용)
        // [픽스처: stdout-float-tol — C1/stdout-float-tol 계약변경 시 검증용]
        //
-       // ★ 현재 규격(런타임규격.md §2-1)의 grading.compare는 "stdout-trim" const.
-       //    따라서 아래 compare는 "stdout-trim"으로 선언하고, expected를
-       //    소수점 2자리 고정 문자열로 작성해 현행 채점기에서도 통과 가능하게 함.
-       //
-       //    stdout-float-tol 계약 승인·구현 완료 시:
-       //      1. compare를 "stdout-float-tol"로 변경
-       //      2. grading에 tolerance 필드 추가 (예: "tolerance": 1e-9)
-       //      3. expected를 정확값으로 교체
-       //      4. 이 픽스처로 float 비교 경로 회귀 검증
+       // stdout-float-tol 비교 모드 구현 완료 (런타임규격 §2-1, plugin.js _compare()).
+       // 이 픽스처는 현재 compare="stdout-trim" + 고정 소수점 expected로 유지.
+       // float-tol 회귀 검증 시:
+       //   1. compare를 "stdout-float-tol"으로 변경
+       //   2. tolerance: 1e-4 추가
+       //   3. expected를 정확값으로 교체해도 동작 확인 가능
     ──────────────────────────────────────────────────────────── */
     {
       activity_id: 'cod-mock-002',
@@ -264,32 +261,13 @@
 
     /* ────────────────────────────────────────────────────────────
        E. micropip 화이트리스트 core 픽스처 — numpy 통계 문제
-       // [픽스처: micropip 화이트리스트 core]
+       // [픽스처: micropip 화이트리스트 core — 구현 완료]
        //
-       // 목적: grading.allowed_packages[] 필드를 포함하는 첫 번째 픽스처.
-       //       기존 4개 픽스처는 표준라이브러리(math/sys)만 사용해
-       //       allowed_packages 경로가 전혀 검증되지 않는 갭을 메움.
+       // 런타임규격.md §2-1 grading 스키마에 allowed_packages[] 추가 완료.
+       // plugin.js mount() → _collectAllowedPackages() → _installPackages() 경로 구현 완료.
+       // V12 체크리스트 추가 완료.
        //
-       // ★ 스키마 계약 관계 (micropip 화이트리스트 core 구현 시 추가될 필드):
-       //   현재 런타임규격.md §2-1 grading 스키마는
-       //     "additionalProperties": false
-       //     "required": ["test_cases","compare"]
-       //   로 선언되어 있으며, allowed_packages 필드가 정의되어 있지 않음.
-       //   → 현행 스키마 기준으로 이 픽스처의 grading은 §2-1 validate를 통과하지 못함.
-       //
-       //   micropip 화이트리스트 core(기능백로그.md core 3번) 구현 승인·착수 시:
-       //     1. 런타임규격.md §2-1 grading 스키마에 아래 필드 추가:
-       //          "allowed_packages": {
-       //            "type": "array",
-       //            "items": { "type": "string" },
-       //            "default": []
-       //          }
-       //     2. §3-2 허용패키지 규칙 업데이트: "MVP: 없음" → allowed_packages[] 기반 허용
-       //     3. 기계검증 체크리스트에 V12(allowed_packages → micropip.install 연결) 추가
-       //     4. 이 픽스처(cod-mock-005)로 화이트리스트 mount 경로 회귀 검증
-       //
-       //   변경 전에는 allowed_packages 필드를 주석 처리하지 않고 그대로 두어
-       //   "이 픽스처가 어떤 계약을 기다리는지" 명시적으로 표시.
+       // 이 픽스처로 회귀 검증: mount 후 Pyodide에서 'import numpy' 성공 여부 확인.
     ──────────────────────────────────────────────────────────── */
     {
       activity_id: 'cod-mock-005',
@@ -335,10 +313,8 @@
         ].join(' / ')
       },
       grading: {
-        // ★ allowed_packages: micropip 화이트리스트 core 구현 승인 후 런타임이 읽을 필드.
-        //   현행 런타임규격 §2-1 grading 스키마(additionalProperties:false)에 미정의 상태.
-        //   Pyodide 채점 시 이 배열을 읽어 mount() 단계에서 micropip.install() 사전 실행.
-        //   (계약: 기능백로그.md core "micropip 화이트리스트" 구현 완료 시 스키마에 추가)
+        // allowed_packages: 런타임규격 §2-1 grading 스키마에 정의됨 (구현 완료).
+        // mount() 시 micropip.install(['numpy']) 사전 실행됨.
         allowed_packages: ['numpy'],
         test_cases: [
           { input: '4\n1.0 2.0 3.0 4.0',          expected: '2.5 1.12'   },

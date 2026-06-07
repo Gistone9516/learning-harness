@@ -20,7 +20,7 @@ window.MANIFEST_AWS = {
   entry_url:               "http://localhost:5001", // grade.py 실행 위치
   byok:                    null,              // 키 불요 (LocalStack dummy key 사용)
   capabilities:            ["cloud-lab"],
-  scoring_mode:            "external",        // 비동기 채점서버 (플러그인계약 §2)
+  scoring_mode:            "auto",            // 동기 POST /grade (플러그인계약 §2, C2 fix)
   activity_type:           "cloud-task",
   progress_schema_version: 1
 };

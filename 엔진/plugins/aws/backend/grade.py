@@ -102,6 +102,11 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
             client.describe_table(TableName=identifier)
             return True, f"DynamoDB 테이블 '{identifier}' 존재함"
 
+        elif service == "sqs":
+            # identifier = 큐 이름 (QueueName); SQS get_queue_url 으로 존재 확인
+            client.get_queue_url(QueueName=identifier)
+            return True, f"SQS 큐 '{identifier}' 존재함"
+
         else:
             return False, f"resource-exists: 미지원 서비스 '{service}'"
 
@@ -118,21 +123,32 @@ def _resource_exists(service: str, identifier: str) -> tuple[bool, str]:
 def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     """boto3 로 리소스 속성 조회 후 expected 와 비교.
 
-    expected 형식: {"attribute_path": "expected_value"}
-      - attribute_path: dot-notation으로 boto3 응답 dict 내 경로
-        예: "VersioningConfiguration.Status" → resp["VersioningConfiguration"]["Status"]
-      - 단일 값 비교만 지원 (dict 1-key 권장; multi-key 시 AND 조건).
+    expected 형식 (두 가지 지원):
 
-    서비스별 조회 API:
-      s3       → identifier=버킷명, attribute_path=BucketVersioning.Status 등
-      dynamodb → identifier=테이블명, attribute_path=Table.BillingModeSummary.BillingMode 등
-      lambda   → identifier=함수명, attribute_path=Configuration.Runtime 등
-      ec2      → 인스턴스 태그/상태 조회 (InstanceId 기준)
-      iam      → identifier=역할명, attribute_path=Role.AssumeRolePolicyDocument 등
+    [1] dot-notation 형식: {"BucketVersioning.Status": "Enabled"}
+        boto3 응답 dict 경로로 직접 조회.
+
+    [2] 축약키 형식 (목업 ActivitySpec 호환):
+        {"versioning": {"Status": "Enabled"}}      → S3 get_bucket_versioning 결과 비교
+        {"public_access_block": {"BlockPublicAcls": true}} → S3 get_public_access_block
+        {"env_var": {"APP_ENV": "production"}}     → Lambda 환경변수 비교
+        {"redrive_policy": {"maxReceiveCount": 3}} → SQS RedrivePolicy 비교
+
+    Multi-key: AND 조건 (모두 ok 이어야 통과).
     """
     if not isinstance(expected, dict) or len(expected) == 0:
         return False, "config-equals: expected 는 {attribute_path: value} dict 이어야 함"
 
+    # 축약키 처리 — 축약키가 1개이고 값이 dict이면 전용 핸들러 우선 시도
+    alias_keys = {"versioning", "public_access_block", "env_var", "redrive_policy"}
+    exp_keys = set(expected.keys())
+    if len(exp_keys) == 1 and exp_keys.issubset(alias_keys):
+        alias_key = next(iter(exp_keys))
+        exp_val   = expected[alias_key]
+        ok, msg   = _check_alias(service, identifier, alias_key, exp_val)
+        return ok, msg
+
+    # 일반 dot-notation 경로 처리
     client = make_client(service)
     try:
         actual_root = _fetch_resource_config(client, service, identifier)
@@ -157,6 +173,98 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     if all_ok:
         return True, f"'{identifier}' 속성 일치 — {summary}"
     return False, f"'{identifier}' 속성 불일치 — {summary}"
+
+
+def _check_alias(service: str, identifier: str, alias_key: str, exp_val) -> tuple[bool, str]:
+    """축약키 별칭 핸들러."""
+    client = make_client(service)
+    try:
+        if alias_key == "versioning":
+            # S3 버전 관리 상태 확인
+            resp = client.get_bucket_versioning(Bucket=identifier)
+            resp.pop("ResponseMetadata", None)
+            # exp_val 예: {"Status": "Enabled"} 또는 단순 문자열 "Enabled"
+            if isinstance(exp_val, str):
+                actual = resp.get("Status", "")
+                ok     = actual == exp_val
+                return ok, f"'{identifier}' 버전 관리: 기대={exp_val!r}, 실제={actual!r} → {'✓' if ok else '✗'}"
+            elif isinstance(exp_val, dict):
+                results, all_ok = [], True
+                for k, v in exp_val.items():
+                    actual = resp.get(k)
+                    ok     = actual == v
+                    if not ok: all_ok = False
+                    results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+                msg = " | ".join(results)
+                return all_ok, f"'{identifier}' 버전 관리 — {msg}"
+            return False, "versioning: expected 형식 오류 (str 또는 dict)"
+
+        elif alias_key == "public_access_block":
+            resp = client.get_public_access_block(Bucket=identifier)
+            resp.pop("ResponseMetadata", None)
+            cfg = resp.get("PublicAccessBlockConfiguration", {})
+            if not isinstance(exp_val, dict):
+                return False, "public_access_block: expected는 dict이어야 함"
+            results, all_ok = [], True
+            for k, v in exp_val.items():
+                actual = cfg.get(k)
+                ok     = actual == v
+                if not ok: all_ok = False
+                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+            msg = " | ".join(results)
+            return all_ok, f"'{identifier}' 퍼블릭 액세스 차단 — {msg}"
+
+        elif alias_key == "env_var":
+            resp = client.get_function_configuration(FunctionName=identifier)
+            env  = resp.get("Environment", {}).get("Variables", {})
+            if not isinstance(exp_val, dict):
+                return False, "env_var: expected는 dict이어야 함"
+            results, all_ok = [], True
+            for k, v in exp_val.items():
+                actual = env.get(k)
+                ok     = actual == v
+                if not ok: all_ok = False
+                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+            msg = " | ".join(results)
+            return all_ok, f"'{identifier}' 환경변수 — {msg}"
+
+        elif alias_key == "redrive_policy":
+            # SQS RedrivePolicy 확인
+            queue_url_resp = client.get_queue_url(QueueName=identifier)
+            queue_url      = queue_url_resp["QueueUrl"]
+            attr_resp      = client.get_queue_attributes(
+                QueueUrl=queue_url,
+                AttributeNames=["RedrivePolicy"]
+            )
+            rdp_raw = attr_resp.get("Attributes", {}).get("RedrivePolicy")
+            if not rdp_raw:
+                return False, f"'{identifier}' RedrivePolicy 미설정"
+            try:
+                rdp = json.loads(rdp_raw)
+            except (json.JSONDecodeError, TypeError):
+                return False, f"'{identifier}' RedrivePolicy 파싱 실패: {rdp_raw!r}"
+            if not isinstance(exp_val, dict):
+                return False, "redrive_policy: expected는 dict이어야 함"
+            results, all_ok = [], True
+            for k, v in exp_val.items():
+                # maxReceiveCount는 문자열로 저장되는 경우가 있으므로 타입 캐스팅
+                actual = rdp.get(k)
+                # SQS 속성은 모두 문자열 → 숫자 비교 시 int 변환
+                if isinstance(v, int) and isinstance(actual, str):
+                    try: actual = int(actual)
+                    except ValueError: pass
+                ok = actual == v
+                if not ok: all_ok = False
+                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+            msg = " | ".join(results)
+            return all_ok, f"'{identifier}' RedrivePolicy — {msg}"
+
+        else:
+            return False, f"미지원 축약키: {alias_key!r}"
+
+    except ClientError as exc:
+        code = exc.response["Error"]["Code"]
+        return False, f"속성 조회 실패 (오류코드: {code})"
 
 
 def _fetch_resource_config(client, service: str, identifier: str) -> dict:
@@ -200,6 +308,13 @@ def _fetch_resource_config(client, service: str, identifier: str) -> dict:
         resp = client.get_role(RoleName=identifier)
         resp.pop("ResponseMetadata", None)
         return resp  # resp["Role"]["Arn"] 등
+
+    elif service == "sqs":
+        queue_url_resp = client.get_queue_url(QueueName=identifier)
+        queue_url      = queue_url_resp["QueueUrl"]
+        resp = client.get_queue_attributes(QueueUrl=queue_url, AttributeNames=["All"])
+        resp.pop("ResponseMetadata", None)
+        return resp
 
     else:
         raise NotImplementedError(f"config-equals: 미지원 서비스 '{service}'")
