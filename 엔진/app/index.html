@@ -218,31 +218,41 @@
 <!-- app.js: 엔진 코어 + 노출 API (편집 금지, window.APP.*) -->
 <script src="app.js"></script>
 
-<!-- 플러그인 #1: card-quiz (manifest → plugin 순서, §7 SoT) -->
+<!-- 플러그인 #1: card-quiz (manifest → plugin → 목업카드 순서, §7 SoT) -->
 <script src="../plugins/card-quiz/manifest.js"></script>
 <script src="../plugins/card-quiz/plugin.js"></script>
+<!-- card-quiz 목업: judge선택지·back.why·cloze·recall_seq·self 픽스처 (cycle-4 새기능) -->
+<script src="../../규격/card-quiz/_목업카드.js"></script>
 
-<!-- 플러그인 #2: coding (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<!-- 플러그인 #2: coding (manifest → plugin → 예제 activities → 목업 순서, §7 SoT) -->
 <script src="../plugins/coding/manifest.js"></script>
 <script src="../plugins/coding/plugin.js"></script>
 <script src="../plugins/coding/_example/activities.js"></script>
+<!-- coding 목업: float-tol·다중케이스·back.solution/explanation·matplotlib 픽스처 (cycle-4 새기능) -->
+<script src="../../규격/coding/_목업액티비티.js"></script>
 
-<!-- 플러그인 #3: excel (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<!-- 플러그인 #3: excel (manifest → plugin → 예제 activities → 목업 순서, §7 SoT) -->
 <script src="../plugins/excel/manifest.js"></script>
 <script src="../plugins/excel/plugin.js"></script>
 <script src="../plugins/excel/_example/activities.js"></script>
+<!-- excel 목업: 다중 target_cells·float-tol·VLOOKUP 픽스처 (cycle-4 새기능) -->
+<script src="../../규격/excel/_목업액티비티.js"></script>
 
-<!-- 플러그인 #4: english (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<!-- 플러그인 #4: english (manifest → plugin → 예제 activities → 목업 순서, §7 SoT) -->
 <!-- Web Speech(SpeechSynthesis/SpeechRecognition)는 브라우저 내장 — CDN 불요 -->
 <script src="../plugins/english/manifest.js"></script>
 <script src="../plugins/english/plugin.js"></script>
 <script src="../plugins/english/_example/activities.js"></script>
+<!-- english 목업: dictation_threshold·writing llm-rubric graceful fallback 픽스처 (cycle-4 새기능) -->
+<script src="../../규격/english/_목업액티비티.js"></script>
 
-<!-- 플러그인 #5: aws (manifest → plugin → 예제 activities 순서, §7 SoT) -->
+<!-- 플러그인 #5: aws (manifest → plugin → 예제 activities → 목업 순서, §7 SoT) -->
 <!-- boto3 채점서버(grade.py) 필요 — 백엔드 미연결 시 graceful fallback(pending+안내) -->
 <script src="../plugins/aws/manifest.js"></script>
 <script src="../plugins/aws/plugin.js"></script>
 <script src="../plugins/aws/_example/activities.js"></script>
+<!-- aws 목업: SNS 토픽 생성 픽스처 추가 (cycle-4 새기능) -->
+<script src="../../규격/aws/_목업액티비티.js"></script>
 
 <!-- 공통셸 (마지막 로드 → window.SHELL.init 호출) -->
 <script src="shell.js"></script>

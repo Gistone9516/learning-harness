@@ -1,7 +1,7 @@
 // 목업 콘텐츠 (cycle-3 r2) — 테스트 픽스처용, 실제 학습 콘텐츠 아님. 원본 deck과 별개.
 
 window.ACTIVITIES = window.ACTIVITIES || {};
-window.ACTIVITIES['card-quiz'] = [
+window.ACTIVITIES['card-quiz'] = (window.ACTIVITIES['card-quiz'] || []).concat([
 
   // [픽스처: func/exact — grading.accept[] 복수정답, front.hint 힌트렌더]
   {
@@ -182,4 +182,4 @@ window.ACTIVITIES['card-quiz'] = [
     }
   }
 
-];
+]);

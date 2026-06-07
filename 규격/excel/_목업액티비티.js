@@ -19,7 +19,7 @@
 
   if (!window.ACTIVITIES) window.ACTIVITIES = {};
 
-  window.ACTIVITIES['excel'] = [
+  window.ACTIVITIES['excel'] = (window.ACTIVITIES['excel'] || []).concat([
 
     /* ──────────────────────────────────────────────────────────────
        [픽스처: 단일 target_cell 값비교]
@@ -264,6 +264,6 @@
       }
     }
 
-  ];
+  ]);
 
 })();

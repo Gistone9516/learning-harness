@@ -17,7 +17,7 @@
 
   if (!window.ACTIVITIES) window.ACTIVITIES = {};
 
-  window.ACTIVITIES['english'] = [
+  window.ACTIVITIES['english'] = (window.ACTIVITIES['english'] || []).concat([
 
     /* ──────────────────────────────────────────────────────────────
        [픽스처: static-채점 완전동작 + back.explanation 해설]
@@ -283,6 +283,6 @@
       }
     }
 
-  ];
+  ]);
 
 })();

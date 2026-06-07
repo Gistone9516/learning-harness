@@ -16,7 +16,7 @@
 
   if (!window.ACTIVITIES) window.ACTIVITIES = {};
 
-  window.ACTIVITIES['coding'] = [
+  window.ACTIVITIES['coding'] = (window.ACTIVITIES['coding'] || []).concat([
 
     /* ────────────────────────────────────────────────────────────
        A. 정수 stdout-trim 비교 픽스처
@@ -326,6 +326,6 @@
       }
     }
 
-  ];
+  ]);
 
 })();
