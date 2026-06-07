@@ -1033,7 +1033,7 @@
         if (!btn) return;
         var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
         if (isNaN(newIdx) || newIdx === _state.activityIndex) return;
-        _loadEnglishActivity(container, ctx, activities, newIdx);
+        _loadEnglishActivity(container, ctx, _state.activities, newIdx);
       });
     }
 
@@ -1062,6 +1062,7 @@
     _state.ctx           = null;
     _state.activity      = null;
     _state.activities    = null;
+    _state.progress      = null;
     _state.activityIndex = 0;
   }
 
@@ -1157,6 +1158,15 @@
     var activitiesRaw = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
     if (activitiesRaw.length) {
       _state.activities = _sortActivitiesByDueAt(activitiesRaw, snapshot);
+      // 재정렬 후 현재 activity의 새 인덱스로 _state.activityIndex 갱신 (배지 불일치 방지)
+      if (_state.activity) {
+        var currentId = _state.activity.activity_id;
+        var newIdx = -1;
+        for (var i = 0; i < _state.activities.length; i++) {
+          if (_state.activities[i].activity_id === currentId) { newIdx = i; break; }
+        }
+        if (newIdx !== -1) _state.activityIndex = newIdx;
+      }
     }
 
     // 마운트 상태에서 복원 시 last_answer 갱신

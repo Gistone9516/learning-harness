@@ -364,7 +364,8 @@
     mountTime:      0,      // [mid] 풀이 시간: mount() 호출 시각 (Date.now())
     filterArea:     '',     // [mid] 태그 필터: 현재 선택 area (''=전체)
     filterSubarea:  '',     // [mid] 태그 필터: 현재 선택 subarea (''=전체)
-    scoreInFlight:  false   // 채점 중 중복 클릭 방어
+    scoreInFlight:   false,  // 채점 중 중복 클릭 방어
+    pkgInstallFailed: false  // _installPackages 실패 시 true — 채점 진입 차단
   };
 
   /* ─────────────────────────────────────────────
@@ -797,6 +798,11 @@
       submitBtn.addEventListener('click', function () {
         // 채점 중 중복 클릭 방어 (더블클릭 시 cold_attempts/emit 이중 방지)
         if (_state.scoreInFlight) return;
+        // 패키지 미설치 상태 진입 차단 (채점 시 런타임 오류 방지)
+        if (_state.pkgInstallFailed) {
+          _showResult(resultEl, null, '필수 패키지 설치에 실패했습니다. 페이지를 새로 고침한 후 다시 시도하세요.');
+          return;
+        }
         if (!_state.activity) {
           _showResult(resultEl, null, '문제가 로드되지 않았습니다.');
           return;
@@ -807,11 +813,14 @@
         }
         var code = _state.editor.getValue();
         var activity = _state.activity;
+        var submittedIdx = _state.activityIndex;  // nav 전환 오염 방지: 제출 시점 idx 캡처
         _state.scoreInFlight = true;
         submitBtn.disabled = true;
         _showResult(resultEl, null, '채점 중...');
         // score() 호출
         score({ code: code }).then(function (result) {
+          // nav 전환 후 구 결과가 새 activity 영역에 표시되는 오염 방지
+          if (_state.activityIndex !== submittedIdx) return;
           _showResult(resultEl, result, null);
           // solution 버튼: back에 내용이 있으면 표시
           // 오답인 경우 첫 제출 시에만 표시 (즉각 공개 방지), 정답이면 항상 표시
@@ -873,6 +882,8 @@
     _state.filterArea     = '';      // [mid]
     _state.filterSubarea  = '';      // [mid]
     _state.scoreInFlight  = false;
+    _state.pkgInstallFailed = false;
+    _state.progress       = null;    // 재마운트 시 오염 방지 — 진도는 localStorage 재로드
   }
 
   /* ─────────────────────────────────────────────
@@ -1096,7 +1107,8 @@
       // 설치 완료 후 _safe_modules 갱신: 설치된 패키지가 케이스 간 정리에서 제외됨
       try { py.runPython('_safe_modules = set(_sys.modules.keys())'); } catch (e2) {}
     }).catch(function (e) {
-      // F-12: 설치 실패 경고 — loadingEl에 표시 (silent degradation 방지)
+      // F-12: 설치 실패 — 플래그 설정 + loadingEl 표시 (채점 진입 차단)
+      _state.pkgInstallFailed = true;
       var warnMsg = '⚠️ 패키지 설치 실패: ' + (e && (e.message || String(e)) || '알 수 없는 오류');
       console.warn('[coding] micropip install 실패:', e && (e.message || e));
       if (loadingEl) loadingEl.textContent = warnMsg;

@@ -295,8 +295,15 @@
         var targetInst = window.PLUGIN_REGISTRY[targetPid];
         if (targetInst && typeof targetInst.startRetrySession === 'function') {
           targetInst.startRetrySession(wrongItems);
+          _setRoute('learn');
+        } else {
+          console.warn('[SHELL] startRetrySession 미지원 — 오답 재연습 불가', targetPid);
+          var el2 = document.createElement('p');
+          el2.style.cssText = 'margin-top:8px;font-size:13px;color:var(--hot,#c0392b)';
+          el2.textContent = '이 플러그인은 오답 재연습을 지원하지 않습니다.';
+          btnRow.appendChild(el2);
+          return;
         }
-        _setRoute('learn');
       });
       btnRow.appendChild(btnRetry);
     }

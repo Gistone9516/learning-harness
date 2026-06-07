@@ -614,6 +614,12 @@
         try {
           var result = _mountUniver(univerContainer, initialGrid);
           _state.univerAPI = result.univerAPI;
+          // MED: 세션 내 활동 전환 시 cell_snapshot 복원
+          // onProgressRestored 경로에만 있던 복원을 전환 경로에도 적용 — A→B→A 시 A 입력 보존
+          var activitySnap = _state.progress && _state.progress.activities && _state.progress.activities[activity.activity_id];
+          if (activitySnap && activitySnap.plugin_extra && activitySnap.plugin_extra.cell_snapshot) {
+            _applySnapshotRestore(_state.progress);
+          }
         } catch (e) {
           univerContainer.textContent = 'Univer 초기화 실패: ' + e.message;
         }
@@ -766,13 +772,17 @@
           _showResult(resultEl, null, 'Univer 초기화 실패 — 페이지를 새로고침하세요.');
           return;
         }
-        // 클릭 시점 activity 캡처 — score().then 콜백이 resolve 시점에
-        // _state.activity를 읽으면 채점 중 activity 전환 시 다른 해설이 표시됨 (coding 패턴 미러)
-        var capturedActivity = _state.activity;
+        // 클릭 시점 activity + activityIndex 캡처 —
+        // score().then 콜백 resolve 시점에 _state.activity/_state.activityIndex를 읽으면
+        // 채점 중 nav 전환이 일어났을 때 결과가 다른 활동 영역에 오염됨 (coding 패턴 미러 + 인덱스 가드 강화)
+        var capturedActivity      = _state.activity;
+        var capturedActivityIndex = _state.activityIndex;
         _state.scoreInFlight = true;
         submitBtn.disabled = true;
         _showResult(resultEl, null, '채점 중...', null);
         score().then(function (scoreResult) {
+          // MED: resolve 시점에 활동이 전환됐으면 결과 쓰기 skip (오염 방지)
+          if (_state.activityIndex !== capturedActivityIndex) return;
           var back = (capturedActivity && capturedActivity.back) || null;
           _showResult(resultEl, scoreResult, null, back);
           ctx.emit({ type: 'activity-completed', result: scoreResult });

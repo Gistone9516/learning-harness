@@ -696,6 +696,8 @@
     _state.ctx           = null;
     _state.activities    = [];
     _state.backendOnline = false;
+    _state.progress      = null;   // 재마운트 시 오염 방지 — 진도는 localStorage 재로드
+    _state.restored      = false;
   }
 
   /* ─────────────────────────────────────────────
