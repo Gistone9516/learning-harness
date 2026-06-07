@@ -384,12 +384,13 @@
 
   /**
    * 채점 결과 렌더 — 다중셀 결과표 + 해설 패널 토글 포함
-   * @param {HTMLElement}  el        .excel-result 영역
+   * @param {HTMLElement}  el            .excel-result 영역
    * @param {ScoreResult|null} result
-   * @param {string|null}  message   단순 메시지 표시용
-   * @param {object|null}  back      ActivitySpec.back (solution/explanation)
+   * @param {string|null}  message       단순 메시지 표시용
+   * @param {object|null}  back          ActivitySpec.back (solution/explanation)
+   * @param {object|null}  progressEntry 채점 전 진도 엔트리 (cold_attempts 참조 — 2회 이상 오답 시 해설 자동 펼침 판정)
    */
-  function _showResult(el, result, message, back) {
+  function _showResult(el, result, message, back, progressEntry) {
     if (!el) return;
 
     // 단순 메시지 (채점 중... / 오류)
@@ -434,9 +435,11 @@
     }
     html += '</div>';
 
-    // ── 다중셀 결과표 (셀 3개 이상이거나 오답 있을 때 항상 표시) ──
+    // ── 다중셀 결과표 (UX-B: 오답 셀 기대값은 토글 뒤에 숨김 — 역산 학습 방지) ──
     var cellResults = fb.cell_results || [];
     if (cellResults.length > 0) {
+      // 오답 셀 토글 ID (각 행 단위로 고유 ID 생성)
+      var tableBaseId = 'xcr-' + Date.now();
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.82em;margin-bottom:8px">';
       html += '<thead><tr style="background:var(--surface2,#f2eee5)">';
       html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">셀</th>';
@@ -444,32 +447,50 @@
       html += '<th style="padding:4px 8px;text-align:left;border:1px solid var(--line2,#ddd)">입력값</th>';
       html += '<th style="padding:4px 8px;text-align:center;border:1px solid var(--line2,#ddd)">결과</th>';
       html += '</tr></thead><tbody>';
-      cellResults.forEach(function (cr) {
+      cellResults.forEach(function (cr, idx) {
         var rowBg = cr.ok ? 'var(--brand-bg,#e4efe7)' : 'var(--hot-bg,#f9e7e2)';
-        var icon  = cr.ok ? '<span style="color:var(--brand,#1f6b4a)">✓</span>' : '<span style="color:var(--hot,#a8301f)">✗</span>';
-        html += '<tr style="background:' + rowBg + '">';
-        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(cr.cell) + '</code></td>';
-        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.expected)) + '</code></td>';
-        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.actual != null ? cr.actual : '(빈 셀)')) + '</code></td>';
-        html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center">' + icon + '</td>';
-        html += '</tr>';
+        if (cr.ok) {
+          // 정답 셀: ✓만 표시, 기대값 열 비움
+          html += '<tr style="background:' + rowBg + '">';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(cr.cell) + '</code></td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);color:var(--ink3,#aaa);font-size:0.85em">—</td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.actual != null ? cr.actual : '(빈 셀)')) + '</code></td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center"><span style="color:var(--brand,#1f6b4a)">✓</span></td>';
+          html += '</tr>';
+        } else {
+          // 오답 셀: 기대값은 토글 버튼 뒤에 숨김 (역산 학습 방지)
+          var revealId = tableBaseId + '-' + idx;
+          html += '<tr style="background:' + rowBg + '">';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(cr.cell) + '</code></td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)">' +
+            '<button type="button" class="xcr-reveal-btn" data-reveal="' + revealId + '"' +
+            ' style="font-size:0.78em;padding:2px 8px;border-radius:4px;border:1px solid var(--line2,#ccc);' +
+            'background:var(--surface,#fbfaf6);cursor:pointer;color:var(--ink3,#7a7168)">정답값 보기</button>' +
+            '<span id="' + revealId + '" style="display:none"><code>' + _esc(String(cr.expected)) + '</code></span>' +
+            '</td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd)"><code>' + _esc(String(cr.actual != null ? cr.actual : '(빈 셀)')) + '</code></td>';
+          html += '<td style="padding:4px 8px;border:1px solid var(--line2,#ddd);text-align:center"><span style="color:var(--hot,#a8301f)">✗</span></td>';
+          html += '</tr>';
+        }
       });
       html += '</tbody></table>';
     }
 
-    // ── 해설 패널 (back.solution / back.explanation) ──
+    // ── 해설 패널 (UX-A: 기본 접힘 + "왜 틀렸는지 확인하기" 버튼; 2회 이상 오답 시만 자동 펼침) ──
     if (back && (back.solution || back.explanation)) {
       var panelId = 'excel-explanation-' + Date.now();
-      // 오답일 때 해설 자동 펼침 → 인출 실패 직후 즉시 피드백 제공
-      var panelOpen = !isCorrect;
+      // 자동 펼침 조건: 오답이고, 이전 cold_attempts >= 1 (= 이번이 2회째 이상 오답)
+      // progressEntry는 _updateProgress 이전 스냅샷이므로 cold_attempts = 이번 시도 제외 누적 횟수
+      var priorAttempts = (progressEntry && progressEntry.cold_attempts) ? progressEntry.cold_attempts : 0;
+      var autoOpen = !isCorrect && priorAttempts >= 1;
+      var btnLabel = autoOpen ? '해설 닫기 ▾' : (isCorrect ? '해설 보기 ▸' : '왜 틀렸는지 확인하기 ▸');
       html += '<div style="margin-top:8px">';
-      // 토글 버튼
       html += '<button type="button" class="excel-btn-explanation" data-panel="' + panelId + '"' +
         ' style="font-size:0.82em;padding:5px 12px;border-radius:5px;border:1px solid var(--line2,#ccc);' +
         'background:var(--surface2,#f2eee5);cursor:pointer;color:var(--ink2,#444)">' +
-        (panelOpen ? '해설 닫기 ▾' : '해설 보기 ▸') + '</button>';
-      // 해설 패널 (오답 시 초기 펼침)
-      html += '<div id="' + panelId + '" style="display:' + (panelOpen ? 'block' : 'none') + ';margin-top:8px;padding:12px 14px;' +
+        btnLabel + '</button>';
+      // 해설 패널 (2회 이상 오답 시 자동 펼침, 그 외 기본 접힘)
+      html += '<div id="' + panelId + '" style="display:' + (autoOpen ? 'block' : 'none') + ';margin-top:8px;padding:12px 14px;' +
         'border:1px solid var(--line2,#ddd);border-radius:7px;background:#fafbff;font-size:0.87em;line-height:1.7">';
       if (back.solution) {
         html += '<div style="margin-bottom:8px">';
@@ -501,9 +522,19 @@
         if (!panelEl) return;
         var hidden = panelEl.style.display === 'none';
         panelEl.style.display = hidden ? 'block' : 'none';
-        toggleBtn.textContent  = hidden ? '해설 닫기 ▾' : '해설 보기 ▸';
+        toggleBtn.textContent  = hidden ? '해설 닫기 ▾' : '왜 틀렸는지 확인하기 ▸';
       });
     }
+
+    // 오답 셀 "정답값 보기" 토글 이벤트 바인딩 (이벤트 위임)
+    el.addEventListener('click', function (e) {
+      var revealBtn = e.target.closest && e.target.closest('.xcr-reveal-btn');
+      if (!revealBtn) return;
+      var revealEl = document.getElementById(revealBtn.getAttribute('data-reveal'));
+      if (!revealEl) return;
+      revealEl.style.display = 'inline';
+      revealBtn.style.display = 'none';  // 버튼 숨김 (한 번만 열 수 있음 — 되돌림 차단)
+    });
   }
 
   /* ─────────────────────────────────────────────
@@ -803,14 +834,18 @@
         // 채점 중 nav 전환이 일어났을 때 결과가 다른 활동 영역에 오염됨 (coding 패턴 미러 + 인덱스 가드 강화)
         var capturedActivity      = _state.activity;
         var capturedActivityIndex = _state.activityIndex;
+        // UX-A: 채점 전 진도 엔트리 스냅샷 (cold_attempts 기준 — 2회 이상 오답 시 해설 자동 펼침 판정용)
+        var snap = getProgressSnapshot();
+        var capturedProgressEntry = (capturedActivity && snap.activities && snap.activities[capturedActivity.activity_id])
+          ? snap.activities[capturedActivity.activity_id] : null;
         _state.scoreInFlight = true;
         submitBtn.disabled = true;
-        _showResult(resultEl, null, '채점 중...', null);
+        _showResult(resultEl, null, '채점 중...', null, null);
         score().then(function (scoreResult) {
           // MED: resolve 시점에 활동이 전환됐으면 결과 쓰기 skip (오염 방지)
           if (_state.activityIndex !== capturedActivityIndex) return;
           var back = (capturedActivity && capturedActivity.back) || null;
-          _showResult(resultEl, scoreResult, null, back);
+          _showResult(resultEl, scoreResult, null, back, capturedProgressEntry);
           ctx.emit({ type: 'activity-completed', result: scoreResult });
           // 채점 후 네비게이션 배지 갱신 (정답 시 배지 반영)
           _updateNavBadges(container, activities, _state.activityIndex);

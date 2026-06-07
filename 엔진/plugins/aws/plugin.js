@@ -112,26 +112,55 @@
   }
 
   /* ─────────────────────────────────────────────
-     오프라인 배너 HTML (LocalStack 2026.03 인증 안내 포함)
+     오프라인 배너 HTML — 요약 1줄 + 설치 안내 토글
+     (장문 상시노출 → 기본 접힘, 필요 시만 펼침)
   ───────────────────────────────────────────── */
   function _offlineBannerHTML(reason) {
-    return '<div class="aws-offline-banner" style="' +
+    var detailId = 'aws-offline-detail-' + Math.random().toString(36).slice(2, 7);
+    return '<div class="aws-offline-banner" role="status" aria-live="polite" style="' +
       'background:#fff8e1;border:1px solid #ffe082;border-radius:8px;' +
-      'padding:14px 16px;margin-bottom:16px;font-size:0.88em;line-height:1.7;color:#5f4b00">' +
-      '<strong>AWS 백엔드(grade.py)에 연결할 수 없습니다.</strong> ' +
-      '(' + _esc(reason) + ')<br>' +
-      '백엔드를 시작한 후 새로고침하세요.<br><br>' +
-      '<strong>[옵션 A] LocalStack</strong> (2026.03 이후 LOCALSTACK_AUTH_TOKEN 필요):<br>' +
-      '<code style="display:block;background:#fffde7;padding:5px 8px;border-radius:4px;font-size:0.85em;margin:4px 0 8px">' +
-      'LOCALSTACK_AUTH_TOKEN=&lt;your-token&gt; docker run --rm -p 4566:4566 -e LOCALSTACK_AUTH_TOKEN localstack/localstack<br>' +
-      '→ 토큰 발급: https://app.localstack.cloud/sign-in' +
-      '</code>' +
-      '<strong>[옵션 B] MiniStack</strong> (계정·토큰 불필요, MIT):<br>' +
-      '<code style="display:block;background:#fffde7;padding:5px 8px;border-radius:4px;font-size:0.85em;margin:4px 0 8px">' +
-      'docker run --rm -p 4566:4566 gresearch/ministack' +
-      '</code>' +
-      '<strong>grade.py</strong>: <code>python grade.py</code> (기본 포트 5001)' +
-      '</div>';
+      'padding:10px 14px;margin-bottom:14px;font-size:0.88em;line-height:1.6;color:#5f4b00">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<span><strong>AWS 백엔드 미연결</strong> — 백엔드를 시작한 후 새로고침하세요.</span>' +
+        '<button type="button" class="aws-offline-toggle" ' +
+          'aria-expanded="false" aria-controls="' + detailId + '" style="' +
+          'font-size:0.82em;padding:2px 9px;border-radius:4px;border:1px solid #ffe082;' +
+          'background:#fffde7;color:#5f4b00;cursor:pointer;white-space:nowrap">설치 방법 보기</button>' +
+      '</div>' +
+      '<div id="' + detailId + '" hidden style="margin-top:10px;line-height:1.7">' +
+        '<strong>[옵션 A] LocalStack</strong> (2026.03 이후 LOCALSTACK_AUTH_TOKEN 필요):<br>' +
+        '<code style="display:block;background:#fffde7;padding:5px 8px;border-radius:4px;font-size:0.85em;margin:4px 0 8px">' +
+        'LOCALSTACK_AUTH_TOKEN=&lt;your-token&gt; docker run --rm -p 4566:4566 -e LOCALSTACK_AUTH_TOKEN localstack/localstack<br>' +
+        '→ 토큰 발급: https://app.localstack.cloud/sign-in' +
+        '</code>' +
+        '<strong>[옵션 B] MiniStack</strong> (계정·토큰 불필요, MIT):<br>' +
+        '<code style="display:block;background:#fffde7;padding:5px 8px;border-radius:4px;font-size:0.85em;margin:4px 0 8px">' +
+        'docker run --rm -p 4566:4566 gresearch/ministack' +
+        '</code>' +
+        '<strong>grade.py</strong>: <code>python grade.py</code> (기본 포트 5001)' +
+      '</div>' +
+    '</div>';
+  }
+
+  /** 배너 토글 버튼 이벤트 바인딩 (buildLayout 후 호출) */
+  function _bindOfflineToggle(container) {
+    var btn = container.querySelector('.aws-offline-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var detailId = btn.getAttribute('aria-controls');
+      var detail   = detailId && document.getElementById(detailId);
+      if (!detail) return;
+      var isHidden = detail.hasAttribute('hidden');
+      if (isHidden) {
+        detail.removeAttribute('hidden');
+        btn.setAttribute('aria-expanded', 'true');
+        btn.textContent = '설치 방법 숨기기';
+      } else {
+        detail.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.textContent = '설치 방법 보기';
+      }
+    });
   }
 
   /* ─────────────────────────────────────────────
@@ -163,6 +192,11 @@
           '<div class="aws-activity-content"></div>' +
         '</div>' +
       '</div>';
+
+    // 오프라인 배너 토글 바인딩 (backendOnline=false 일 때만 배너 존재)
+    if (!backendOnline) {
+      _bindOfflineToggle(container);
+    }
 
     // 사이드바 클릭 이벤트
     var sidebar = container.querySelector('.aws-sidebar');

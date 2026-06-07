@@ -1341,20 +1341,50 @@
       html += '<div style="margin-top:6px;font-size:0.85rem;color:var(--hot,#a8301f)">오류: ' + _esc(fb.error) + '</div>';
     }
 
-    // back.explanation 표시 (있으면, 정답 시 또는 pending 아닌 비-listening 오답 시)
-    // listening 오답 시 해설(= 정답 텍스트) 즉시 노출하면 재인출 가치가 0이 됨 → 숨김.
-    // (방향성 원칙4: 인출을 약화시키는 편의기능 제외)
+    // back.explanation 표시 (원칙4: 인출강도 우선)
+    // - pending: 항상 숨김
+    // - 정답(correct): 즉시 노출 (인출 완료 후 확인이므로 OK)
+    // - 오답(incorrect) + listening: 재인출 차단이므로 숨김 (기존 동작 유지)
+    // - 오답(incorrect) + vocab/grammar/reading: 즉시 노출 → 재인출 차단.
+    //   → "해설 확인" 버튼 클릭 시에만 노출로 변경 (UX 개선)
     var modality = activity && activity.front && activity.front.modality;
-    var showExplanation = verdict !== 'pending' &&
-                         activity && activity.back && activity.back.explanation &&
-                         !(modality === 'listening' && verdict === 'incorrect');
-    if (showExplanation) {
-      html += '<div style="margin-top:10px;padding:10px 12px;background:var(--surface2,#f2eee5);border-radius:6px;font-size:0.88rem;color:var(--ink2,#444)">' +
-              '<strong>해설:</strong> ' + _esc(activity.back.explanation) + '</div>';
+    var hasExplanation = verdict !== 'pending' &&
+                         activity && activity.back && activity.back.explanation;
+    if (hasExplanation) {
+      if (verdict === 'correct') {
+        // 정답: 즉시 노출
+        html += '<div style="margin-top:10px;padding:10px 12px;background:var(--surface2,#f2eee5);border-radius:6px;font-size:0.88rem;color:var(--ink2,#444)">' +
+                '<strong>해설:</strong> ' + _esc(activity.back.explanation) + '</div>';
+      } else if (verdict === 'incorrect' && modality !== 'listening') {
+        // 오답 + 비-listening: 게이팅 — 클릭 시 노출
+        var expId = 'eng-expl-' + _esc(activity.activity_id || 'x');
+        html += '<div style="margin-top:10px">' +
+                '<button type="button" class="eng-expl-toggle"' +
+                ' data-expl-id="' + expId + '"' +
+                ' style="padding:5px 14px;border-radius:6px;border:1px solid var(--line2,#cfc7b4);background:var(--surface,#fbfaf6);color:var(--ink3,#666);cursor:pointer;font-size:0.83rem">' +
+                '해설 확인</button>' +
+                '<div id="' + expId + '" style="display:none;margin-top:8px;padding:10px 12px;background:var(--surface2,#f2eee5);border-radius:6px;font-size:0.88rem;color:var(--ink2,#444)">' +
+                '<strong>해설:</strong> ' + _esc(activity.back.explanation) + '</div>' +
+                '</div>';
+      }
+      // 오답 + listening: 숨김 (기존 동작 — 재인출 보호)
     }
 
     html += '</div>';
     el.innerHTML = html;
+
+    // "해설 확인" 버튼 이벤트 바인딩 (innerHTML 갱신 후 DOM 존재 시점에서 처리)
+    var explToggle = el.querySelector('.eng-expl-toggle');
+    if (explToggle) {
+      explToggle.addEventListener('click', function () {
+        var targetId = explToggle.getAttribute('data-expl-id');
+        var explDiv = el.querySelector('#' + targetId);
+        if (!explDiv) return;
+        var isHidden = explDiv.style.display === 'none';
+        explDiv.style.display = isHidden ? 'block' : 'none';
+        explToggle.textContent = isHidden ? '해설 닫기' : '해설 확인';
+      });
+    }
   }
 
   /* ─────────────────────────────────────────────

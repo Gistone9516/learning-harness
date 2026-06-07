@@ -98,14 +98,13 @@
 
       '<div class="quiz-wrap" id="quiz-active" role="region" aria-label="퀴즈 카드">',
 
-      /* 세션 진행 + D-day 토글 */
+      /* 세션 진행 */
       '<div data-quiz="progress" class="quiz-progress" aria-label="세션 진행" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
       '  <span id="progress-current" aria-live="polite">0 / 0</span>',
       '  <div class="progress-bar-track" role="progressbar"',
       '       aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progress-track-el" style="flex:1;min-width:80px;">',
       '    <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>',
       '  </div>',
-      '  <button type="button" id="btn-dday-toggle" class="btn-dday-toggle" aria-pressed="false" aria-label="D-day 모드 토글">D-day OFF</button>',
       '  <button type="button" id="btn-unit-filter-toggle" class="btn-quiz-aux" aria-expanded="false" aria-label="단원 필터 토글">단원 필터</button>',
       '</div>',
 
@@ -166,8 +165,11 @@
       '  </button>',
       '</div>',
 
-      /* 정답 확인 */
-      '<button type="button" data-quiz="reveal" class="btn-reveal" id="btn-reveal" aria-label="정답 확인">정답 확인</button>',
+      /* 정답 확인 + 넘기기(앞면 전용) */
+      '<div id="reveal-row" style="display:flex;gap:var(--space-2,8px);align-items:center;flex-wrap:wrap;">',
+      '  <button type="button" data-quiz="reveal" class="btn-reveal" id="btn-reveal" aria-label="정답 확인">정답 확인</button>',
+      '  <button type="button" class="btn-skip" id="btn-skip-card" aria-label="이 카드 넘기기">넘기기</button>',
+      '</div>',
 
       /* 피드백 */
       '<div id="feedback-area" class="answer-area" hidden aria-live="polite">',
@@ -175,10 +177,9 @@
       '  <div id="feedback-detail" class="text-muted"></div>',
       '</div>',
 
-      /* 다음 / 넘기기 */
+      /* 다음 / 보류 (뒷면 확인 후에만 노출) */
       '<div class="answer-area" id="nav-area" hidden style="display:flex;flex-direction:column;gap:var(--space-2);">',
       '  <button type="button" class="btn-next" id="btn-next" aria-label="다음 카드">다음 카드 →</button>',
-      '  <button type="button" class="btn-skip" id="btn-skip-card" aria-label="이 카드 넘기기">넘기기</button>',
       '  <button type="button" id="btn-pause-card" class="btn-pause-card" aria-label="이 카드 일시정지">이 카드 보류</button>',
       '</div>',
 
@@ -202,6 +203,7 @@
       '  <h2 class="empty-state__title">오늘 due 없음</h2>',
       '  <p class="empty-state__desc">오늘 복습할 카드가 없습니다.<br />전체 복습을 원하면 아래 버튼을 누르세요.</p>',
       '  <button type="button" class="btn-force-review" data-action="force-review-all" aria-label="전체 복습 강제 소환">전체복습 시작</button>',
+      '  <button type="button" id="btn-dday-toggle" class="btn-dday-toggle" aria-pressed="false" aria-label="D-day 모드 토글" style="margin-top:8px;">D-day OFF</button>',
       '</div>',
 
       /* 스토리지 오류 */
@@ -267,6 +269,15 @@
     if (noD) noD.setAttribute('hidden', '');
     if (allF) allF.setAttribute('hidden', '');
     if (which && $(which)) $(which).removeAttribute('hidden');
+    // EMPTY_ALL_FUTURE 노출 시 D-day 버튼 상태 동기화
+    if (which === 'empty-all-future') {
+      var ddBtn = $('btn-dday-toggle');
+      if (ddBtn) {
+        var isDDay = _state.session && _state.session.dDayMode;
+        ddBtn.textContent = isDDay ? 'D-day ON' : 'D-day OFF';
+        ddBtn.setAttribute('aria-pressed', isDDay ? 'true' : 'false');
+      }
+    }
   }
 
   function showQuizActive() { showEmpty(null); }
@@ -488,6 +499,9 @@
     if (feedbackArea) { feedbackArea.setAttribute('hidden', ''); feedbackArea.className = 'answer-area'; }
     if (navArea) navArea.setAttribute('hidden', '');
     if (btnReveal) btnReveal.removeAttribute('hidden');
+    // 앞면에서 넘기기 노출 (오클릭 방지: 뒷면 노출 후에는 revealBack이 숨김)
+    var btnSkip = $('btn-skip-card');
+    if (btnSkip) btnSkip.removeAttribute('hidden');
 
     // 힌트 초기화 (카드 전환 시 숨김 상태로 리셋)
     var hintArea = $('hint-area');
@@ -601,6 +615,9 @@
     if (feedbackDetail) feedbackDetail.textContent = detail;
 
     if (btnReveal) btnReveal.setAttribute('hidden', '');
+    // 뒷면 확인 후 넘기기 숨김 (오클릭 방지 — 보류는 nav-area 내에 있음)
+    var btnSkipR = $('btn-skip-card');
+    if (btnSkipR) btnSkipR.setAttribute('hidden', '');
     if (navArea) navArea.removeAttribute('hidden');
   }
 
@@ -845,15 +862,16 @@
       advance();
     });
 
-    // ── D-day 토글 ──
-    _on($('btn-dday-toggle'), 'click', function () {
-      var btn = $('btn-dday-toggle');
-      var isOn = btn && btn.getAttribute('aria-pressed') === 'true';
+    // ── D-day 토글 (이벤트 위임 — EMPTY_ALL_FUTURE 화면에 동적 노출됨) ──
+    _on(_state.host, 'click', function (e) {
+      if (!e.target || e.target.id !== 'btn-dday-toggle') return;
+      var btn = e.target;
+      var isOn = btn.getAttribute('aria-pressed') === 'true';
       if (isOn) {
-        if (btn) { btn.textContent = 'D-day OFF'; btn.setAttribute('aria-pressed', 'false'); }
+        btn.textContent = 'D-day OFF'; btn.setAttribute('aria-pressed', 'false');
         _bootQuiz({ dDayMode: false });
       } else {
-        if (btn) { btn.textContent = 'D-day ON'; btn.setAttribute('aria-pressed', 'true'); }
+        btn.textContent = 'D-day ON'; btn.setAttribute('aria-pressed', 'true');
         _bootQuiz({ dDayMode: true });
       }
     });

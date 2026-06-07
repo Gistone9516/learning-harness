@@ -829,10 +829,33 @@
           // nav 전환 후 구 결과가 새 activity 영역에 표시되는 오염 방지
           if (_state.activityIndex !== submittedIdx) return;
           _showResult(resultEl, result, null);
-          // solution 버튼: back에 내용이 있으면 표시
-          // 오답인 경우 첫 제출 시에만 표시 (즉각 공개 방지), 정답이면 항상 표시
+          // solution 버튼 노출 정책 (원칙4 인출강도):
+          //   · 정답: 스스로 검토 후 확인 유도 — 조용한 스타일로 버튼 노출 (자동강조 X)
+          //   · 오답: 1회 이상 제출 이력 있을 때만 노출 (첫 제출 즉시 공개 방지)
+          //   기능 제거 아님 — 노출 시점·스타일만 조정.
           if (solBtn && activity.back && (activity.back.solution || activity.back.explanation)) {
-            solBtn.style.display = 'inline-block';
+            // _updateProgress가 score() 내부에서 먼저 실행되므로,
+            // 이 시점의 cold_attempts는 현재 제출 포함 누적값임.
+            //   첫 제출(incorrect) → cold_attempts=1
+            //   두 번째 이상 제출  → cold_attempts≥2
+            //   정답 직행(correct) → cold_attempts=1 (priorVerdict=null이므로 증가)
+            var savedEntry = _state.progress && _state.progress.activities && _state.progress.activities[activity.activity_id];
+            var attempts = savedEntry ? (savedEntry.cold_attempts || 0) : 0;
+            if (result.verdict === 'correct') {
+              // 정답: 버튼 노출하되 subdued(조용한) 스타일 — 자동 시선 끌기 없음
+              solBtn.style.display = 'inline-block';
+              solBtn.textContent = '모범 답안 확인 (선택)';
+              solBtn.style.opacity = '0.55';
+              solBtn.title = '정답을 맞혔습니다. 내 풀이를 먼저 검토한 뒤 참고하세요.';
+            } else if (attempts >= 2) {
+              // 오답 + 2회 이상(= 첫 제출이 아닌) 시도: 버튼 일반 노출
+              solBtn.style.display = 'inline-block';
+              solBtn.textContent = '모범 답안 보기';
+              solBtn.style.opacity = '';
+              solBtn.title = '';
+            }
+            // 오답 + 첫 제출(attempts=1): 버튼 숨김 유지 — 스스로 재시도 유도
+            // (_applyActivity에서 display:none 초기화됨)
           }
           // 진도 자동 저장 (emit → shell이 getProgressSnapshot 호출)
           ctx.emit({ type: 'activity-completed', result: result });
