@@ -1080,8 +1080,14 @@
       };
     }
     var entry = snap.activities[activityId];
-    entry.cold_attempts++;
-    if (result.verdict === 'correct') entry.cold_correct++;
+    // cold_attempts 의미 정합: "정복까지 시도수"
+    // 이미 cold_correct를 달성한 활동(prior last_verdict === 'correct')은 분모에서 제외.
+    // prior 값을 last_verdict 덮어쓰기 전에 먼저 읽음.
+    var priorLastVerdict = entry.last_verdict;
+    if (priorLastVerdict !== 'correct') {
+      entry.cold_attempts++;
+      if (result.verdict === 'correct') entry.cold_correct++;
+    }
     // last_verdict는 'correct' | 'incorrect' | null 만 허용 (런타임규격 §5-3)
     entry.last_verdict = (result.verdict === 'correct' || result.verdict === 'incorrect')
       ? result.verdict : null;

@@ -548,8 +548,14 @@
       };
     }
     var entry = snap.activities[activityId];
-    entry.cold_attempts++;
-    if (result.verdict === 'correct') entry.cold_correct++;
+    // cold_attempts 의미 정합: "정복까지 시도수"
+    //   - 이미 cold_correct >= 1 이면 정복 완료 → 이후 재제출은 분모에 포함하지 않음
+    //   - 최초 cold_correct 달성 전까지만 cold_attempts 증가
+    var priorLastVerdict = entry.last_verdict; // last_verdict 덮어쓰기 전에 읽음
+    if (priorLastVerdict !== 'correct') {
+      entry.cold_attempts++;
+      if (result.verdict === 'correct') entry.cold_correct++;
+    }
     entry.last_verdict = result.verdict;
     entry.plugin_extra = {
       last_check_details: (result.feedback && result.feedback.details) || null
@@ -671,12 +677,16 @@
     return new Promise(function (resolve) {
       _healthCheck(entryUrl,
         function onOnline() {
+          // MED guard: unmount 후 stale 콜백이 새 플러그인 화면을 덮어쓰는 것을 차단
+          if (!_state.mounted) { resolve(); return; }
           _state.backendOnline = true;
           _buildLayout(container, true, null);
           _navigateTo(container, _state.currentIdx);
           resolve();
         },
         function onOffline(reason) {
+          // MED guard: unmount 후 stale 콜백이 새 플러그인 화면을 덮어쓰는 것을 차단
+          if (!_state.mounted) { resolve(); return; }
           _state.backendOnline = false;
           _buildLayout(container, false, reason);
           _navigateTo(container, _state.currentIdx);

@@ -1045,8 +1045,14 @@
       };
     }
     var entry = snap.activities[activityId];
-    entry.cold_attempts++;
-    if (result.verdict === 'correct') entry.cold_correct++;
+    // cold_attempts 의미 정합: "정복까지 시도수"
+    // 이미 cold_correct(첫 정답)를 달성한 활동은 재제출해도 분모 불변.
+    // prior last_verdict를 덮어쓰기 전에 읽어 판단.
+    var priorVerdict = entry.last_verdict;
+    if (priorVerdict !== 'correct') {
+      entry.cold_attempts++;
+      if (result.verdict === 'correct') entry.cold_correct++;
+    }
     entry.last_verdict = result.verdict;
     // solve_ms: 첫 제출 시에만 기록 (런타임규격 §4-3 '첫 제출까지 경과 ms')
     var firstSolveMs = entry.plugin_extra.solve_ms || 0;

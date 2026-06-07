@@ -451,10 +451,15 @@
       };
     }
     var entry = snap.activities[activityId];
-    // pending은 시도 횟수 미집계
+    // cold_attempts 의미: "정복(첫 cold_correct 달성)까지의 시도 수"
+    // → 이미 correct 달성한 활동은 재제출해도 분모 부풀리지 않음 (wrong_rate 비교가능성 보장)
+    // pending은 시도 횟수 미집계; prior last_verdict를 덮어쓰기 전에 읽어 cold 여부 판정
+    var priorLastVerdict = entry.last_verdict;
     if (result.verdict !== 'pending') {
-      entry.cold_attempts++;
-      if (result.verdict === 'correct') entry.cold_correct++;
+      if (priorLastVerdict !== 'correct') {
+        entry.cold_attempts++;
+        if (result.verdict === 'correct') entry.cold_correct++;
+      }
     }
     // pending은 last_verdict 덮어쓰기 금지 — once-correct 상태 보존 (cold_attempts 가드와 동일 패턴)
     if (result.verdict !== 'pending') {
