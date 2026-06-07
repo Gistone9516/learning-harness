@@ -79,7 +79,7 @@ window.ACTIVITIES['aws'] = [
           "type": "config-equals",
           "service": "s3",
           "identifier": "lab-versioned-bucket",
-          "expected": { "versioning": "Enabled" }
+          "expected": { "versioning": { "Status": "Enabled" } }
         }
       ]
     }
