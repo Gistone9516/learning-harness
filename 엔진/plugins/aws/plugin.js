@@ -70,10 +70,20 @@
      헬스체크 (런타임규격 §3-3, §5)
   ───────────────────────────────────────────── */
   function _healthCheck(entryUrl, onOnline, onOffline) {
+    var _called = false;   // 이중 콜백 방지 — onOnline/onOffline 단 1회만 호출
     var timedOut = false;
+
+    function _done(online, reason) {
+      if (_called) return;
+      _called = true;
+      clearTimeout(timer);
+      if (online) onOnline();
+      else onOffline(reason);
+    }
+
     var timer = setTimeout(function () {
       timedOut = true;
-      onOffline('헬스체크 타임아웃 (3s)');
+      _done(false, '헬스체크 타임아웃 (3s)');
     }, 3000);
 
     try {
@@ -81,26 +91,23 @@
       xhr.open('GET', entryUrl + '/health', true);
       xhr.onload = function () {
         if (timedOut) return;
-        clearTimeout(timer);
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             var res = JSON.parse(xhr.responseText || '{}');
-            if (res.status === 'ok') { onOnline(); return; }
+            if (res.status === 'ok') { _done(true); return; }
           } catch (e) {}
-          onOnline();
+          _done(true);
         } else {
-          onOffline('health 응답 오류: HTTP ' + xhr.status);
+          _done(false, 'health 응답 오류: HTTP ' + xhr.status);
         }
       };
       xhr.onerror = function () {
         if (timedOut) return;
-        clearTimeout(timer);
-        onOffline('네트워크 오류 — 백엔드 미실행 또는 CORS 차단');
+        _done(false, '네트워크 오류 — 백엔드 미실행 또는 CORS 차단');
       };
       xhr.send();
     } catch (e) {
-      clearTimeout(timer);
-      onOffline(e.message || '헬스체크 실패');
+      _done(false, e.message || '헬스체크 실패');
     }
   }
 
@@ -790,7 +797,9 @@
   ───────────────────────────────────────────── */
   function getProgressSnapshot() {
     if (!_state.progress) {
-      _state.progress = {
+      // _loadProgress() 폴백 — localStorage에 저장된 진도가 있으면 복원
+      // (_loadProgress와 동일 패턴: 파싱 실패 시 null 반환 → 빈 스냅샷으로 초기화)
+      _state.progress = _loadProgress() || {
         plugin_id:      'aws',
         schema_version: 1,
         activities:     {}

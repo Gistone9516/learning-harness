@@ -40,6 +40,7 @@
       incorrectCards: []  // [{card_id, prompt}]
     },
     retryList: null,    // BUG-2: string[] | null — 다음 세션에서만 출제할 card_id 목록
+    _isRetrySession: false,  // BUG-2 cold 이중집계 방지: retry 세션 중이면 true
     // mid: 일시정지 카드 목록 (localStorage 키: clf:plugin_extra:disabled_cards:<subject>)
     disabledCards: null,  // Set<card_id>, 로드 후 초기화
     // self 모드: btn-reveal 후 O/X 클릭 전까지 다음 카드 이동 막는 플래그
@@ -74,6 +75,7 @@
   function startRetrySession(wrongIds) {
     if (!Array.isArray(wrongIds) || !wrongIds.length) return;
     _state.retryList = wrongIds.slice();
+    _state._isRetrySession = true;  // BUG-2 cold 이중집계 방지
     _bootQuiz({});
   }
 
@@ -604,7 +606,9 @@
 
   function commitAttempt(card, verdict) {
     // cold 여부: processAttempt 호출 전에 캡처 (이후 seen_card_ids에 추가됨)
-    var isCold = !(_state.session && _state.session.seen_card_ids && _state.session.seen_card_ids.has(card.card_id));
+    // BUG-2: retry 세션 카드는 원세션에서 이미 cold 집계됨 → 이중집계 스킵
+    var isCold = !_state._isRetrySession &&
+      !(_state.session && _state.session.seen_card_ids && _state.session.seen_card_ids.has(card.card_id));
     try {
       window.APP.processAttempt(card.card_id, verdict, _state.session, _state.progressStore, Date.now(), _state.leitnerCfg);
       // §9: getProgressSnapshot/onProgressRestored = 기존 loadProgress/saveProgress 래핑
@@ -663,8 +667,10 @@
   }
 
   /* BUG-1: session-done 페이로드 emit (셸이 단일 소스로 요약 렌더) */
+  /* 가드 단일화: totalAttempted===0(전체 스킵 세션)이면 emit 안 함 — advance/onEmpty 양쪽 커버 */
   function _emitSessionDone() {
     var stats = _state.sessionStats;
+    if (stats.totalAttempted === 0) return;  // BUG-1: 0문제 요약 방지
     var wrongIds = stats.incorrectCards.map(function (ic) { return ic.card_id; });
     if (_state.ctx && _state.ctx.emit) {
       _state.ctx.emit({
@@ -936,6 +942,8 @@
 
     // mid: 세션 완료 요약 통계 리셋
     _state.sessionStats = { totalAttempted: 0, correctCount: 0, incorrectCards: [] };
+    // BUG-2: retry 세션 플래그 — retryList가 없으면 일반 세션이므로 리셋
+    if (!_state.retryList) _state._isRetrySession = false;
 
     // mid: 일시정지 카드 목록 로드
     _loadDisabledCards();
@@ -961,7 +969,7 @@
         onEmpty: function () {
           var manifest = (window.MANIFEST && window.MANIFEST[subject]) || null;
           var hasDeck = manifest && manifest.decks && manifest.decks.length;
-          if (_state.sessionStats.totalAttempted > 0) _emitSessionDone();
+          _emitSessionDone();  // 내부 totalAttempted===0 가드로 단일화
           showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
         },
         onError: function (err) {
@@ -1124,6 +1132,7 @@
       _state.disabledCards = null;
       _state.unitFilter = null;
       _state.retryList = null;
+      _state._isRetrySession = false;
       _state.sessionStats = { totalAttempted: 0, correctCount: 0, incorrectCards: [] };
       _state._selfPendingVerdict = false;
     },

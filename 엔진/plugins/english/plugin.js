@@ -46,7 +46,11 @@
   function _loadProgress() {
     try {
       var raw = localStorage.getItem(PROGRESS_KEY);
-      return raw ? JSON.parse(raw) : null;
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      // 폴백: 스키마 필수 필드 누락 시 null 반환 (getProgressSnapshot이 신규 생성)
+      if (!parsed || typeof parsed !== 'object' || !parsed.activities) return null;
+      return parsed;
     } catch (e) { return null; }
   }
 
@@ -452,7 +456,10 @@
       entry.cold_attempts++;
       if (result.verdict === 'correct') entry.cold_correct++;
     }
-    entry.last_verdict = result.verdict;
+    // pending은 last_verdict 덮어쓰기 금지 — once-correct 상태 보존 (cold_attempts 가드와 동일 패턴)
+    if (result.verdict !== 'pending') {
+      entry.last_verdict = result.verdict;
+    }
 
     // SM-2: vocab/grammar 모달에만 적용 (core ③)
     // 비대상 모달은 sm2Fields={}로 두면 Object.assign이 기존 값을 덮어쓰지 않아 보존됨.
@@ -647,8 +654,8 @@
     var contentArea = container.querySelector('#eng-content-area');
     if (!contentArea) return;
 
-    if (!activity) {
-      contentArea.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">english 플러그인: 문제 데이터가 없습니다.</div>';
+    if (!activity || !activity.front) {
+      contentArea.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">english 플러그인: 문제 데이터가 없거나 front 필드가 누락되었습니다.</div>';
       _updateNavBadges(container, activities, idx);
       return;
     }
@@ -960,6 +967,23 @@
   }
 
   /* ─────────────────────────────────────────────
+     _sortActivitiesByDueAt(activitiesRaw, snap)
+     SM-2 due_at 기준 정렬 헬퍼 — mount·onProgressRestored 공용.
+     due_at이 작은(더 급한) 항목 먼저; 비대상 모달/미학습 항목은 Infinity로 원래 순서 유지.
+  ───────────────────────────────────────────── */
+  function _sortActivitiesByDueAt(activitiesRaw, snap) {
+    return activitiesRaw.slice().sort(function (a, b) {
+      var ea = snap && snap.activities && snap.activities[a.activity_id];
+      var eb = snap && snap.activities && snap.activities[b.activity_id];
+      var isSmA = a.front && (a.front.modality === 'vocab' || a.front.modality === 'grammar');
+      var isSmB = b.front && (b.front.modality === 'vocab' || b.front.modality === 'grammar');
+      var da = (isSmA && ea && ea.plugin_extra && typeof ea.plugin_extra.due_at === 'number') ? ea.plugin_extra.due_at : Infinity;
+      var db = (isSmB && eb && eb.plugin_extra && typeof eb.plugin_extra.due_at === 'number') ? eb.plugin_extra.due_at : Infinity;
+      return da - db;
+    });
+  }
+
+  /* ─────────────────────────────────────────────
      mount() — UI 주입 (런타임규격 §6-1)
   ───────────────────────────────────────────── */
   function mount(container, ctx) {
@@ -978,21 +1002,8 @@
     }
 
     // SM-2 due_at 기준 정렬 (core ③ — mount 진입점 결합)
-    // due_at이 작은(더 급한) 항목 먼저. due_at 없는 항목은 맨 뒤.
-    var now = Date.now();
-    var snap = _state.progress || _loadProgress();
-    if (snap) _state.progress = snap;
-
-    var activities = activitiesRaw.slice().sort(function (a, b) {
-      var ea = snap && snap.activities && snap.activities[a.activity_id];
-      var eb = snap && snap.activities && snap.activities[b.activity_id];
-      // SM-2 적용 대상(vocab/grammar)만 due_at 정렬; 비대상 모달은 Infinity로 원래 순서 유지
-      var isSmA = a.front && (a.front.modality === 'vocab' || a.front.modality === 'grammar');
-      var isSmB = b.front && (b.front.modality === 'vocab' || b.front.modality === 'grammar');
-      var da = (isSmA && ea && ea.plugin_extra && typeof ea.plugin_extra.due_at === 'number') ? ea.plugin_extra.due_at : Infinity;
-      var db = (isSmB && eb && eb.plugin_extra && typeof eb.plugin_extra.due_at === 'number') ? eb.plugin_extra.due_at : Infinity;
-      return da - db;
-    });
+    var snap = getProgressSnapshot();  // 캐시 or localStorage 폴백 포함
+    var activities = _sortActivitiesByDueAt(activitiesRaw, snap);
 
     // 정렬된 배열 _state에 보존 (onProgressRestored nav 배지 갱신이 동일 배열 참조하도록)
     _state.activities = activities;
@@ -1123,7 +1134,9 @@
   ───────────────────────────────────────────── */
   function getProgressSnapshot() {
     if (!_state.progress) {
-      _state.progress = {
+      // 폴백: 메모리 캐시 미스 시 localStorage 재시도 (mount 전 호출 또는 캐시 소거 시 복원)
+      var loaded = _loadProgress();
+      _state.progress = loaded || {
         plugin_id:      'english',
         schema_version: 1,
         activities:     {}
@@ -1140,6 +1153,12 @@
     _state.progress = snapshot;
     _state.restored = true;
 
+    // due_at 재정렬 — 복원된 진도에 SM-2 값이 있으면 순서가 바뀔 수 있음 (mount와 동일 패턴)
+    var activitiesRaw = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+    if (activitiesRaw.length) {
+      _state.activities = _sortActivitiesByDueAt(activitiesRaw, snapshot);
+    }
+
     // 마운트 상태에서 복원 시 last_answer 갱신
     if (_state.mounted && _state.host && _state.activity) {
       var actId = _state.activity.activity_id;
@@ -1149,8 +1168,8 @@
         var inp = contentArea ? contentArea.querySelector('#eng-answer-input') : null;
         if (inp) inp.value = saved.plugin_extra.last_answer;
       }
-      // nav 배지도 갱신 (정렬된 배열 사용 — 원본 배열과 인덱스 불일치 방지)
-      var activities = _state.activities || (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+      // nav 배지도 갱신 (재정렬된 배열 사용 — 원본 배열과 인덱스 불일치 방지)
+      var activities = _state.activities || [];
       if (activities.length > 1) {
         _updateNavBadges(_state.host, activities, _state.activityIndex);
       }

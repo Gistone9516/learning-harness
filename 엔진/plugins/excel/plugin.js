@@ -766,11 +766,14 @@
           _showResult(resultEl, null, 'Univer 초기화 실패 — 페이지를 새로고침하세요.');
           return;
         }
+        // 클릭 시점 activity 캡처 — score().then 콜백이 resolve 시점에
+        // _state.activity를 읽으면 채점 중 activity 전환 시 다른 해설이 표시됨 (coding 패턴 미러)
+        var capturedActivity = _state.activity;
         _state.scoreInFlight = true;
         submitBtn.disabled = true;
         _showResult(resultEl, null, '채점 중...', null);
         score().then(function (scoreResult) {
-          var back = (_state.activity && _state.activity.back) || null;
+          var back = (capturedActivity && capturedActivity.back) || null;
           _showResult(resultEl, scoreResult, null, back);
           ctx.emit({ type: 'activity-completed', result: scoreResult });
           // 채점 후 네비게이션 배지 갱신 (정답 시 배지 반영)
@@ -894,7 +897,10 @@
    */
   function getProgressSnapshot() {
     if (!_state.progress) {
-      _state.progress = {
+      // localStorage 폴백: unmount에서 _state.progress=null로 비우므로
+      // 대시보드·getDashboardContrib 호출 시 진도 소멸 방지 (coding 패턴 미러)
+      var loaded = _loadProgress();
+      _state.progress = loaded || {
         plugin_id:      'excel',
         schema_version: 1,
         activities:     {}

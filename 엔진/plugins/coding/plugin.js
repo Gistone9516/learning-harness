@@ -913,10 +913,11 @@
    */
   function getProgressSnapshot() {
     if (!_state.progress) {
-      _state.progress = {
-        plugin_id:       'coding',
-        schema_version:  1,
-        activities:      {}
+      // 언마운트/미마운트 후 진도 소멸 방지: localStorage에서 복구 시도
+      _state.progress = _loadProgress() || {
+        plugin_id:      'coding',
+        schema_version: 1,
+        activities:     {}
       };
     }
     return _state.progress;

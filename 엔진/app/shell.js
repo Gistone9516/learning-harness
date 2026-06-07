@@ -393,7 +393,9 @@
     }
 
     if (mountResult && typeof mountResult.then === 'function') {
+      var mountSeqAtCall = _mountSeq; // 구형 reject가 신규 마운트 상태 덮어쓰기 방지
       mountResult.catch(function (e) {
+        if (mountSeqAtCall !== _mountSeq) return; // 이미 다른 마운트가 진행 중 — 무시
         console.error('[SHELL] mount Promise 실패', pluginId, e);
         // F-03: 에러 배너 표시 + 활성 상태 리셋
         host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + _esc(pluginId) + '] 플러그인 로드 실패: ' + _esc(e && (e.message || String(e))) + '</div>';
@@ -618,6 +620,27 @@
         if (ovBar) ovBar.style.width = pct(avg) + '%';
         if (ovPct) ovPct.textContent = pct(avg) + '%';
       }
+    }
+
+    // 5. extra_widgets — 플러그인이 선언한 커스텀 위젯 삽입
+    var extraWidgets = data.extra_widgets || [];
+    if (extraWidgets.length) {
+      var ewArea = $('extra-widgets-area');
+      if (!ewArea) {
+        // 동적 생성 — dashboard-wrap 말미에 붙임
+        ewArea = document.createElement('div');
+        ewArea.id = 'extra-widgets-area';
+        var dWrap2 = document.querySelector('.dashboard-wrap');
+        if (dWrap2) dWrap2.appendChild(ewArea);
+      }
+      ewArea.innerHTML = '';
+      extraWidgets.forEach(function (w) {
+        var wDiv = document.createElement('div');
+        wDiv.className = 'extra-widget';
+        // 위젯 html은 플러그인이 _esc 책임 (계약 §5)
+        if (w && w.html) wDiv.innerHTML = w.html;
+        ewArea.appendChild(wDiv);
+      });
     }
   }
 
@@ -891,7 +914,13 @@
   ───────────────────────────────────────────── */
   function _collectExtraPluginManifests(seenIds) {
     var extras = [];
-    Object.keys(window).forEach(function (k) {
+    var winKeys;
+    try { winKeys = Object.keys(window); } catch (e) {
+      // 보안 익스텐션 환경의 SecurityError — 전역 스캔 불가, 빈 배열 반환
+      console.warn('[SHELL] _collectExtraPluginManifests: Object.keys(window) 실패', e);
+      return extras;
+    }
+    winKeys.forEach(function (k) {
       if (/^MANIFEST_[A-Z]/.test(k)) {
         var m = window[k];
         if (m && m.plugin_id && !seenIds[m.plugin_id]) {
@@ -916,7 +945,7 @@
     pManifest.byok.keys.forEach(function (keyDef) {
       var lbl = document.createElement('label');
       lbl.style.cssText = 'display:block;margin-bottom:var(--space-4,12px)';
-      lbl.innerHTML = '<span class="text-muted" style="display:block;margin-bottom:4px">' + keyDef.label + '</span>';
+      lbl.innerHTML = '<span class="text-muted" style="display:block;margin-bottom:4px">' + _esc(keyDef.label) + '</span>';
       var input = document.createElement('input');
       input.type = 'password';
       input.style.cssText = 'width:100%;box-sizing:border-box;font-size:var(--fs-md,14px);padding:9px 12px;border:1px solid var(--line2,#ddd);border-radius:var(--r,4px);background:var(--surface,#fff);color:var(--ink,#111)';
