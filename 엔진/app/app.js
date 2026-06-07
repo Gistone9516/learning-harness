@@ -698,6 +698,13 @@ function buildQueue(cards, progress, now, opts) {
   // weight 정상화 헬퍼
   const w = card => _normalizeWeight(card.tags && card.tags.weight !== undefined ? card.tags.weight : 5);
 
+  // F-09: 공통 비교자 (weight DESC → card_id ASC)
+  const byWeightId = (a, b) => {
+    const wDiff = w(b) - w(a);
+    if (wDiff !== 0) return wDiff;
+    return a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0;
+  };
+
   // ── 정렬 ──
   if (dDayMode) {
     // D-day: box ASC → weight DESC → card_id ASC
@@ -706,25 +713,15 @@ function buildQueue(cards, progress, now, opts) {
       const boxA = (progress[a.card_id] ? progress[a.card_id].box : BOX_MIN);
       const boxB = (progress[b.card_id] ? progress[b.card_id].box : BOX_MIN);
       if (boxA !== boxB) return boxA - boxB;
-      const wDiff = w(b) - w(a); // weight DESC
-      if (wDiff !== 0) return wDiff;
-      return a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0;
+      return byWeightId(a, b);
     });
     return allDDay.map(c => c.card_id);
   }
 
   // 일반: review weight DESC → card_id ASC
-  reviewCards.sort((a, b) => {
-    const wDiff = w(b) - w(a);
-    if (wDiff !== 0) return wDiff;
-    return a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0;
-  });
+  reviewCards.sort(byWeightId);
   // new weight DESC → card_id ASC
-  newCards.sort((a, b) => {
-    const wDiff = w(b) - w(a);
-    if (wDiff !== 0) return wDiff;
-    return a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0;
-  });
+  newCards.sort(byWeightId);
 
   // limit 적용: 정렬 후 그룹별 상한 자르기 (§2.5)
   const reviewLimited = opts.reviewLimit !== undefined

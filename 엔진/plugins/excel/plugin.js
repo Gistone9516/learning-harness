@@ -290,15 +290,30 @@
         return;
       }
 
+      // F-09: settled를 클로저 외부로 올려 unsubscribe 핸들과 함께 중복 구독/resolve 방지
       var settled = false;
+      var unsubscribe = null;
+
+      function _settle(scoreResult) {
+        if (settled) return;
+        settled = true;
+        if (typeof unsubscribe === 'function') {
+          try { unsubscribe(); } catch (e) {}
+        }
+        resolve(scoreResult);
+      }
+
       try {
-        formulaEngine.calculationEnd(function (state) {
+        // calculationEnd 반환값이 unsubscribe 함수일 경우 캡처
+        var ret = formulaEngine.calculationEnd(function (state) {
           // state === 3 → 계산 완료 (Univer 내부 상태코드, 런타임규격 §4-3)
-          if (!settled && state === 3) {
-            settled = true;
-            resolve(_runScore(activity, univerAPI));
+          if (state === 3) {
+            _settle(_runScore(activity, univerAPI));
           }
         });
+        if (typeof ret === 'function') {
+          unsubscribe = ret;
+        }
       } catch (e) {
         // calculationEnd API 없거나 실패 → fallback 즉시 채점
         resolve(_runScore(activity, univerAPI));
@@ -307,22 +322,19 @@
 
       // 5초 타임아웃 방어 — state===3 미발화 시 "수식 계산 실패" 안내 반환
       setTimeout(function () {
-        if (!settled) {
-          settled = true;
-          resolve({
-            verdict:   'timeout',
-            score_raw: 0,
-            grader_id: 'engine',
-            feedback:  {
-              passed:      0,
-              total:       (activity.grading && activity.grading.expected)
-                             ? activity.grading.expected.length : 0,
-              first_fail:  null,
-              cell_results: [],
-              timeout:     true   // _showResult 타임아웃 분기용 플래그
-            }
-          });
-        }
+        _settle({
+          verdict:   'timeout',
+          score_raw: 0,
+          grader_id: 'engine',
+          feedback:  {
+            passed:      0,
+            total:       (activity.grading && activity.grading.expected)
+                           ? activity.grading.expected.length : 0,
+            first_fail:  null,
+            cell_results: [],
+            timeout:     true   // _showResult 타임아웃 분기용 플래그
+          }
+        });
       }, 5000);
     });
   }
@@ -849,16 +861,8 @@
     var activity  = _state.activity;
     var univerAPI = _state.univerAPI;
 
-    if (!activity) {
-      return Promise.resolve({
-        verdict:   'incorrect',
-        score_raw: 0,
-        grader_id: 'engine',
-        feedback:  { passed: 0, total: 0, first_fail: null }
-      });
-    }
-
-    if (!univerAPI) {
+    // F-10: 두 동일 fallback guard를 단일 조건으로 병합
+    if (!activity || !univerAPI) {
       return Promise.resolve({
         verdict:   'incorrect',
         score_raw: 0,
@@ -919,12 +923,37 @@
     var savedSnapshot = entry.plugin_extra && entry.plugin_extra.cell_snapshot;
     if (!savedSnapshot) return;
 
-    // createWorkbook으로 스냅샷 재주입 (getSnapshot() 반환값을 그대로 전달)
+    // BUG-5: 기존 workbook이 이미 존재하므로 두 번째 createWorkbook은 중복 생성 위험.
+    // loadData (in-place 교체) API가 있으면 우선 사용; 없으면 dispose 후 createWorkbook.
     try {
-      _createWorkbook(_state.univerAPI, savedSnapshot);
+      var wb = _state.univerAPI && _state.univerAPI.getActiveWorkbook();
+      if (wb && typeof wb.load === 'function') {
+        // Univer Facade: FWorkbook.load(IWorkbookData) — in-place 교체
+        wb.load(savedSnapshot);
+      } else if (_state.univerAPI && typeof _state.univerAPI.loadData === 'function') {
+        _state.univerAPI.loadData(savedSnapshot);
+      } else {
+        // fallback: dispose 후 createWorkbook으로 교체 (중복 생성 방지)
+        if (typeof _state.univerAPI.dispose === 'function') {
+          _state.univerAPI.dispose();
+        }
+        _state.univerAPI = null;
+        // univerContainer가 있으면 새 Univer 인스턴스 재생성
+        if (_state.univerContainer) {
+          _state.univerContainer.innerHTML = '';
+          if (_checkUniver()) {
+            var result = _mountUniver(_state.univerContainer,
+              (savedSnapshot.sheets
+                ? [] // 스냅샷에 cellData 있음 — 아래에서 createWorkbook으로 주입
+                : [['']]) );
+            _state.univerAPI = result.univerAPI;
+            _createWorkbook(_state.univerAPI, savedSnapshot);
+          }
+        }
+      }
     } catch (e) {
-      // createWorkbook이 스냅샷 형태를 거부할 경우 무시 (graceful fallback)
-      console.warn('[excel] onProgressRestored: createWorkbook 재주입 실패', e);
+      // in-place 교체 실패 시 무시 (graceful fallback)
+      console.warn('[excel] onProgressRestored: 스냅샷 재주입 실패', e);
     }
   }
 

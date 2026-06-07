@@ -277,6 +277,18 @@
         }
       });
     }
+    // F-07: file:// 프로토콜에서는 fetch가 항상 실패 → 키 문제로 오인 방지
+    if (typeof location !== 'undefined' && location.protocol === 'file:') {
+      return Promise.resolve({
+        verdict:   'pending',
+        score_raw: null,
+        grader_id: 'llm',
+        feedback:  {
+          message: 'file://에서는 LLM 호출 불가 — 웹서버로 여세요 (예: npx serve 또는 VS Code Live Server).'
+        }
+      });
+    }
+
     // 키 있는 경우: OpenAI-compatible POST /chat/completions
     // llm_endpoint / llm_model byok 키로 유연화 (core ②)
     var rubric    = (activity.grading && activity.grading.rubric) || '';

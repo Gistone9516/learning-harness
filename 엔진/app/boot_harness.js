@@ -221,9 +221,6 @@ step('synonyms.js',  FILES.synonyms,  ensureGeneratedMocks);
 step('manifest.js',  FILES.manifest,  ensureGeneratedMocks);
 step('decks/ss_unit1.js', FILES.decks, () => {});  // deck 없으면 그냥 skip
 
-// Step 0b: 생성물 없으면 mock 보장
-ensureGeneratedMocks();
-
 // Step 1: app.js 엔진 코어 — stub 대체 (DOM 의존 우회)
 // 실제 app.js는 브라우저 환경에서만 올바르게 동작.
 // 하니스 검증 범위: 등록·인터페이스 계약만. DOM/mount/렌더 경로는 브라우저 E2E 테스트 필요.

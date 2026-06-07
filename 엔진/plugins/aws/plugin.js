@@ -353,7 +353,7 @@
         var idx = parseInt(cb.getAttribute('data-cp-idx'), 10);
         var state = _loadCheckpointState(activity.activity_id);
         state[idx] = cb.checked;
-        _saveCheckpointState(activity.activity_id, state);
+        _saveCheckpointState(activity.activity_id, state, idx, cb);
         var row = cpSection.querySelector('.aws-cp-row[data-cp-idx="' + idx + '"]');
         var label = row && row.querySelector('.aws-cp-label');
         if (label) {
@@ -595,8 +595,37 @@
     } catch (e) { return {}; }
   }
 
-  function _saveCheckpointState(activityId, state) {
-    try { localStorage.setItem(_cpKey(activityId), JSON.stringify(state)); } catch (e) {}
+  function _saveCheckpointState(activityId, state, cpIdx, cb) {
+    try {
+      localStorage.setItem(_cpKey(activityId), JSON.stringify(state));
+    } catch (e) {
+      // 저장 실패(quota 초과 등) — 체크박스 원복 + 안내
+      if (typeof cpIdx === 'number' && cb) {
+        // 변경 전 상태로 되돌리기
+        state[cpIdx] = !state[cpIdx];
+        if (cb.checked !== undefined) cb.checked = state[cpIdx];
+        var label = cb.parentNode && cb.parentNode.querySelector('.aws-cp-label');
+        if (label) {
+          if (state[cpIdx]) {
+            label.style.textDecoration = 'line-through';
+            label.style.color = 'var(--ink3,#aaa)';
+          } else {
+            label.style.textDecoration = '';
+            label.style.color = 'var(--ink,#111)';
+          }
+        }
+      }
+      // 안내 배너 (이미 있으면 중복 생성 방지)
+      if (_state.host && !_state.host.querySelector('.aws-storage-warn')) {
+        var warn = document.createElement('div');
+        warn.className = 'aws-storage-warn';
+        warn.style.cssText = 'background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;' +
+          'padding:8px 12px;margin:8px 0;font-size:0.84em;color:#7b4700';
+        warn.textContent = '체크포인트 저장 실패 — 브라우저 저장 공간이 부족합니다. 진도가 보존되지 않을 수 있습니다.';
+        var viewer = _state.host.querySelector('.aws-viewer');
+        if (viewer) viewer.insertBefore(warn, viewer.firstChild);
+      }
+    }
   }
 
   /* ─────────────────────────────────────────────

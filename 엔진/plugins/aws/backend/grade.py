@@ -192,11 +192,18 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     exp_keys = set(expected.keys())
     # 클라이언트를 한 번만 생성해 alias/dot-notation 양쪽에 전달 (중복 생성 제거)
     client = make_client(service)
-    if len(exp_keys) == 1 and exp_keys.issubset(alias_keys):
-        alias_key = next(iter(exp_keys))
-        exp_val   = expected[alias_key]
-        ok, msg   = _check_alias(client, service, identifier, alias_key, exp_val)
-        return ok, msg
+    if exp_keys and exp_keys.issubset(alias_keys):
+        # multi-key alias: 각 키마다 _check_alias 순회 후 AND 결합
+        all_ok = True
+        msgs   = []
+        for alias_key in exp_keys:
+            exp_val = expected[alias_key]
+            ok, msg = _check_alias(client, service, identifier, alias_key, exp_val)
+            if not ok:
+                all_ok = False
+            msgs.append(msg)
+        combined = " | ".join(msgs)
+        return all_ok, combined
 
     # 일반 dot-notation 경로 처리
     try:
@@ -224,6 +231,24 @@ def _config_equals(service: str, identifier: str, expected) -> tuple[bool, str]:
     return False, f"'{identifier}' 속성 불일치 — {summary}"
 
 
+def _compare_dict(exp: dict, source: dict, label: str, *, str_cast: bool = False) -> tuple[bool, str]:
+    """exp 항목마다 source에서 실제값 조회 후 비교 → (all_ok, msg).
+
+    str_cast=True: SNS 속성처럼 모든 값이 문자열로 저장될 때 str(actual) == str(v) 로 비교.
+    """
+    results, all_ok = [], True
+    for k, v in exp.items():
+        actual = source.get(k)
+        if str_cast:
+            ok = str(actual) == str(v) if actual is not None else False
+        else:
+            ok = actual == v
+        if not ok:
+            all_ok = False
+        results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
+    return all_ok, f"{label} — {' | '.join(results)}"
+
+
 def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val) -> tuple[bool, str]:
     """축약키 별칭 핸들러. client는 호출자(_config_equals)가 생성해 전달 — 중복 생성 방지."""
     try:
@@ -238,14 +263,8 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
                 ok     = actual == exp_val
                 return ok, f"'{identifier}' 버전 관리: 기대={exp_val!r}, 실제={actual!r} → {'✓' if ok else '✗'}"
             elif isinstance(exp_val, dict):
-                results, all_ok = [], True
-                for k, v in exp_val.items():
-                    actual = resp.get(k)
-                    ok     = actual == v
-                    if not ok: all_ok = False
-                    results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-                msg = " | ".join(results)
-                return all_ok, f"'{identifier}' 버전 관리 — {msg}"
+                ok, msg = _compare_dict(exp_val, resp, f"'{identifier}' 버전 관리")
+                return ok, msg
             return False, "versioning: expected 형식 오류 (str 또는 dict)"
 
         elif alias_key == "public_access_block":
@@ -254,28 +273,14 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
             cfg = resp.get("PublicAccessBlockConfiguration", {})
             if not isinstance(exp_val, dict):
                 return False, "public_access_block: expected는 dict이어야 함"
-            results, all_ok = [], True
-            for k, v in exp_val.items():
-                actual = cfg.get(k)
-                ok     = actual == v
-                if not ok: all_ok = False
-                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-            msg = " | ".join(results)
-            return all_ok, f"'{identifier}' 퍼블릭 액세스 차단 — {msg}"
+            return _compare_dict(exp_val, cfg, f"'{identifier}' 퍼블릭 액세스 차단")
 
         elif alias_key == "env_var":
             resp = client.get_function_configuration(FunctionName=identifier)
             env  = resp.get("Environment", {}).get("Variables", {})
             if not isinstance(exp_val, dict):
                 return False, "env_var: expected는 dict이어야 함"
-            results, all_ok = [], True
-            for k, v in exp_val.items():
-                actual = env.get(k)
-                ok     = actual == v
-                if not ok: all_ok = False
-                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-            msg = " | ".join(results)
-            return all_ok, f"'{identifier}' 환경변수 — {msg}"
+            return _compare_dict(exp_val, env, f"'{identifier}' 환경변수")
 
         elif alias_key == "redrive_policy":
             # SQS RedrivePolicy 확인
@@ -294,19 +299,18 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
                 return False, f"'{identifier}' RedrivePolicy 파싱 실패: {rdp_raw!r}"
             if not isinstance(exp_val, dict):
                 return False, "redrive_policy: expected는 dict이어야 함"
-            results, all_ok = [], True
+            # SQS 속성은 문자열 저장 — int 기대값은 int 변환 후 _compare_dict 호출
+            normalized: dict = {}
             for k, v in exp_val.items():
-                # maxReceiveCount는 문자열로 저장되는 경우가 있으므로 타입 캐스팅
                 actual = rdp.get(k)
-                # SQS 속성은 모두 문자열 → 숫자 비교 시 int 변환
                 if isinstance(v, int) and isinstance(actual, str):
-                    try: actual = int(actual)
-                    except ValueError: pass
-                ok = actual == v
-                if not ok: all_ok = False
-                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-            msg = " | ".join(results)
-            return all_ok, f"'{identifier}' RedrivePolicy — {msg}"
+                    try:
+                        actual = int(actual)
+                    except ValueError:
+                        pass
+                normalized[k] = v
+                rdp[k] = actual  # 변환된 실제값을 source에 반영
+            return _compare_dict(normalized, rdp, f"'{identifier}' RedrivePolicy")
 
         elif alias_key == "lambda_runtime":
             # exp_val: "python3.12" 등 런타임 문자열
@@ -331,23 +335,27 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
             if not isinstance(exp_val, dict):
                 return False, "iam_policy_attached: expected는 dict이어야 함"
             policy_arn = exp_val.get("policy_arn", "")
-            if "role" in exp_val:
-                # IAM 정책 수가 많을 때 Truncated 발생 — paginator로 전체 조회
-                paginator = client.get_paginator("list_attached_role_policies")
-                attached = [
-                    p["PolicyArn"]
-                    for page in paginator.paginate(RoleName=exp_val["role"])
-                    for p in page.get("AttachedPolicies", [])
-                ]
-            elif "user" in exp_val:
-                paginator = client.get_paginator("list_attached_user_policies")
-                attached = [
-                    p["PolicyArn"]
-                    for page in paginator.paginate(UserName=exp_val["user"])
-                    for p in page.get("AttachedPolicies", [])
-                ]
-            else:
-                return False, "iam_policy_attached: expected에 'role' 또는 'user' 키 필요"
+            try:
+                if "role" in exp_val:
+                    # IAM 정책 수가 많을 때 Truncated 발생 — paginator로 전체 조회
+                    paginator = client.get_paginator("list_attached_role_policies")
+                    attached = [
+                        p["PolicyArn"]
+                        for page in paginator.paginate(RoleName=exp_val["role"])
+                        for p in page.get("AttachedPolicies", [])
+                    ]
+                elif "user" in exp_val:
+                    paginator = client.get_paginator("list_attached_user_policies")
+                    attached = [
+                        p["PolicyArn"]
+                        for page in paginator.paginate(UserName=exp_val["user"])
+                        for p in page.get("AttachedPolicies", [])
+                    ]
+                else:
+                    return False, "iam_policy_attached: expected에 'role' 또는 'user' 키 필요"
+            except ClientError as exc:
+                code = exc.response["Error"]["Code"]
+                return False, f"iam_policy_attached 조회 실패 (오류코드: {code})"
             ok = policy_arn in attached
             return ok, f"정책 '{policy_arn}' 연결 여부: {'✓ 연결됨' if ok else '✗ 미연결'}"
 
@@ -373,14 +381,15 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
             tags = {t["Key"]: t["Value"] for t in tags_raw}
             if not isinstance(exp_val, dict):
                 return False, "ec2_tags: expected는 dict이어야 함"
+            # 레이블에 Tag[] 접두 표기 유지 — source에 맞춰 direct _compare_dict 사용 불가 → 직접 순회
             results, all_ok = [], True
             for k, v in exp_val.items():
                 actual = tags.get(k)
                 ok = actual == v
-                if not ok: all_ok = False
+                if not ok:
+                    all_ok = False
                 results.append(f"Tag[{k}]: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-            msg = " | ".join(results)
-            return all_ok, f"'{identifier}' 태그 — {msg}"
+            return all_ok, f"'{identifier}' 태그 — {' | '.join(results)}"
 
         elif alias_key == "sns_attributes":
             # exp_val: {"DisplayName": "..."} 등 토픽 속성 dict
@@ -392,14 +401,7 @@ def _check_alias(client, service: str, identifier: str, alias_key: str, exp_val)
             attrs = attrs_resp.get("Attributes", {})
             if not isinstance(exp_val, dict):
                 return False, "sns_attributes: expected는 dict이어야 함"
-            results, all_ok = [], True
-            for k, v in exp_val.items():
-                actual = attrs.get(k)
-                ok = str(actual) == str(v) if actual is not None else False
-                if not ok: all_ok = False
-                results.append(f"{k}: 기대={v!r}, 실제={actual!r} → {'✓' if ok else '✗'}")
-            msg = " | ".join(results)
-            return all_ok, f"'{identifier}' SNS 속성 — {msg}"
+            return _compare_dict(exp_val, attrs, f"'{identifier}' SNS 속성", str_cast=True)
 
         else:
             return False, f"미지원 축약키: {alias_key!r}"
@@ -554,7 +556,19 @@ class GradeHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _read_body(self) -> dict | None:
-        length = int(self.headers.get("Content-Length", 0))
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw_length)
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": "Content-Length 헤더가 유효하지 않습니다."})
+            return None
+        if length < 0:
+            self._send_json(400, {"error": "Content-Length 음수 거부"})
+            return None
+        _MAX_BODY = 1 * 1024 * 1024  # 1 MB
+        if length > _MAX_BODY:
+            self._send_json(400, {"error": f"Content-Length 초과 (최대 {_MAX_BODY} bytes)"})
+            return None
         if length == 0:
             return {}
         raw = self.rfile.read(length)

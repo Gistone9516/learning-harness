@@ -30,16 +30,16 @@
     current: null,
     total: 0,
     done: 0,
-    conceptTarget: null,
     leitnerCfg: undefined,
     // mid: 단원 필터
     unitFilter: null,   // null = 전체, string[] = 선택 unit 목록
-    // mid: 세션 완료 요약
+    // BUG-1/BUG-2: 세션 완료 요약 + retry 목록
     sessionStats: {
       totalAttempted: 0,
       correctCount: 0,
       incorrectCards: []  // [{card_id, prompt}]
     },
+    retryList: null,    // BUG-2: string[] | null — 다음 세션에서만 출제할 card_id 목록
     // mid: 일시정지 카드 목록 (localStorage 키: clf:plugin_extra:disabled_cards:<subject>)
     disabledCards: null,  // Set<card_id>, 로드 후 초기화
     // self 모드: btn-reveal 후 O/X 클릭 전까지 다음 카드 이동 막는 플래그
@@ -68,6 +68,13 @@
 
   function _isCardDisabled(card_id) {
     return _state.disabledCards && _state.disabledCards.has(card_id);
+  }
+
+  /* BUG-2: retry 세션 시작 — wrongIds를 _state.retryList에 저장 후 _bootQuiz 호출 */
+  function startRetrySession(wrongIds) {
+    if (!Array.isArray(wrongIds) || !wrongIds.length) return;
+    _state.retryList = wrongIds.slice();
+    _bootQuiz({});
   }
 
   /* ────────────────────────────────────────────────────
@@ -416,23 +423,25 @@
     // → {{…}} 내 임의 텍스트를 모두 매칭해 빈칸 분리
     var parts = text.split(/\{\{[^}]+\}\}/);
     var n = 0;
+    function _makeClozeInput(idx) {
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.setAttribute('data-blank-index', String(idx));
+      inp.setAttribute('aria-label', '빈칸 ' + (idx + 1));
+      // F-06/cloze 단서: 고정 width로 길이단서 중립화
+      inp.style.cssText = 'width:8em;max-width:18em;';
+      return inp;
+    }
     parts.forEach(function (seg, i) {
       area.appendChild(document.createTextNode(seg));
       if (i < parts.length - 1 && n < blanks.length) {
-        var inp = document.createElement('input');
-        inp.type = 'text';
-        inp.setAttribute('data-blank-index', String(n));
-        inp.setAttribute('aria-label', '빈칸 ' + (n + 1));
-        area.appendChild(inp); n++;
+        area.appendChild(_makeClozeInput(n)); n++;
       }
     });
     if (n === 0 && blanks.length) {
       area.appendChild(document.createTextNode(text + ' '));
       for (var b = 0; b < blanks.length; b++) {
-        var inp2 = document.createElement('input'); inp2.type = 'text';
-        inp2.setAttribute('data-blank-index', String(b));
-        inp2.setAttribute('aria-label', '빈칸 ' + (b + 1));
-        area.appendChild(inp2);
+        area.appendChild(_makeClozeInput(b));
         if (b < blanks.length - 1) area.appendChild(document.createTextNode('  '));
       }
     }
@@ -464,7 +473,6 @@
       if (card.links && card.links.concept_ref) {
         cl.removeAttribute('hidden');
         cl.onclick = function () {
-          _state.conceptTarget = card.links.concept_ref;
           // 셸에 navigation-request 이벤트 emit (concept 화면으로 + 딥링크 ref 전달)
           if (_state.ctx && _state.ctx.emit) {
             _state.ctx.emit({ type: 'navigation-request', target: 'concept', conceptRef: card.links.concept_ref });
@@ -645,34 +653,6 @@
     }
   }
 
-  function showSessionSummary() {
-    var el = $('session-summary');
-    if (!el) return;
-    var stats = _state.sessionStats;
-    var total = stats.totalAttempted;
-    var correct = stats.correctCount;
-    var rate = total > 0 ? Math.round(correct / total * 100) : 0;
-    var statsEl = $('session-summary-stats');
-    if (statsEl) {
-      statsEl.textContent = '총 ' + total + '회 시도 · 정답률 ' + correct + '/' + total + ' (' + rate + '%)';
-    }
-    var incorrectEl = $('session-summary-incorrect');
-    if (incorrectEl) {
-      if (stats.incorrectCards.length === 0) {
-        incorrectEl.textContent = '오답 없음 — 완벽합니다!';
-        incorrectEl.style.color = '#388e3c';
-      } else {
-        var html = '<strong style="color:var(--hot,#a8301f);">오답 카드 (' + stats.incorrectCards.length + '개):</strong><ul style="margin:4px 0 0 16px;padding:0;">';
-        stats.incorrectCards.forEach(function (ic) {
-          html += '<li style="margin-bottom:2px;">' + ic.prompt.replace(/</g, '&lt;').slice(0, 60) + (ic.prompt.length > 60 ? '…' : '') + '</li>';
-        });
-        html += '</ul>';
-        incorrectEl.innerHTML = html;
-      }
-    }
-    el.removeAttribute('hidden');
-  }
-
   function advance() {
     var next;
     try {
@@ -680,16 +660,25 @@
     } catch (e) { console.error('[getNextCard]', e); next = null; }
     if (next) renderCard(next);
     else {
-      // 세션 완료 → session-done emit (§9: onEmpty→emit session-done)
-      if (_state.ctx && _state.ctx.emit) {
-        _state.ctx.emit({ type: 'session-done' });
-      }
-      // mid: 세션 완료 요약 표시
-      showSessionSummary();
+      _emitSessionDone();
       // UI 빈상태 표시
       var manifest = (window.MANIFEST && window.MANIFEST[(_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1']) || null;
       var hasDeck = manifest && manifest.decks && manifest.decks.length;
       showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
+    }
+  }
+
+  /* BUG-1: session-done 페이로드 emit (셸이 단일 소스로 요약 렌더) */
+  function _emitSessionDone() {
+    var stats = _state.sessionStats;
+    var wrongIds = stats.incorrectCards.map(function (ic) { return ic.card_id; });
+    if (_state.ctx && _state.ctx.emit) {
+      _state.ctx.emit({
+        type: 'session-done',
+        total: stats.totalAttempted,
+        correct: stats.correctCount,
+        wrong: wrongIds
+      });
     }
   }
 
@@ -869,35 +858,6 @@
       }
     });
 
-    // ── 진도 내보내기 ──
-    _on($('btn-progress-export'), 'click', function () {
-      try {
-        var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
-        var manifest = window.MANIFEST && window.MANIFEST[subject];
-        var deckIds = (manifest && manifest.decks) || [];
-        var d0 = deckIds[0];
-        var deckId = (typeof d0 === 'string') ? d0 : (d0 && d0.deck_id);
-        var ps = _state.progressStore;
-        if (!ps && deckId) ps = window.APP.loadProgress(deckId);
-        if (!ps) { _showIOMsg('진도 데이터 없음'); return; }
-        var json = JSON.stringify(ps, null, 2);
-        var blob = new Blob([json], { type: 'application/json' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'clf-progress-' + (deckId || subject) + '-' + new Date().toISOString().slice(0, 10) + '.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        // 다운로드 대화상자가 비동기이므로 즉시 revoke하면 실패할 수 있음 → 지연 revoke
-        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-        _showIOMsg('내보내기 완료');
-      } catch (e) {
-        _showIOMsg('내보내기 오류: ' + e.message);
-        console.error('[progress-export]', e);
-      }
-    });
-
     // ── 진도 가져오기 ──
     _on($('input-progress-import'), 'change', function (e) {
       var file = e.target.files && e.target.files[0];
@@ -990,7 +950,9 @@
     // mid: 단원 필터 또는 일시정지 카드 적용 여부 확인
     var hasUnitFilter = _state.unitFilter && _state.unitFilter.length > 0;
     var hasDisabledCards = _state.disabledCards && _state.disabledCards.size > 0;
-    var needsCustomBoot = hasUnitFilter || hasDisabledCards;
+    // BUG-2: retryList → 항상 custom boot 경로 사용 (필터만 retryList)
+    var hasRetryList = _state.retryList && _state.retryList.length > 0;
+    var needsCustomBoot = hasUnitFilter || hasDisabledCards || hasRetryList;
 
     if (!needsCustomBoot) {
       // 기본 경로: APP.init 사용
@@ -998,9 +960,7 @@
         subject: subject,
         dDayMode: dDayMode,
         onCard: function (card, session, progressStore, synonyms) {
-          _state.session = session;
-          _state.progressStore = progressStore;
-          _state.synonyms = synonyms;
+          // session/progressStore/synonyms는 result 블록에서 확정 기입 — 여기선 total/done/render만
           _state.total = (session.queue ? session.queue.length : 0) + (session.requeue ? session.requeue.length : 0) + 1;
           _state.done = 0;
           renderCard(card);
@@ -1008,9 +968,8 @@
         onEmpty: function () {
           var manifest = (window.MANIFEST && window.MANIFEST[subject]) || null;
           var hasDeck = manifest && manifest.decks && manifest.decks.length;
-          showSessionSummary();
+          _emitSessionDone();
           showEmpty(hasDeck ? 'empty-all-future' : 'empty-no-deck');
-          if (_state.ctx && _state.ctx.emit) { _state.ctx.emit({ type: 'session-done' }); }
         },
         onError: function (err) {
           console.error('[card-quiz plugin boot]', err);
@@ -1046,13 +1005,17 @@
         var deckId3 = (typeof d0 === 'string') ? d0 : (d0 && d0.deck_id);
         var deck3 = window.__CLF__.loadDeck(deckId3);
         var progressStore3 = window.__CLF__.loadProgress(deckId3);
-        // 단원 필터 + 일시정지 카드 적용
+        // 단원 필터 + 일시정지 카드 + retry 필터 적용
+        var retrySet = hasRetryList ? _state.retryList : null;
         var filteredCards = deck3.cards.filter(function (c) {
           if (c.enabled === false) return false;
           if (_isCardDisabled(c.card_id)) return false;
           if (hasUnitFilter && _state.unitFilter.indexOf(c.unit) === -1) return false;
+          if (retrySet && retrySet.indexOf(c.card_id) === -1) return false;
           return true;
         });
+        // BUG-2: retryList 소비 — 이번 세션에만 적용
+        _state.retryList = null;
         if (!filteredCards.length) { showEmpty('empty-all-future'); return; }
         // 필터된 덱으로 buildQueue 호출
         var queue3 = window.__CLF__.buildQueue(filteredCards, progressStore3.cards, Date.now(), {
@@ -1164,9 +1127,10 @@
       _state.session = null;
       _state.progressStore = null;
       _state.deck = null;
-      // subject 전환 시 오염 방지: disabledCards/unitFilter/sessionStats/self플래그 초기화
+      // subject 전환 시 오염 방지: disabledCards/unitFilter/sessionStats/retryList/self플래그 초기화
       _state.disabledCards = null;
       _state.unitFilter = null;
+      _state.retryList = null;
       _state.sessionStats = { totalAttempted: 0, correctCount: 0, incorrectCards: [] };
       _state._selfPendingVerdict = false;
     },
@@ -1188,14 +1152,17 @@
       var subject = (_state.ctx && _state.ctx.settings && _state.ctx.settings.subject) || 'comp1';
       var ps = _state.progressStore;
       if (!ps) {
-        // progressStore 미초기화 시 localStorage에서 로드
+        // F-13 robust: progressStore 미초기화 시 localStorage에서 로드 — SchemaVersionError 차단
         try {
           var manifest = window.MANIFEST && window.MANIFEST[subject];
           var deckIds = (manifest && manifest.decks) || [];
           var d0 = deckIds[0];
           var deckId = (typeof d0 === 'string') ? d0 : (d0 && d0.deck_id);
           if (deckId) ps = window.APP.loadProgress(deckId);
-        } catch (e) {}
+        } catch (e) {
+          // SchemaVersionError 등 전파 차단 — ps는 null 유지
+          console.warn('[getProgressSnapshot] loadProgress 실패:', e && e.name);
+        }
       }
       return {
         plugin_id: 'card-quiz',
@@ -1223,7 +1190,9 @@
     getDashboardContrib: function () {
       if (!_state.deck || !_state.progressStore) return null;
       try {
-        var data = window.APP.getDashboardData(_state.deck, _state.progressStore, Date.now());
+        // BUG-3: 단원 필터 활성 시 _state.deck._fullDeck 우선 사용 (부분통계 방지)
+        var deckForDashboard = (_state.deck._fullDeck) ? _state.deck._fullDeck : _state.deck;
+        var data = window.APP.getDashboardData(deckForDashboard, _state.progressStore, Date.now());
         return {
           plugin_id: 'card-quiz',
           by_area: data.by_area,
@@ -1236,7 +1205,14 @@
         console.error('[card-quiz getDashboardContrib]', e);
         return null;
       }
-    }
+    },
+
+    /**
+     * startRetrySession(wrongIds) — BUG-2
+     * 셸이 session-done.wrong 목록으로 retry 세션을 시작할 때 호출.
+     * @param {string[]} wrongIds — 오답 card_id 배열
+     */
+    startRetrySession: startRetrySession
   };
 
   /* ───────── 전역 등록 (shell.js가 PLUGIN_REGISTRY에 넣기 전 준비) ───────── */

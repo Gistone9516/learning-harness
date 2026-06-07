@@ -41,17 +41,6 @@
     });
   }
 
-  // 생성물 manifest.js 이후 로드되므로 즉시 실행 가능
+  // 생성물 manifest.js 이후 로드되므로 즉시 실행
   registerManifest();
-
-  // DOMContentLoaded 이미 발화된 경우에도 동작하도록 readyState 확인 후 등록
-  // (동적 script 삽입, async 로드 등 DOMContentLoaded 발화 후 이 파일이 실행될 때 대비)
-  if (!window.MANIFEST) {
-    if (document.readyState === 'loading') {
-      window.addEventListener('DOMContentLoaded', registerManifest);
-    } else {
-      // 이미 DOMContentLoaded 발화됨 → 즉시 재시도 (MANIFEST가 뒤늦게 생긴 경우)
-      registerManifest();
-    }
-  }
 })();

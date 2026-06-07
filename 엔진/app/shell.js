@@ -174,22 +174,34 @@
   function _renderSessionSummary(pluginId, event) {
     var host = $('plugin-host');
     if (!host) return;
-    var inst2 = window.PLUGIN_REGISTRY[pluginId];
-    var snap = (inst2 && inst2.getProgressSnapshot) ? inst2.getProgressSnapshot() : null;
 
+    // BUG-1: session-done 페이로드(total/correct/wrong) 우선 사용.
+    // snap 누적 순회는 event 필드가 없을 때만 fallback.
     var total = 0, correct = 0;
     var wrongItems = [];
-    if (snap && snap.activities) {
-      Object.keys(snap.activities).forEach(function (aid) {
-        var ap = snap.activities[aid];
-        total++;
-        if (ap.last_verdict === 'correct') correct++;
-        else if (ap.last_verdict === 'incorrect') wrongItems.push(aid);
-      });
+
+    if (event && event.total != null && event.correct != null && Array.isArray(event.wrong)) {
+      // event payload 완비 — 직접 사용
+      total = event.total;
+      correct = event.correct;
+      wrongItems = event.wrong;
+    } else {
+      // fallback: getProgressSnapshot 누적 순회 (event 미완비 시)
+      var inst2 = window.PLUGIN_REGISTRY[pluginId];
+      var snap = (inst2 && inst2.getProgressSnapshot) ? inst2.getProgressSnapshot() : null;
+      if (snap && snap.activities) {
+        Object.keys(snap.activities).forEach(function (aid) {
+          var ap = snap.activities[aid];
+          total++;
+          if (ap.last_verdict === 'correct') correct++;
+          else if (ap.last_verdict === 'incorrect') wrongItems.push(aid);
+        });
+      }
+      // event 부분 override (있는 필드만)
+      if (event && event.total != null) total = event.total;
+      if (event && event.correct != null) correct = event.correct;
+      if (event && Array.isArray(event.wrong)) wrongItems = event.wrong;
     }
-    if (event && event.total != null) total = event.total;
-    if (event && event.correct != null) correct = event.correct;
-    if (event && Array.isArray(event.wrong)) wrongItems = event.wrong;
 
     var pct = total > 0 ? Math.round(correct / total * 100) : 0;
 
@@ -377,6 +389,8 @@
     if (mountResult && typeof mountResult.then === 'function') {
       mountResult.catch(function (e) {
         console.error('[SHELL] mount Promise 실패', pluginId, e);
+        // F-03: 에러 배너 표시 + 활성 상태 리셋
+        host.innerHTML = '<div class="error-banner" style="margin:var(--space-6)">[' + pluginId + '] 플러그인 로드 실패: ' + (e && (e.message || String(e))) + '</div>';
         _activePluginId = null;
         _activePluginInstance = null;
         _activeMountOk = false;
@@ -434,6 +448,16 @@
 
   var STATUS_KO = { safe: '안전', watch: '주의', danger: '위험' };
 
+  /** F-10: HTML escape (areaLabel 등 동적 값의 innerHTML 삽입 보호) */
+  function _esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function _renderDashboardData(data) {
     if (!data) return;
 
@@ -469,9 +493,9 @@
       byArea.forEach(function (r) {
         var row = document.createElement('div'); row.className = 'area-row';
         if (r.retrieval_rate == null) {
-          row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(r.area, r.subarea) + '</b></span><span class="area-row__val" style="color:var(--ink3)">데이터 부족</span>';
+          row.innerHTML = '<span class="area-row__label"><b>' + _esc(areaLabel(r.area, r.subarea)) + '</b></span><span class="area-row__val" style="color:var(--ink3)">데이터 부족</span>';
         } else {
-          row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(r.area, r.subarea) + '</b></span>' +
+          row.innerHTML = '<span class="area-row__label"><b>' + _esc(areaLabel(r.area, r.subarea)) + '</b></span>' +
             '<span class="area-gauge"><i style="width:' + pct(r.retrieval_rate) + '%"></i></span>' +
             '<span class="area-row__val">' + pct(r.retrieval_rate) + '%</span>';
         }
@@ -487,7 +511,7 @@
       if (!weakness.length) wl.innerHTML = '<p class="widget-empty">아직 오답 데이터가 없습니다</p>';
       weakness.slice(0, 5).forEach(function (w) {
         var row = document.createElement('div'); row.className = 'area-row';
-        row.innerHTML = '<span class="area-row__label"><b>' + w.unit + '</b><br><span style="font-size:var(--fs-xs);color:var(--ink3)">' + areaLabel(w.area, w.subarea) + '</span></span>' +
+        row.innerHTML = '<span class="area-row__label"><b>' + _esc(w.unit) + '</b><br><span style="font-size:var(--fs-xs);color:var(--ink3)">' + _esc(areaLabel(w.area, w.subarea)) + '</span></span>' +
           '<span class="area-gauge hot"><i style="width:' + pct(w.wrong_rate) + '%"></i></span>' +
           '<span class="area-row__val" style="color:var(--hot)">' + pct(w.wrong_rate) + '%</span>';
         wl.appendChild(row);
@@ -504,9 +528,9 @@
         var row = document.createElement('div'); row.className = 'area-row';
         var gaugeCls = p.status === 'danger' ? 'area-gauge hot' : p.status === 'watch' ? 'area-gauge warn' : 'area-gauge';
         var statusKo = STATUS_KO[p.status] || p.status;
-        row.innerHTML = '<span class="area-row__label"><b>' + areaLabel(p.area, p.subarea) + '</b> <span style="font-size:var(--fs-xs);color:var(--ink3)">목표 ' + p.target + '</span></span>' +
-          '<span class="' + gaugeCls + '"><i style="width:' + pct(p.progress) + '%"></i></span>' +
-          '<span class="status-chip ' + p.status + '">' + statusKo + '</span>';
+        row.innerHTML = '<span class="area-row__label"><b>' + _esc(areaLabel(p.area, p.subarea)) + '</b> <span style="font-size:var(--fs-xs);color:var(--ink3)">목표 ' + _esc(String(p.target)) + '</span></span>' +
+          '<span class="' + _esc(gaugeCls) + '"><i style="width:' + pct(p.progress) + '%"></i></span>' +
+          '<span class="status-chip ' + _esc(p.status) + '">' + _esc(statusKo) + '</span>';
         pl.appendChild(row);
       });
     }
@@ -522,7 +546,7 @@
         var tot = (bd.box1 || 0) + (bd.box2 || 0) + (bd.box3 || 0);
         var w1 = tot ? bd.box1 / tot * 100 : 0, w2 = tot ? bd.box2 / tot * 100 : 0, w3 = tot ? bd.box3 / tot * 100 : 0;
         var wrap = document.createElement('div');
-        wrap.innerHTML = '<div class="completion-row__head"><span class="lbl">' + areaLabel(c.area, c.subarea) + '</span><span class="val">정복 ' + pct(c.mastery_rate) + '%</span></div>' +
+        wrap.innerHTML = '<div class="completion-row__head"><span class="lbl">' + _esc(areaLabel(c.area, c.subarea)) + '</span><span class="val">정복 ' + pct(c.mastery_rate) + '%</span></div>' +
           '<div class="stack-bar"><span class="box1" style="width:' + w1 + '%"></span><span class="box2" style="width:' + w2 + '%"></span><span class="box3" style="width:' + w3 + '%"></span></div>';
         cl.appendChild(wrap);
       });

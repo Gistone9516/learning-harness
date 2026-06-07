@@ -94,7 +94,8 @@
   function _runOneCase(code, stdin, captureplot) {
     var py = _pyodide;
 
-    // 케이스 간 전역 오염 방지: 사용자 정의 모듈 제거 (표준라이브러리 유지)
+    // BUG-4: 케이스 간 전역 오염 방지 — exec를 독립 namespace(dict)에서 실행.
+    // 사용자 정의 모듈도 제거해 import 캐시 오염 차단.
     try {
       py.runPython(
         'import sys as _sys\n' +
@@ -111,6 +112,7 @@
         '    pass\n'
       : '';
 
+    // BUG-4: exec를 독립 namespace(_ns)에서 실행 — 전역 dict 오염 방지.
     // stdin 주입 + stdout/stderr 리디렉션 래퍼 코드
     var wrapper =
       mplSetup +
@@ -119,8 +121,9 @@
       '_sys.stdout = _io.StringIO()\n' +
       '_sys.stderr = _io.StringIO()\n' +
       '_PLOT_B64 = ""\n' +
+      '_ns = {}\n' +
       'try:\n' +
-      '    exec(_USER_CODE)\n' +
+      '    exec(_USER_CODE, _ns)\n' +
       'except SystemExit:\n' +
       '    pass\n' +
       '_STDOUT_VAL = _sys.stdout.getvalue()\n' +
@@ -146,8 +149,13 @@
     py.globals.set('_USER_CODE', code);
 
     var runPromise = py.runPythonAsync(wrapper + mplCapture).then(function () {
-      var out   = py.globals.get('_STDOUT_VAL') || '';
-      var pb64  = captureplot ? (py.globals.get('_PLOT_B64') || '') : '';
+      var out    = py.globals.get('_STDOUT_VAL') || '';
+      var stderr = py.globals.get('_STDERR_VAL') || '';
+      var pb64   = captureplot ? (py.globals.get('_PLOT_B64') || '') : '';
+      // F-01: stderr 회수 — 비어 있으면 무시, 있으면 error로 반환 (오채점 방지)
+      if (stderr) {
+        return { stdout: out, error: stderr.split('\n')[0], plot_b64: pb64 || null };
+      }
       return { stdout: out, error: null, plot_b64: pb64 || null };
     }).catch(function (e) {
       // Python 예외: 첫 줄만 반환 (런타임규격 §3-2)
@@ -409,21 +417,17 @@
     ].join('\n');
   }
 
-  /** 테스트 케이스 패널 HTML — 입력만 공개 (기대 출력은 채점 후 결과표에서 공개) */
+  /**
+   * 테스트 케이스 패널 HTML.
+   * F-05: 입력값·케이스 수 사전 노출 제거 — expected 비공개 정책과 일관.
+   * 케이스 수·입력은 제출 후 결과표에서만 공개.
+   * 케이스가 존재함을 알리는 최소 힌트(건수 미포함)만 표시.
+   */
   function _buildTestCasesHTML(activity) {
     var tcs = activity && activity.grading && activity.grading.test_cases;
     if (!tcs || !tcs.length) return '';
-    var rows = tcs.map(function (tc, i) {
-      var inputDisplay = _esc(tc.input).replace(/\n/g, '↵');
-      return '<div style="margin-bottom:6px;padding:8px;background:var(--surface,#fff);border:1px solid var(--line2,#ddd);border-radius:4px;font-size:0.82em;font-family:monospace">' +
-        '<span style="color:var(--ink3,#666)">케이스 ' + (i + 1) + '</span>&nbsp;&nbsp;' +
-        '<span style="color:var(--ink3,#555)">입력:</span> <code style="background:var(--surface2,#f2eee5);padding:1px 4px;border-radius:3px">' + inputDisplay + '</code>' +
-        '</div>';
-    }).join('');
-    return '<details style="margin-bottom:8px">' +
-      '<summary style="cursor:pointer;font-size:0.85em;color:var(--ink3,#666);padding:4px 0">테스트 케이스 입력 ' + tcs.length + '개 보기</summary>' +
-      '<div style="margin-top:6px">' + rows + '</div>' +
-      '</details>';
+    // 케이스 존재 여부만 표시 — 개수·입력값 비공개
+    return '<div style="margin-bottom:8px;font-size:0.82em;color:var(--ink3,#888)">테스트 케이스 포함 · 제출 후 결과 확인</div>';
   }
 
   /* ─────────────────────────────────────────────
@@ -772,6 +776,7 @@
         // [mid] matplotlib 패키지 설치된 activity이면 플롯 캡처 활성화
         var capturePlot = _hasMplPackage(_state.activity);
         if (plotEl) { plotEl.innerHTML = ''; plotEl.style.display = 'none'; }
+        // F-02: .catch 추가 — 실행 오류 표시, 출력창 무한 로딩 방지
         _runOneCase(code, '', capturePlot).then(function (res) {
           _showOutput(outputEl, res.error ? ('오류: ' + res.error) : (res.stdout || '(출력 없음)'));
           // [mid] 플롯이 캡처됐으면 img 태그로 표시
@@ -780,6 +785,8 @@
               '" alt="matplotlib 출력" style="max-width:100%;border-radius:6px;border:1px solid var(--line2,#ddd)">';
             plotEl.style.display = 'block';
           }
+        }).catch(function (e) {
+          _showOutput(outputEl, '실행 오류: ' + (e && (e.message || String(e)) || '알 수 없는 오류'));
         });
       });
     }
@@ -1079,8 +1086,10 @@
       // 설치 완료 후 _safe_modules 갱신: 설치된 패키지가 케이스 간 정리에서 제외됨
       try { py.runPython('_safe_modules = set(_sys.modules.keys())'); } catch (e2) {}
     }).catch(function (e) {
-      // 설치 실패: 경고만(채점 실패가 아님 — 사용자가 직접 install 코드 작성 가능)
-      console.warn('[coding] micropip install 실패:', e.message || e);
+      // F-12: 설치 실패 경고 — loadingEl에 표시 (silent degradation 방지)
+      var warnMsg = '⚠️ 패키지 설치 실패: ' + (e && (e.message || String(e)) || '알 수 없는 오류');
+      console.warn('[coding] micropip install 실패:', e && (e.message || e));
+      if (loadingEl) loadingEl.textContent = warnMsg;
     });
   }
 
