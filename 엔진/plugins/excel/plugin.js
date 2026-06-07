@@ -54,13 +54,15 @@
      플러그인 내부 상태
   ───────────────────────────────────────────── */
   var _state = {
-    mounted:    false,
-    host:       null,   // HTMLElement — #plugin-host
-    ctx:        null,   // PluginContext
-    activity:   null,   // 현재 ActivitySpec (sheet-task)
-    univerAPI:  null,   // Univer Facade API 인스턴스
-    progress:   null,   // PluginProgressSnapshot (메모리 캐시)
-    restored:   false   // onProgressRestored 호출됐는지
+    mounted:       false,
+    host:          null,   // HTMLElement — #plugin-host
+    ctx:           null,   // PluginContext
+    activity:      null,   // 현재 ActivitySpec (sheet-task)
+    univerAPI:     null,   // Univer Facade API 인스턴스
+    progress:      null,   // PluginProgressSnapshot (메모리 캐시)
+    restored:      false,  // onProgressRestored 호출됐는지
+    activityIndex: 0,      // 현재 활동 인덱스
+    univerContainer: null  // Univer 컨테이너 ref (dispose용)
   };
 
   /* ─────────────────────────────────────────────
@@ -322,14 +324,121 @@
   }
 
   /* ─────────────────────────────────────────────
+     Activity 네비게이션 바 HTML 생성
+  ───────────────────────────────────────────── */
+  /**
+   * @param {Array}  activities
+   * @param {number} currentIdx
+   * @returns {string}
+   */
+  function _buildNavHTML(activities, currentIdx) {
+    if (!activities || activities.length <= 1) return '';
+    var html = '<div class="act-nav" style="display:flex;align-items:center;gap:6px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line2,#eee);flex-wrap:wrap">';
+    html += '<span style="font-size:0.8rem;color:var(--ink3,#888);font-weight:500;margin-right:2px">문제</span>';
+    for (var i = 0; i < activities.length; i++) {
+      html += '<button type="button" class="act-nav-btn" data-act-idx="' + i + '"' +
+        ' style="min-width:34px;height:34px;border-radius:7px;border:1.5px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.83rem;font-weight:500">' +
+        (i + 1) + '</button>';
+    }
+    html += '<span class="act-count" style="margin-left:auto;font-size:0.8rem;color:var(--ink3,#888)">' + (currentIdx + 1) + ' / ' + activities.length + '</span>';
+    html += '</div>';
+    return html;
+  }
+
+  /* ─────────────────────────────────────────────
+     네비게이션 배지 업데이트 (진도·활성 상태 반영)
+  ───────────────────────────────────────────── */
+  /**
+   * @param {HTMLElement} container
+   * @param {Array}       activities
+   * @param {number}      currentIdx
+   */
+  function _updateNavBadges(container, activities, currentIdx) {
+    var btns = container.querySelectorAll('.act-nav-btn');
+    for (var i = 0; i < btns.length; i++) {
+      var isActive = i === currentIdx;
+      var act = activities[i];
+      var saved = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
+      var done = saved && saved.last_verdict === 'correct';
+      btns[i].style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
+      btns[i].style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
+      btns[i].style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      btns[i].title = done ? '완료 ✓' : '';
+    }
+    var countEl = container.querySelector('.act-count');
+    if (countEl) countEl.textContent = (currentIdx + 1) + ' / ' + activities.length;
+  }
+
+  /* ─────────────────────────────────────────────
+     활동 전환 — Univer dispose 후 새 활동으로 리마운트
+  ───────────────────────────────────────────── */
+  /**
+   * @param {HTMLElement}   container
+   * @param {object}        ctx
+   * @param {Array}         activities
+   * @param {number}        idx
+   */
+  function _switchExcelActivity(container, ctx, activities, idx) {
+    _state.activityIndex = idx;
+    _state.activity = activities[idx] || null;
+    var activity = _state.activity;
+
+    // 기존 Univer dispose
+    if (_state.univerAPI) {
+      try { if (typeof _state.univerAPI.dispose === 'function') _state.univerAPI.dispose(); } catch (e) {}
+      _state.univerAPI = null;
+    }
+
+    // 문제 지문 업데이트
+    var promptEl = container.querySelector('.excel-prompt');
+    if (promptEl && activity) promptEl.textContent = (activity.front && activity.front.prompt) || '';
+
+    // 채점 결과 초기화
+    var resultEl = container.querySelector('.excel-result');
+    if (resultEl) resultEl.innerHTML = '';
+
+    // activity-id 속성 갱신
+    var wrap = container.querySelector('.excel-wrap');
+    if (wrap && activity) wrap.setAttribute('data-activity-id', activity.activity_id);
+
+    // Univer 리마운트
+    var univerContainer = container.querySelector('.excel-univer-container');
+    if (univerContainer && activity) {
+      univerContainer.innerHTML = ''; // 기존 캔버스 제거
+      if (_checkUniver()) {
+        var initialGrid = (activity.front && activity.front.initial_grid) || [['']];
+        try {
+          var result = _mountUniver(univerContainer, initialGrid);
+          _state.univerAPI = result.univerAPI;
+        } catch (e) {
+          univerContainer.textContent = 'Univer 초기화 실패: ' + e.message;
+        }
+      }
+    }
+
+    // 네비게이션 배지 갱신
+    _updateNavBadges(container, activities, idx);
+  }
+
+  /* ─────────────────────────────────────────────
      UI HTML 생성
   ───────────────────────────────────────────── */
-  function _buildHTML(activity) {
+  /**
+   * @param {object} activity
+   * @param {Array}  activities
+   * @param {number} currentIdx
+   * @returns {string}
+   */
+  function _buildHTML(activity, activities, currentIdx) {
     var prompt = (activity && activity.front && activity.front.prompt) || '(문제 없음)';
     var actId  = (activity && activity.activity_id) || '';
+    var navHtml = _buildNavHTML(activities, currentIdx);
 
     return [
       '<div class="excel-wrap" data-activity-id="' + _esc(actId) + '">',
+
+      /* 활동 네비게이션 바 */
+      navHtml,
 
       /* 문제 지문 */
       '<div class="excel-problem" style="' +
@@ -357,6 +466,10 @@
         'background:var(--accent,#0550ae);color:#fff;cursor:pointer;font-weight:600">',
       '    채점',
       '  </button>',
+      '  <button type="button" class="excel-btn-reset"',
+      '          style="padding:8px 16px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer;font-size:0.88rem;color:var(--ink3,#666)">',
+      '    초기화',
+      '  </button>',
       '</div>',
 
       /* 채점 결과 */
@@ -383,10 +496,22 @@
 
     // activities 취득 (window.ACTIVITIES['excel'])
     var activities = (window.ACTIVITIES && window.ACTIVITIES['excel']) || [];
-    _state.activity = activities[0] || null;
+
+    // 해시에서 초기 인덱스 취득 (#.../excel/N 형태 지원)
+    var initIdx = 0;
+    try {
+      var hashParts = window.location.hash.split('/');
+      var hashNum = parseInt(hashParts[2], 10);
+      if (!isNaN(hashNum) && hashNum >= 0 && hashNum < activities.length) {
+        initIdx = hashNum;
+      }
+    } catch (e) {}
+
+    _state.activityIndex = initIdx;
+    _state.activity = activities[initIdx] || null;
 
     // HTML 골격 주입
-    container.innerHTML = _buildHTML(_state.activity);
+    container.innerHTML = _buildHTML(_state.activity, activities, initIdx);
 
     // Univer CDN 로드 여부 확인
     if (!_checkUniver()) {
@@ -403,6 +528,7 @@
     var activity    = _state.activity;
     var initialGrid = (activity && activity.front && activity.front.initial_grid) || [['']];
     var univerContainer = container.querySelector('.excel-univer-container');
+    _state.univerContainer = univerContainer;
 
     try {
       var result = _mountUniver(univerContainer, initialGrid);
@@ -431,14 +557,40 @@
           return;
         }
         _showResult(resultEl, null, '채점 중...');
-        score().then(function (result) {
-          _showResult(resultEl, result, null);
-          ctx.emit({ type: 'activity-completed', result: result });
+        score().then(function (scoreResult) {
+          _showResult(resultEl, scoreResult, null);
+          ctx.emit({ type: 'activity-completed', result: scoreResult });
+          // 채점 후 네비게이션 배지 갱신 (정답 시 배지 반영)
+          _updateNavBadges(container, activities, _state.activityIndex);
         }).catch(function (e) {
           _showResult(resultEl, null, '채점 오류: ' + e.message);
         });
       });
     }
+
+    // Reset(초기화) 버튼 바인딩
+    var resetBtn = container.querySelector('.excel-btn-reset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function () {
+        _switchExcelActivity(container, ctx, activities, _state.activityIndex);
+      });
+    }
+
+    // 네비게이션 버튼 바인딩
+    var navBtns = container.querySelectorAll('.act-nav-btn');
+    for (var i = 0; i < navBtns.length; i++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
+          if (!isNaN(newIdx) && newIdx !== _state.activityIndex) {
+            _switchExcelActivity(container, ctx, activities, newIdx);
+          }
+        });
+      })(navBtns[i]);
+    }
+
+    // 초기 배지 상태 반영
+    _updateNavBadges(container, activities, initIdx);
 
     return Promise.resolve();
   }
@@ -459,10 +611,12 @@
 
     if (_state.host) _state.host.innerHTML = '';
 
-    _state.mounted   = false;
-    _state.host      = null;
-    _state.ctx       = null;
-    _state.activity  = null;
+    _state.mounted        = false;
+    _state.host           = null;
+    _state.ctx            = null;
+    _state.activity       = null;
+    _state.activityIndex  = 0;
+    _state.univerContainer = null;
   }
 
   /* ─────────────────────────────────────────────

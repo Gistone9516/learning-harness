@@ -60,6 +60,8 @@
  *   2. grammar  — 동사 시제 (현재완료 vs. 단순과거)
  *   3. reading  — 단문 독해 (일상 공지문, 주제 파악)
  *   4. listening — 단문 받아쓰기 (일상 문장 TTS)
+ *   5. vocab    — 형용사 "ambiguous" 의미 선택 (단어 맥락)
+ *   6. grammar  — 관계대명사 which vs. who vs. whom (객관식)
  * ─────────────────────────────────────────────────────────────────
  */
 (function () {
@@ -215,6 +217,81 @@
         expected: 'The train to the airport departs every thirty minutes.'
         // Engine normalises both strings to lowercase, strips punctuation,
         // then computes WER: score_raw = 1 - (substitutions+deletions+insertions) / ref_word_count
+      }
+    },
+
+    /* ────────────────────────────────────────────────────────────
+       5. Vocabulary — "ambiguous" 의미 파악 (문맥 선택)
+       modality : vocab
+       grading  : exact  (grader_id = "engine")
+    ──────────────────────────────────────────────────────────── */
+    {
+      activity_id: 'english-ex-005',
+      type: 'lang-task',
+      front: {
+        modality: 'vocab',
+        prompt:
+          'Read the sentence and answer the question.\n\n' +
+          '"The instructions were so ambiguous that each team member\n' +
+          'interpreted them differently."\n\n' +
+          'What does the word "ambiguous" mean in this context?',
+        options: [
+          'A) very detailed and specific',
+          'B) unclear and open to more than one interpretation',
+          'C) written in a foreign language',
+          'D) too long to read carefully'
+        ]
+      },
+      back: {
+        answer: 'B',
+        explanation:
+          '"Ambiguous" describes something that can be understood in more than one ' +
+          'way, causing confusion. The context clue is "each team member interpreted ' +
+          'them differently," which directly shows multiple interpretations arising ' +
+          'from the unclear instructions. Option A is the opposite meaning; ' +
+          'C and D are unrelated to the sentence.'
+      },
+      grading: {
+        mode:   'exact',
+        accept: ['B', 'b', 'B) unclear and open to more than one interpretation',
+                 'unclear and open to more than one interpretation']
+      }
+    },
+
+    /* ────────────────────────────────────────────────────────────
+       6. Grammar — 관계대명사 who / which / whom 선택
+       modality : grammar
+       grading  : exact  (grader_id = "engine")
+    ──────────────────────────────────────────────────────────── */
+    {
+      activity_id: 'english-ex-006',
+      type: 'lang-task',
+      front: {
+        modality: 'grammar',
+        prompt:
+          'Choose the correct relative pronoun to complete the sentence.\n\n' +
+          '"The scientist ______ discovered the new compound received an award."',
+        options: [
+          'A) which',
+          'B) whom',
+          'C) who',
+          'D) whose'
+        ]
+      },
+      back: {
+        answer: 'C',
+        explanation:
+          '"Who" is used as a subject relative pronoun referring to a person. ' +
+          'In this sentence the relative clause needs a subject ("___ discovered"), ' +
+          'so the subject form "who" is correct. ' +
+          '"Whom" is the object form (used when the pronoun is the object of a verb ' +
+          'or preposition, e.g. "the scientist whom we honoured"). ' +
+          '"Which" refers to things, not people. ' +
+          '"Whose" indicates possession.'
+      },
+      grading: {
+        mode:   'exact',
+        accept: ['C', 'c', 'C) who', 'who']
       }
     }
 

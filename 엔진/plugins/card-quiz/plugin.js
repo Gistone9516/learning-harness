@@ -463,6 +463,44 @@
         }
       });
     });
+
+    // 키보드 단축키
+    _on(document, 'keydown', function (e) {
+      // 입력 포커스 중이면 무시
+      var tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      var btnReveal = $('btn-reveal');
+      var navArea = $('nav-area');
+      var inputSelf = $('input-self');
+
+      if (e.key === 'Enter') {
+        // 정답 확인 버튼이 보일 때 → 클릭
+        if (btnReveal && !btnReveal.hasAttribute('hidden')) {
+          e.preventDefault();
+          btnReveal.click();
+        }
+      } else if (e.key === 'ArrowRight' || e.key === ' ') {
+        // 다음 카드 영역이 보일 때 → 다음 카드
+        if (navArea && !navArea.hasAttribute('hidden')) {
+          e.preventDefault();
+          var btnNext = $('btn-next');
+          if (btnNext) btnNext.click();
+        }
+      } else if (e.key === 'o' || e.key === 'O') {
+        // 자가채점 영역이 보일 때 → 정답(O)
+        if (inputSelf && !inputSelf.hasAttribute('hidden')) {
+          var oBtn = document.querySelector('[data-self-verdict="o"]');
+          if (oBtn) oBtn.click();
+        }
+      } else if (e.key === 'x' || e.key === 'X') {
+        // 자가채점 영역이 보일 때 → 오답(X)
+        if (inputSelf && !inputSelf.hasAttribute('hidden')) {
+          var xBtn = document.querySelector('[data-self-verdict="x"]');
+          if (xBtn) xBtn.click();
+        }
+      }
+    });
   }
 
   function _unbindEvents() {

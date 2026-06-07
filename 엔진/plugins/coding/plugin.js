@@ -2,7 +2,7 @@
  * coding / plugin.js
  * 플러그인계약 §3 PluginInstance 구현 — coding 플러그인
  * ────────────────────────────────────────────────────────────
- * 런타임규격 conform (buildflow cycle-2).
+ * 런타임규격 conform (buildflow cycle-2, cycle-3 upgrade).
  *
  * 의존 CDN (index.html에서 shell.js보다 먼저 로드):
  *   CodeMirror 5.x  — codemirror.min.js + codemirror.min.css + mode/python/python.min.js
@@ -127,6 +127,7 @@
   /* ─────────────────────────────────────────────
      채점 (런타임규격 §3-1, §3-3, §3-4)
      stdout-trim: trim(actual) === trim(expected)
+     float tolerance: numeric 비교 허용 (1e-6)
   ───────────────────────────────────────────── */
   /**
    * @param {object} activity  ActivitySpec (code-problem)
@@ -161,7 +162,14 @@
             if (!errorMsg) errorMsg = res.error;
             return;
           }
-          var ok = res.stdout.trim() === tc.expected.trim();
+          // float tolerance 비교
+          var actualTrim = res.stdout.trim();
+          var expectedTrim = tc.expected.trim();
+          var ok = actualTrim === expectedTrim;
+          if (!ok) {
+            var af = parseFloat(actualTrim), ef = parseFloat(expectedTrim);
+            if (!isNaN(af) && !isNaN(ef) && Math.abs(af - ef) < 1e-6) ok = true;
+          }
           if (ok) {
             passed++;
           } else if (!firstFail) {
@@ -210,13 +218,14 @@
      플러그인 내부 상태
   ───────────────────────────────────────────── */
   var _state = {
-    mounted:    false,
-    host:       null,   // HTMLElement — #plugin-host
-    ctx:        null,   // PluginContext
-    activity:   null,   // 현재 ActivitySpec
-    editor:     null,   // CodeMirror 인스턴스
-    progress:   null,   // PluginProgressSnapshot (메모리 캐시)
-    restored:   false   // onProgressRestored 호출됐는지
+    mounted:       false,
+    host:          null,   // HTMLElement — #plugin-host
+    ctx:           null,   // PluginContext
+    activity:      null,   // 현재 ActivitySpec
+    activityIndex: 0,      // 현재 활성 activity 인덱스
+    editor:        null,   // CodeMirror 인스턴스
+    progress:      null,   // PluginProgressSnapshot (메모리 캐시)
+    restored:      false   // onProgressRestored 호출됐는지
   };
 
   /* ─────────────────────────────────────────────
@@ -255,6 +264,161 @@
   }
 
   /* ─────────────────────────────────────────────
+     UI HTML 생성 헬퍼들
+  ───────────────────────────────────────────── */
+
+  /** 문제 영역 HTML */
+  function _buildProblemHTML(activity) {
+    var prompt    = (activity && activity.front && activity.front.prompt) || '(문제 없음)';
+    var langLabel = (activity && activity.front && activity.front.language) || 'python';
+    return [
+      '<div class="coding-problem">',
+      '  <div class="coding-lang-badge" style="display:inline-block;padding:2px 8px;border-radius:4px;background:var(--accent,#0550ae);color:#fff;font-size:0.75em;font-weight:700;margin-bottom:8px">' + _esc(langLabel.toUpperCase()) + '</div>',
+      '  <div class="coding-prompt" style="white-space:pre-wrap;font-size:0.95em;line-height:1.6;color:var(--ink,#111)">' + _esc(prompt) + '</div>',
+      '</div>'
+    ].join('\n');
+  }
+
+  /** 테스트 케이스 패널 HTML */
+  function _buildTestCasesHTML(activity) {
+    var tcs = activity && activity.grading && activity.grading.test_cases;
+    if (!tcs || !tcs.length) return '';
+    var rows = tcs.map(function (tc, i) {
+      var inputDisplay = _esc(tc.input).replace(/\n/g, '↵');
+      var expectedDisplay = _esc(tc.expected).replace(/\n/g, '↵');
+      return '<div style="margin-bottom:6px;padding:8px;background:var(--surface,#fff);border:1px solid var(--line2,#ddd);border-radius:4px;font-size:0.82em;font-family:monospace">' +
+        '<span style="color:var(--ink3,#666)">케이스 ' + (i + 1) + '</span>&nbsp;&nbsp;' +
+        '<span style="color:var(--ink3,#555)">입력:</span> <code style="background:var(--surface2,#f6f8fa);padding:1px 4px;border-radius:3px">' + inputDisplay + '</code>' +
+        '&nbsp;&nbsp;<span style="color:var(--ink3,#555)">기대 출력:</span> <code style="background:var(--surface2,#f6f8fa);padding:1px 4px;border-radius:3px">' + expectedDisplay + '</code>' +
+        '</div>';
+    }).join('');
+    return '<details style="margin-bottom:8px">' +
+      '<summary style="cursor:pointer;font-size:0.85em;color:var(--ink3,#666);user-select:none;padding:4px 0">테스트 케이스 ' + tcs.length + '개 보기</summary>' +
+      '<div style="margin-top:6px">' + rows + '</div>' +
+      '</details>';
+  }
+
+  /** 영속 셸 HTML (nav + 편집기 뼈대, activities 배열 기반) */
+  function _buildShellHTML(activities) {
+    var navHtml = '';
+    if (activities.length > 1) {
+      var btnHtmls = activities.map(function (act, i) {
+        return '<button type="button" class="act-nav-btn" data-act-idx="' + i + '" ' +
+          'style="padding:5px 14px;border-radius:6px;border:1px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.85em;color:var(--ink3,#666);transition:background 0.15s">' +
+          _esc(act.activity_id || ('문제 ' + (i + 1))) +
+          '</button>';
+      }).join('\n');
+      navHtml = [
+        '<div class="act-nav" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line2,#eee)">',
+        btnHtmls,
+        '<span class="act-count" style="margin-left:auto;font-size:0.8em;color:var(--ink3,#888)">1 / ' + activities.length + '</span>',
+        '</div>'
+      ].join('\n');
+    }
+
+    return [
+      '<div class="coding-wrap">',
+
+      /* activity nav */
+      navHtml,
+
+      /* 문제 영역 (동적) */
+      '<div id="coding-problem-area" style="margin-bottom:10px"></div>',
+
+      /* 테스트 케이스 패널 (동적) */
+      '<div id="coding-testcases-wrap"></div>',
+
+      /* Pyodide 로딩 표시 */
+      '<div class="coding-pyodide-loading" style="font-size:0.85em;color:var(--ink3,#888);margin-bottom:8px">',
+      '  ⏳ Python 런타임(Pyodide) 로드 중...',
+      '</div>',
+
+      /* 에디터 영역 (에디터 인스턴스 주입됨) */
+      '<div class="coding-editor-wrap" style="margin-bottom:8px"></div>',
+
+      /* 버튼 영역 */
+      '<div class="coding-actions" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">',
+      '  <button type="button" class="coding-btn-run" disabled',
+      '          style="padding:8px 18px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer">',
+      '    실행 <span style="font-size:0.75em;color:var(--ink3,#999)">(Ctrl+Enter)</span>',
+      '  </button>',
+      '  <button type="button" class="coding-btn-submit" disabled',
+      '          style="padding:8px 22px;border-radius:6px;border:none;background:var(--accent,#0550ae);color:#fff;cursor:pointer;font-weight:600">',
+      '    제출·채점 <span style="font-size:0.75em;opacity:0.85">(Shift+Enter)</span>',
+      '  </button>',
+      '  <button type="button" class="coding-btn-solution"',
+      '          style="display:none;padding:8px 16px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface2,#f6f8fa);cursor:pointer;font-size:0.88em;color:var(--ink3,#555)">',
+      '    모범 답안 보기',
+      '  </button>',
+      '</div>',
+
+      /* 실행 출력창 */
+      '<pre class="coding-output"',
+      '     style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:6px;padding:12px;min-height:48px;font-size:0.85em;white-space:pre-wrap;overflow-x:auto;color:var(--ink,#111)">',
+      '</pre>',
+
+      /* 채점 결과 */
+      '<div class="coding-result" style="min-height:28px"></div>',
+
+      '</div>'
+    ].join('\n');
+  }
+
+  /* ─────────────────────────────────────────────
+     _applyActivity — 문제 영역·에디터·nav 갱신
+  ───────────────────────────────────────────── */
+  function _applyActivity(container, activities, idx) {
+    _state.activityIndex = idx;
+    _state.activity = activities[idx] || null;
+    var activity = _state.activity;
+
+    // 문제 영역 갱신
+    var problemEl = container.querySelector('#coding-problem-area');
+    if (problemEl) problemEl.innerHTML = _buildProblemHTML(activity);
+
+    // 테스트 케이스 패널 갱신
+    var tcEl = container.querySelector('#coding-testcases-wrap');
+    if (tcEl) tcEl.innerHTML = _buildTestCasesHTML(activity);
+
+    // 에디터 코드 갱신 (진도에 저장된 코드 우선)
+    if (_state.editor && activity) {
+      var code = (activity.front && activity.front.starter_code) || '';
+      var saved = _state.progress && _state.progress.activities && _state.progress.activities[activity.activity_id];
+      if (saved && saved.plugin_extra && saved.plugin_extra.last_code) code = saved.plugin_extra.last_code;
+      _state.editor.setValue(code);
+    }
+
+    // 출력·결과 초기화, solution 버튼 숨기기
+    var outputEl = container.querySelector('.coding-output');
+    var resultEl = container.querySelector('.coding-result');
+    var solBtn   = container.querySelector('.coding-btn-solution');
+    if (outputEl) outputEl.textContent = '';
+    if (resultEl) resultEl.innerHTML = '';
+    if (solBtn)   solBtn.style.display = 'none';
+
+    // nav 버튼 활성 상태 + completion badge 갱신
+    var actBtns = container.querySelectorAll('.act-nav-btn');
+    for (var i = 0; i < actBtns.length; i++) {
+      var btn = actBtns[i];
+      var isActive = (i === idx);
+      var act = activities[i];
+      var saved2 = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
+      var done = saved2 && saved2.last_verdict === 'correct';
+      btn.style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
+      btn.style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
+      btn.style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      // completion badge
+      var label = act ? (act.activity_id || ('문제 ' + (i + 1))) : ('문제 ' + (i + 1));
+      btn.textContent = done ? label + ' ✓' : label;
+      btn.title = done ? '완료 ✓' : '';
+    }
+
+    // 카운트 표시 갱신
+    var countEl = container.querySelector('.act-count');
+    if (countEl) countEl.textContent = (idx + 1) + ' / ' + activities.length;
+  }
+
+  /* ─────────────────────────────────────────────
      mount() — UI 주입 (런타임규격 §4-1)
   ───────────────────────────────────────────── */
   /**
@@ -266,41 +430,54 @@
     // 이미 마운트된 경우 먼저 정리
     if (_state.mounted) unmount();
 
-    _state.host = container;
-    _state.ctx  = ctx;
+    _state.host    = container;
+    _state.ctx     = ctx;
     _state.mounted = true;
 
     // activities 목록 취득 (window.ACTIVITIES['coding'])
     var activities = (window.ACTIVITIES && window.ACTIVITIES['coding']) || [];
-    // 활성 activity: 현재는 첫 번째 (추후 hash activityId 연동 가능)
-    _state.activity = activities[0] || null;
 
-    // HTML 골격 주입
-    container.innerHTML = _buildHTML(_state.activity);
-
-    var hostEl      = container;
-    var editorWrap  = hostEl.querySelector('.coding-editor-wrap');
-    var outputEl    = hostEl.querySelector('.coding-output');
-    var runBtn      = hostEl.querySelector('.coding-btn-run');
-    var submitBtn   = hostEl.querySelector('.coding-btn-submit');
-    var loadingEl   = hostEl.querySelector('.coding-pyodide-loading');
-    var resultEl    = hostEl.querySelector('.coding-result');
-
-    // 에디터 생성
-    var initialCode = (_state.activity && _state.activity.front.starter_code) || '';
-
-    // 진도 복원 (onProgressRestored 이미 호출됐으면 last_code 적용)
-    if (_state.restored && _state.progress) {
-      var actId = _state.activity && _state.activity.activity_id;
-      var saved = actId && _state.progress.activities && _state.progress.activities[actId];
-      if (saved && saved.plugin_extra && saved.plugin_extra.last_code) {
-        initialCode = saved.plugin_extra.last_code;
+    // 초기 activityIndex: URL hash에서 activityId 매칭 시도
+    var initIdx = 0;
+    try {
+      var hashParts = window.location.hash.split('/');
+      var hashActId = hashParts[2] || '';
+      if (hashActId) {
+        for (var hi = 0; hi < activities.length; hi++) {
+          if (activities[hi].activity_id === hashActId) { initIdx = hi; break; }
+        }
       }
+    } catch (e) { /* hash 파싱 실패 무시 */ }
+
+    // 셸 HTML 주입
+    container.innerHTML = _buildShellHTML(activities);
+
+    var editorWrap = container.querySelector('.coding-editor-wrap');
+    var outputEl   = container.querySelector('.coding-output');
+    var runBtn     = container.querySelector('.coding-btn-run');
+    var submitBtn  = container.querySelector('.coding-btn-submit');
+    var loadingEl  = container.querySelector('.coding-pyodide-loading');
+    var resultEl   = container.querySelector('.coding-result');
+    var solBtn     = container.querySelector('.coding-btn-solution');
+
+    // 에디터 1회 생성 (스위치 시 재사용)
+    _state.editor = _createEditor(editorWrap, '');
+
+    // activity 적용 (문제·테스트케이스·에디터코드 초기화)
+    _applyActivity(container, activities, initIdx);
+
+    // nav 버튼 이벤트 바인딩
+    var actBtns = container.querySelectorAll('.act-nav-btn');
+    for (var bi = 0; bi < actBtns.length; bi++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
+          if (!isNaN(newIdx)) _applyActivity(container, activities, newIdx);
+        });
+      })(actBtns[bi]);
     }
 
-    _state.editor = _createEditor(editorWrap, initialCode);
-
-    // Pyodide 백그라운드 프리로드 (mount 시작과 동시에)
+    // Pyodide 백그라운드 프리로드
     if (loadingEl) loadingEl.removeAttribute('hidden');
     _ensurePyodide().then(function () {
       if (loadingEl) loadingEl.setAttribute('hidden', '');
@@ -308,6 +485,19 @@
       if (submitBtn) submitBtn.disabled = false;
     }).catch(function (e) {
       if (loadingEl) loadingEl.textContent = 'Pyodide 로드 실패: ' + e.message;
+    });
+
+    /* ── 키보드 단축키 (컨테이너 keydown) ── */
+    container.addEventListener('keydown', function (e) {
+      if (e.ctrlKey && !e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        var rb = container.querySelector('.coding-btn-run');
+        if (rb && !rb.disabled) rb.click();
+      } else if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        var sb = container.querySelector('.coding-btn-submit');
+        if (sb && !sb.disabled) sb.click();
+      }
     });
 
     /* ── Run 버튼: 제출 없이 실행만 (stdout 출력) ── */
@@ -339,19 +529,68 @@
           return;
         }
         var code = _state.editor.getValue();
+        var activity = _state.activity;
         _showResult(resultEl, null, '채점 중...');
         // score() 호출
         score({ code: code }).then(function (result) {
           _showResult(resultEl, result, null);
+          // solution 버튼: back에 내용이 있으면 표시
+          if (solBtn && activity.back && (activity.back.solution || activity.back.explanation)) {
+            solBtn.style.display = 'inline-block';
+          }
           // 진도 자동 저장 (emit → shell이 getProgressSnapshot 호출)
           ctx.emit({ type: 'activity-completed', result: result });
+          // nav badge 갱신 (verdict 반영)
+          _applyActivityNavOnly(container, activities, _state.activityIndex);
         }).catch(function (e) {
           _showResult(resultEl, null, '채점 오류: ' + e.message);
         });
       });
     }
 
+    /* ── Solution 버튼: 모범 답안·해설 표시 ── */
+    if (solBtn) {
+      solBtn.addEventListener('click', function () {
+        var activity = _state.activity;
+        if (!activity || !activity.back) return;
+        var re = container.querySelector('.coding-result');
+        var html = '<div style="margin-top:8px;padding:12px;background:var(--surface2,#f6f8fa);border-radius:6px;border:1px solid var(--line2,#ddd)">';
+        if (activity.back.solution) {
+          html += '<div style="font-size:0.82rem;color:var(--ink3,#666);margin-bottom:6px">모범 답안:</div>' +
+            '<pre style="margin:0;padding:10px;background:#1e1e1e;color:#d4d4d4;border-radius:4px;font-size:0.85em;overflow-x:auto;white-space:pre-wrap">' +
+            _esc(activity.back.solution) + '</pre>';
+        }
+        if (activity.back.explanation) {
+          html += '<div style="margin-top:8px;font-size:0.87rem;color:var(--ink2,#444)"><strong>해설:</strong> ' +
+            _esc(activity.back.explanation) + '</div>';
+        }
+        html += '</div>';
+        if (re) re.innerHTML += html;
+        solBtn.style.display = 'none';
+      });
+    }
+
     return Promise.resolve();
+  }
+
+  /**
+   * nav 버튼 badge만 갱신 (submit 후 verdict 반영용, 에디터/문제 건드리지 않음)
+   */
+  function _applyActivityNavOnly(container, activities, idx) {
+    var actBtns = container.querySelectorAll('.act-nav-btn');
+    for (var i = 0; i < actBtns.length; i++) {
+      var btn = actBtns[i];
+      var isActive = (i === idx);
+      var act = activities[i];
+      var saved2 = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
+      var done = saved2 && saved2.last_verdict === 'correct';
+      btn.style.background   = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
+      btn.style.color        = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
+      btn.style.borderColor  = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      var label = act ? (act.activity_id || ('문제 ' + (i + 1))) : ('문제 ' + (i + 1));
+      btn.textContent = done ? label + ' ✓' : label;
+      btn.title = done ? '완료 ✓' : '';
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -359,11 +598,12 @@
   ───────────────────────────────────────────── */
   function unmount() {
     if (_state.host) _state.host.innerHTML = '';
-    _state.mounted  = false;
-    _state.host     = null;
-    _state.ctx      = null;
-    _state.editor   = null;
-    _state.activity = null;
+    _state.mounted        = false;
+    _state.host           = null;
+    _state.ctx            = null;
+    _state.editor         = null;
+    _state.activity       = null;
+    _state.activityIndex  = 0;
   }
 
   /* ─────────────────────────────────────────────
@@ -586,55 +826,6 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
-  }
-
-  /* ─────────────────────────────────────────────
-     UI HTML 생성 (런타임규격 §4-1)
-  ───────────────────────────────────────────── */
-  function _buildHTML(activity) {
-    var prompt       = (activity && activity.front && activity.front.prompt) || '(문제 없음)';
-    var langLabel    = (activity && activity.front && activity.front.language) || 'python';
-    var actId        = (activity && activity.activity_id) || '';
-
-    return [
-      '<div class="coding-wrap" data-activity-id="' + _esc(actId) + '">',
-
-      /* 문제 영역 */
-      '<div class="coding-problem">',
-      '  <div class="coding-lang-badge">' + _esc(langLabel.toUpperCase()) + '</div>',
-      '  <div class="coding-prompt">' + _esc(prompt) + '</div>',
-      '</div>',
-
-      /* Pyodide 로딩 표시 */
-      '<div class="coding-pyodide-loading" style="font-size:0.85em;color:var(--ink3,#888);margin-bottom:8px">',
-      '  ⏳ Python 런타임(Pyodide) 로드 중...',
-      '</div>',
-
-      /* 에디터 영역 */
-      '<div class="coding-editor-wrap" style="margin-bottom:8px"></div>',
-
-      /* 버튼 영역 */
-      '<div class="coding-actions" style="display:flex;gap:8px;margin-bottom:8px">',
-      '  <button type="button" class="coding-btn-run"    disabled',
-      '          style="padding:8px 18px;border-radius:6px;border:1px solid var(--line2,#ccc);background:var(--surface,#fff);cursor:pointer">',
-      '    실행',
-      '  </button>',
-      '  <button type="button" class="coding-btn-submit" disabled',
-      '          style="padding:8px 22px;border-radius:6px;border:none;background:var(--accent,#0550ae);color:#fff;cursor:pointer;font-weight:600">',
-      '    제출·채점',
-      '  </button>',
-      '</div>',
-
-      /* 실행 출력창 */
-      '<pre class="coding-output"',
-      '     style="background:var(--surface2,#f6f8fa);border:1px solid var(--line2,#ddd);border-radius:6px;padding:12px;min-height:48px;font-size:0.85em;white-space:pre-wrap;overflow-x:auto;color:var(--ink,#111)">',
-      '</pre>',
-
-      /* 채점 결과 */
-      '<div class="coding-result" style="min-height:28px"></div>',
-
-      '</div>'
-    ].join('\n');
   }
 
   /* ─────────────────────────────────────────────

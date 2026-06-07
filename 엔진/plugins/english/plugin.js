@@ -32,7 +32,8 @@
     activity: null,   // 현재 ActivitySpec (lang-task)
     progress: null,   // PluginProgressSnapshot 메모리 캐시
     restored: false,  // onProgressRestored 호출 여부
-    currentRecognition: null  // SpeechRecognition 인스턴스 (speaking)
+    currentRecognition: null,  // SpeechRecognition 인스턴스 (speaking)
+    activityIndex: 0   // 현재 활성 문제 인덱스
   };
 
   var PROGRESS_KEY = 'clf:english:progress';
@@ -442,40 +443,82 @@
   }
 
   /* ─────────────────────────────────────────────
-     mount() — UI 주입 (런타임규격 §6-1)
+     Activity Nav Bar 헬퍼
   ───────────────────────────────────────────── */
-  function mount(container, ctx) {
-    if (_state.mounted) unmount();
 
-    _state.host     = container;
-    _state.ctx      = ctx;
-    _state.mounted  = true;
+  /** nav HTML 생성. activities.length <= 1이면 빈 문자열 반환. */
+  function _buildNavHTML(activities, currentIdx) {
+    if (!activities || activities.length <= 1) return '';
+    var html = '<div class="act-nav" style="display:flex;align-items:center;gap:6px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line2,#eee);flex-wrap:wrap">';
+    html += '<span style="font-size:0.8rem;color:var(--ink3,#888);font-weight:500;margin-right:2px">문제</span>';
+    for (var i = 0; i < activities.length; i++) {
+      html += '<button type="button" class="act-nav-btn" data-act-idx="' + i + '"' +
+        ' style="min-width:34px;height:34px;border-radius:7px;border:1.5px solid var(--line2,#ddd);background:var(--surface,#fff);cursor:pointer;font-size:0.83rem;font-weight:500">' +
+        (i + 1) + '</button>';
+    }
+    html += '<span class="act-count" style="margin-left:auto;font-size:0.8rem;color:var(--ink3,#888)">' + (currentIdx + 1) + ' / ' + activities.length + '</span>';
+    html += '</div>';
+    return html;
+  }
 
-    var activities = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
-    _state.activity = activities[0] || null;
+  /** nav 배지 스타일 업데이트 (완료 = 초록, 현재 = 강조) */
+  function _updateNavBadges(container, activities, currentIdx) {
+    var btns = container.querySelectorAll('.act-nav-btn');
+    for (var i = 0; i < btns.length; i++) {
+      var isActive = i === currentIdx;
+      var act = activities[i];
+      var saved = act && _state.progress && _state.progress.activities && _state.progress.activities[act.activity_id];
+      var done = saved && saved.last_verdict === 'correct';
+      btns[i].style.background = isActive ? 'var(--accent,#0550ae)' : 'var(--surface,#fff)';
+      btns[i].style.color = isActive ? '#fff' : (done ? 'var(--ok,#22863a)' : 'var(--ink3,#666)');
+      btns[i].style.borderColor = isActive ? 'var(--accent,#0550ae)' : (done ? 'var(--ok,#22863a)' : 'var(--line2,#ddd)');
+      btns[i].title = done ? '완료 ✓' : '';
+    }
+    var countEl = container.querySelector('.act-count');
+    if (countEl) countEl.textContent = (currentIdx + 1) + ' / ' + activities.length;
+  }
 
+  /* ─────────────────────────────────────────────
+     _loadEnglishActivity — 문제 전환 (nav 전환 + 초기 로드 공용)
+  ───────────────────────────────────────────── */
+  function _loadEnglishActivity(container, ctx, activities, idx) {
+    // 활성 음성 중단
+    if (_state.currentRecognition) {
+      try { _state.currentRecognition.stop(); } catch (e) {}
+      _state.currentRecognition = null;
+    }
+    if (window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+
+    _state.activityIndex = idx;
+    _state.activity = activities[idx];
     var activity = _state.activity;
+
+    var contentArea = container.querySelector('#eng-content-area');
+    if (!contentArea) return;
+
     if (!activity) {
-      container.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">' +
-                            'english 플러그인: 문제 데이터(window.ACTIVITIES[\'english\'])가 없습니다.</div>';
-      return Promise.resolve();
+      contentArea.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">english 플러그인: 문제 데이터가 없습니다.</div>';
+      _updateNavBadges(container, activities, idx);
+      return;
     }
 
     var modality = activity.front.modality;
 
     // 진도 복원: last_answer
     var lastAnswer = null;
-    if (_state.restored && _state.progress) {
+    if (_state.progress) {
       var actId = activity.activity_id;
       var saved = _state.progress.activities && _state.progress.activities[actId];
       if (saved && saved.plugin_extra) lastAnswer = saved.plugin_extra.last_answer || null;
     }
 
     // BYO-key 상태 (writing/speaking)
-    var llmKey     = ctx.getKey('llm_api_key');
-    var azureKey   = ctx.getKey('azure_speech_key');
-    var ttSupport  = !!window.speechSynthesis;
-    var srSupport  = !!_getSpeechRecognition();
+    var llmKey    = ctx.getKey('llm_api_key');
+    var azureKey  = ctx.getKey('azure_speech_key');
+    var ttSupport = !!window.speechSynthesis;
+    var srSupport = !!_getSpeechRecognition();
 
     // 모달별 HTML 조립
     var html = '<div class="eng-wrap" data-modality="' + _esc(modality) + '" data-activity-id="' + _esc(activity.activity_id) + '">';
@@ -539,17 +582,17 @@
     html += '<div id="eng-result" class="eng-result" style="min-height:28px;margin-top:14px"></div>';
     html += '</div>';
 
-    container.innerHTML = html;
+    contentArea.innerHTML = html;
 
     // 이전 답안 복원
     if (lastAnswer) {
-      var inp = container.querySelector('#eng-answer-input');
+      var inp = contentArea.querySelector('#eng-answer-input');
       if (inp) inp.value = lastAnswer;
     }
 
     // TTS 버튼 바인딩 (listening)
     if (modality === 'listening' && ttSupport) {
-      var ttsBtn = container.querySelector('#eng-tts-btn');
+      var ttsBtn = contentArea.querySelector('#eng-tts-btn');
       if (ttsBtn) {
         ttsBtn.addEventListener('click', function () {
           var text = activity.front.audio_text;
@@ -584,9 +627,9 @@
 
     // 녹음 버튼 바인딩 (speaking, STT 지원)
     if (modality === 'speaking' && srSupport) {
-      var recordBtn = container.querySelector('#eng-record-btn');
-      var statusEl  = container.querySelector('#eng-record-status');
-      var ansInput  = container.querySelector('#eng-answer-input');
+      var recordBtn = contentArea.querySelector('#eng-record-btn');
+      var statusEl  = contentArea.querySelector('#eng-record-status');
+      var ansInput  = contentArea.querySelector('#eng-answer-input');
       if (recordBtn) {
         var _recording = false;
         recordBtn.addEventListener('click', function () {
@@ -641,11 +684,11 @@
     }
 
     // 제출 버튼 바인딩
-    var submitBtn = container.querySelector('#eng-submit-btn');
+    var submitBtn = contentArea.querySelector('#eng-submit-btn');
     if (submitBtn) {
       submitBtn.addEventListener('click', function () {
-        var text = _readAnswer(container, activity);
-        var resultEl = container.querySelector('#eng-result');
+        var text = _readAnswer(contentArea, activity);
+        var resultEl = contentArea.querySelector('#eng-result');
         if (resultEl) resultEl.innerHTML = '<span style="color:var(--ink3,#666)">채점 중...</span>';
 
         // speaking은 text + audio_blob 구조 (v1은 text만)
@@ -656,11 +699,67 @@
         score(userAnswer).then(function (result) {
           _renderResult(resultEl, result, activity);
           ctx.emit({ type: 'activity-completed', result: result });
+          // 채점 후 nav 배지 즉시 갱신
+          _updateNavBadges(container, activities, _state.activityIndex);
         }).catch(function (e) {
           if (resultEl) resultEl.innerHTML = '<span style="color:var(--hot,#d73a49)">채점 오류: ' + _esc(e.message) + '</span>';
         });
       });
     }
+
+    // nav 배지 업데이트
+    _updateNavBadges(container, activities, idx);
+  }
+
+  /* ─────────────────────────────────────────────
+     mount() — UI 주입 (런타임규격 §6-1)
+  ───────────────────────────────────────────── */
+  function mount(container, ctx) {
+    if (_state.mounted) unmount();
+
+    _state.host    = container;
+    _state.ctx     = ctx;
+    _state.mounted = true;
+
+    var activities = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+
+    if (!activities.length) {
+      container.innerHTML = '<div class="error-banner" style="margin:var(--space-6,24px)">' +
+                            'english 플러그인: 문제 데이터(window.ACTIVITIES[\'english\'])가 없습니다.</div>';
+      return Promise.resolve();
+    }
+
+    // 초기 인덱스: URL 해시 또는 0
+    var hashParts = window.location.hash.split('/');
+    var initIdx = 0;
+    if (hashParts[2] !== undefined) {
+      var parsed = parseInt(hashParts[2], 10);
+      if (!isNaN(parsed) && parsed >= 0 && parsed < activities.length) {
+        initIdx = parsed;
+      }
+    }
+
+    // 외부 구조: nav + content area
+    var outerHTML = '<div class="eng-outer">' +
+                    _buildNavHTML(activities, initIdx) +
+                    '<div id="eng-content-area"></div>' +
+                    '</div>';
+    container.innerHTML = outerHTML;
+
+    // nav 버튼 이벤트 위임
+    var navEl = container.querySelector('.act-nav');
+    if (navEl) {
+      navEl.addEventListener('click', function (e) {
+        var btn = e.target.closest('.act-nav-btn');
+        if (!btn) return;
+        var newIdx = parseInt(btn.getAttribute('data-act-idx'), 10);
+        if (isNaN(newIdx) || newIdx === _state.activityIndex) return;
+        _loadEnglishActivity(container, ctx, activities, newIdx);
+      });
+    }
+
+    // 첫 문제 로드
+    _loadEnglishActivity(container, ctx, activities, initIdx);
 
     return Promise.resolve();
   }
@@ -679,10 +778,11 @@
       try { window.speechSynthesis.cancel(); } catch (e) {}
     }
     if (_state.host) _state.host.innerHTML = '';
-    _state.mounted  = false;
-    _state.host     = null;
-    _state.ctx      = null;
-    _state.activity = null;
+    _state.mounted       = false;
+    _state.host          = null;
+    _state.ctx           = null;
+    _state.activity      = null;
+    _state.activityIndex = 0;
   }
 
   /* ─────────────────────────────────────────────
@@ -776,8 +876,14 @@
       var actId = _state.activity.activity_id;
       var saved = snapshot.activities && snapshot.activities[actId];
       if (saved && saved.plugin_extra && saved.plugin_extra.last_answer) {
-        var inp = _state.host.querySelector('#eng-answer-input');
+        var contentArea = _state.host.querySelector('#eng-content-area');
+        var inp = contentArea ? contentArea.querySelector('#eng-answer-input') : null;
         if (inp) inp.value = saved.plugin_extra.last_answer;
+      }
+      // nav 배지도 갱신
+      var activities = (window.ACTIVITIES && window.ACTIVITIES['english']) || [];
+      if (activities.length > 1) {
+        _updateNavBadges(_state.host, activities, _state.activityIndex);
       }
     }
   }
