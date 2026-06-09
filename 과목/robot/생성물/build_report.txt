@@ -1,0 +1,6 @@
+WARN W_SECTION_INDEX_ABSENT -:- 개념서 인덱스 미제공 — concept_ref 검증 스킵
+WARN W_CONCEPT_DOC_SKIP -:- 개념서 파일 스킵 (deck_id 없음, section_id 감지): 01_좌표계.md
+WARN W_CONCEPT_DOC_SKIP -:- 개념서 파일 스킵 (deck_id 없음, section_id 감지): 02_링크와관절.md
+WARN W_CONCEPT_DOC_SKIP -:- 개념서 파일 스킵 (deck_id 없음, section_id 감지): 03_정기구학FK.md
+WARN W_CONCEPT_DOC_SKIP -:- 개념서 파일 스킵 (deck_id 없음, section_id 감지): 04_자유도.md
+WARN W_CONCEPT_DOC_SKIP -:- 개념서 파일 스킵 (deck_id 없음, section_id 감지): 05_끝점.md

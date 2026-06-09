@@ -486,3 +486,22 @@ body[data-viewport-mode="mobile"] [data-grade-mode="keyword"][data-input-fallbac
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:0ms!important;transition-duration:0ms!important}
 }
+
+/* ── 카드 앞면 2-pane: 코드(좌) / 문제(우) — 실전 답안 카드용 ── */
+.card-front-split{
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);
+  gap:16px; align-items:start; margin-top:10px;
+}
+.card-front-split .cf-code{
+  margin:0; padding:14px 16px; border-radius:var(--r,12px);
+  background:#2e2b27; color:#f3efe6;
+  font-family:'IBM Plex Mono',monospace; font-size:13px; line-height:1.55;
+  overflow-x:auto; white-space:pre; max-height:60vh;
+}
+.card-front-split .cf-q{
+  font-size:var(--fs-md,15px); line-height:1.75; align-self:center;
+  padding-left:2px;
+}
+@media (max-width:760px){
+  .card-front-split{grid-template-columns:1fr}
+}

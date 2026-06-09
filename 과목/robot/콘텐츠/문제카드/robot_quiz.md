@@ -1,0 +1,178 @@
+---
+deck_id: robot_quiz
+subject_id: robot
+title: "로봇 입문 — 좌표계·링크·FK·자유도·끝점 개념 문제"
+unit: robot-basics
+area: written
+subarea: computer
+schema_version: 1
+---
+
+## @robot-func-0001
+- type: func
+- grade_mode: exact
+- weight: 9
+- concept_ref: robot.kinematics.fk
+- answers: 정기구학|FK|forward kinematics
+
+---FRONT---
+관절 각도(θ)를 입력으로 받아 끝점(end-effector)의 위치 좌표를 계산하는 방법을 무엇이라 하는가?
+
+---BACK---
+**정기구학(FK, Forward Kinematics)**
+
+관절 각도 → 끝점 위치를 계산하는 방향.
+
+**2링크 FK 공식**
+```
+x = L₁·cos(θ₁) + L₂·cos(θ₁+θ₂)
+y = L₁·sin(θ₁) + L₂·sin(θ₁+θ₂)
+```
+
+**비교**: 역기구학(IK)은 반대 방향 — 끝점 위치 → 관절 각도를 계산.
+입문 실습에서는 FK만 다룬다.
+
+---
+
+## @robot-judge-0001
+- type: judge
+- grade_mode: exact
+- weight: 8
+- answers: x = L₁·cos(θ₁) + L₂·cos(θ₁+θ₂)|L1 cos θ1 더하기 L2 cos(θ1+θ2)
+
+---FRONT---
+링크 길이 L₁=2, L₂=2, 관절 각도 θ₁=0°, θ₂=0°일 때 끝점의 x 좌표는?
+(단, cos 0° = 1)
+
+---BACK---
+**정답: x = 4**
+
+계산: x = L₁·cos(0°) + L₂·cos(0°+0°) = 2×1 + 2×1 = 4
+
+두 링크가 모두 오른쪽(θ=0°)으로 펼쳐진 상태 → x = L₁+L₂ = 4, y = 0.
+
+---
+
+## @robot-recall-0001
+- type: recall_seq
+- grade_mode: exact
+- weight: 8
+- concept_ref: robot.struct.link-joint
+- answers: 베이스(고정)|관절1(θ₁)|링크1(L₁)|관절2(θ₂)|링크2(L₂)|끝점
+
+---FRONT---
+2링크 직렬 로봇 팔의 구성 요소를 베이스에서 끝점까지 순서대로 나열하시오.
+
+---BACK---
+**순서**: 베이스(고정) → 관절1(θ₁) → 링크1(L₁) → 관절2(θ₂) → 링크2(L₂) → 끝점
+
+- **베이스**: 고정된 지점. 글로벌 좌표계의 원점.
+- **관절(Joint)**: 각도 θ로 회전하는 부분.
+- **링크(Link)**: 고정 길이의 뼈대.
+- **끝점(End-Effector)**: 실제 작업이 이루어지는 팔 끝.
+
+---
+
+## @robot-cloze-0001
+- type: cloze
+- grade_mode: cloze
+- weight: 9
+- concept_ref: robot.kinematics.fk
+
+---FRONT---
+2링크 로봇의 FK 공식에서 끝점 y 좌표는 다음과 같다.
+
+y = L₁ × {{sin(θ₁)}} + L₂ × {{sin(θ₁+θ₂)}}
+
+---BACK---
+**FK y좌표 공식**: y = L₁·sin(θ₁) + L₂·sin(θ₁+θ₂)
+
+- 첫 번째 빈칸: **sin(θ₁)** — 링크1이 y축에 기여하는 성분.
+- 두 번째 빈칸: **sin(θ₁+θ₂)** — 링크2의 절대 각도는 θ₁+θ₂ (이전 관절 각도를 누적).
+
+**주의**: x좌표는 cos, y좌표는 sin 사용. 각도 단위는 라디안(radian)을 쓰는 경우도 많으니 단위 확인 필요.
+
+---
+
+## @robot-func-0002
+- type: func
+- grade_mode: exact
+- weight: 7
+- concept_ref: robot.concept.dof
+- answers: 자유도|DOF|degrees of freedom
+
+---FRONT---
+로봇이 독립적으로 움직일 수 있는 방향의 수를 나타내는 용어는?
+
+---BACK---
+**자유도(DOF, Degrees of Freedom)**
+
+- 회전 관절 1개 = 1 DOF.
+- 2링크 로봇(관절 2개) = **2 DOF** → 평면 내 임의 (x, y) 위치에 도달 가능.
+- 3링크 로봇(관절 3개) = 3 DOF → 평면 내 위치 + 방향 제어 가능.
+
+**작업 공간(Workspace)**: 2 DOF 로봇이 끝점으로 닿을 수 있는 범위는 도넛 형태. 최대 반경 = L₁+L₂, 최소 반경 = |L₁−L₂|.
+
+---
+
+## @robot-judge-0002
+- type: judge
+- grade_mode: exact
+- weight: 8
+- concept_ref: robot.concept.end-effector
+- answers: 끝점이 목표보다 y축 방향 아래에 있음|y축 아래|y좌표가 목표보다 낮음
+
+---FRONT---
+FK 시뮬레이터에서 끝점 좌표가 (3.0, 1.0)이고 목표 좌표가 (3.0, 2.5)다. 끝점을 목표에 가깝게 움직이려면 어느 방향으로 조정해야 하는가?
+
+---BACK---
+**끝점이 y축 방향 아래에 있으므로, y를 높이는 방향으로 θ₁ 또는 θ₂를 조정해야 한다.**
+
+- x 차이: 3.0 − 3.0 = 0 (x는 이미 일치)
+- y 차이: 2.5 − 1.0 = +1.5 (끝점이 목표보다 1.5 낮음)
+
+**조정 방법**: θ₁을 증가시키면 전체 팔이 위로 회전 → y 증가. θ₂ 조정도 함께 시도.
+
+---
+
+## @robot-proc-0001
+- type: proc
+- grade_mode: keyword
+- weight: 7
+- concept_ref: robot.kinematics.fk
+- keywords: 관절각|슬라이더|끝점 좌표
+
+---FRONT---
+FK 슬라이더 실습에서 끝점을 목표점에 맞추는 기본 절차는?
+
+---BACK---
+**절차**
+1. θ₁ 슬라이더를 조정해 링크1의 방향을 대략 목표 방향으로 정렬.
+2. θ₂ 슬라이더를 조정해 링크2의 끝이 목표점에 가까워지도록 미세 조정.
+3. 끝점 좌표 표시를 확인하며 반복 조정.
+4. 끝점과 목표 사이 거리가 허용 오차 이하이면 정답 처리.
+
+**팁**: θ₁이 전체 팔의 큰 방향, θ₂가 세부 위치를 담당한다는 감각으로 접근.
+
+---
+
+## @robot-judge-0003
+- type: judge
+- grade_mode: exact
+- weight: 6
+- concept_ref: robot.coord.frame
+- answers: 글로벌 좌표계|world frame|base frame|글로벌(world) 좌표계
+
+---FRONT---
+로봇 팔의 끝점 위치를 표현할 때 기준이 되는, 로봇 바닥(베이스)에 고정된 좌표계를 무엇이라 하는가?
+
+---BACK---
+**글로벌(World/Base) 좌표계**
+
+- 로봇 베이스에 고정돼 움직이지 않음.
+- 끝점의 절대 위치 (x, y)를 이 좌표계 기준으로 표현.
+- 대비: 로컬(링크) 좌표계는 각 링크에 붙어 함께 움직임.
+
+FK 계산 결과 (x, y)는 글로벌 좌표계 기준 값이다.
+
+---

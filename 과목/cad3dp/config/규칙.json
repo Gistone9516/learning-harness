@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "subject_id": "cad3dp",
+  "subject_label": "CAD·3D 프린팅 입문",
+  "areas": [
+    {
+      "area": "written",
+      "subarea": "computer",
+      "label": "개념·원리",
+      "target": null
+    },
+    {
+      "area": "practical",
+      "subarea": "excel",
+      "label": "파라메트릭·실습",
+      "target": null
+    }
+  ],
+  "normalize": ["trim", "lower", "collapse_space"],
+  "synonyms": {
+    "솔리드": ["솔리드 모델", "solid"],
+    "파라메트릭": ["파라메트릭 모델링", "parametric"],
+    "불리언": ["불리언 연산", "boolean", "csg"],
+    "매니폴드": ["매니폴드 메시", "watertight", "닫힌 솔리드"],
+    "stl": ["스테레오리소그래피", "스테레오리소그라피"],
+    "fdm": ["fused deposition modeling", "fdm 방식", "용융 적층"],
+    "슬라이싱": ["슬라이싱 소프트웨어", "슬라이서"],
+    "노즐": ["노즐 직경", "노즐 크기"],
+    "레이어": ["레이어 두께", "적층 두께", "layer height"]
+  },
+  "grade_modes": {},
+  "leitner": {
+    "boxes": 3,
+    "intervals_days": [1, 3, 7],
+    "dday_compress": true,
+    "promote_on": "cold_first_correct"
+  },
+  "dday": {
+    "enabled": false,
+    "date": null
+  }
+}

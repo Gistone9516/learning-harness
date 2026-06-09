@@ -113,6 +113,8 @@
       '  <div data-quiz="card-front" class="card-front" id="card-front" role="region" aria-label="카드 앞면">',
       '    <span class="card-type-badge" id="card-type-badge"></span>',
       '    <p class="card-front__prompt" id="card-front-prompt"></p>',
+      '    <!-- 코드-좌 / 문제-우 2-pane (front에 코드블록이 있을 때만 노출) -->',
+      '    <div class="card-front-split" id="card-front-split" hidden></div>',
       '    <!-- 힌트 토글 (front.hint) -->',
       '    <div id="hint-area" hidden style="margin-top:8px;">',
       '      <button type="button" id="btn-hint-toggle" class="btn-quiz-aux" aria-expanded="false">힌트 보기</button>',
@@ -460,6 +462,17 @@
     return f.prompt || f.scenario || f.text || (Array.isArray(f.options) ? f.options.join(' / ') : '') || '(문항)';
   }
 
+  // front 문자열에 ```코드``` 펜스가 있으면 {code, text}로 분리(코드-좌/문제-우 렌더용). 없으면 null.
+  function splitCodeFront(s) {
+    if (!s) return null;
+    var m = s.match(/```[a-zA-Z0-9]*\n?([\s\S]*?)```/);
+    if (!m) return null;
+    var code = m[1].replace(/\s+$/, '');
+    if (!code.trim()) return null;
+    var text = (s.slice(0, m.index) + s.slice(m.index + m[0].length)).replace(/```/g, '').trim();
+    return { code: code, text: text || '(문항)' };
+  }
+
   function renderCard(card) {
     _state.current = card;
     if (!card) return;
@@ -473,7 +486,23 @@
     }
 
     var prompt = $('card-front-prompt');
-    if (prompt) prompt.textContent = frontText(card);
+    var split = $('card-front-split');
+    var ft = frontText(card);
+    var parsed = (card.type !== 'cloze') ? splitCodeFront(ft) : null;
+    if (parsed && split) {
+      // 코드(좌) / 문제(우) 2-pane
+      split.innerHTML = '';
+      var pre = document.createElement('pre'); pre.className = 'cf-code';
+      var codeEl = document.createElement('code'); codeEl.textContent = parsed.code;
+      pre.appendChild(codeEl);
+      var qEl = document.createElement('div'); qEl.className = 'cf-q'; qEl.textContent = parsed.text;
+      split.appendChild(pre); split.appendChild(qEl);
+      split.removeAttribute('hidden');
+      if (prompt) { prompt.textContent = ''; prompt.setAttribute('hidden', ''); }
+    } else {
+      if (prompt) { prompt.textContent = ft; prompt.removeAttribute('hidden'); }
+      if (split) { split.innerHTML = ''; split.setAttribute('hidden', ''); }
+    }
 
     var cl = $('concept-link-btn');
     if (cl) {

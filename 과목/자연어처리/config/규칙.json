@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "subject_id": "nlp",
+  "subject_label": "자연어처리",
+  "areas": [
+    { "area": "written", "subarea": "computer",    "label": "1) 개념",            "target": 30 },
+    { "area": "written", "subarea": "spreadsheet",  "label": "2) 라이브러리 명령어", "target": 35 },
+    { "area": "written", "subarea": "database",     "label": "3) 기말 답안·실전",    "target": 100 }
+  ],
+  "normalize": ["trim", "lower", "nfkc", "collapse_space", "strip_trailing_paren"],
+  "synonyms": {
+    "tf-idf": ["tfidf", "tf idf"],
+    "bow": ["bag-of-words", "bagofwords"],
+    "lda": ["latent-dirichlet-allocation"],
+    "rnn": ["recurrent-neural-network"],
+    "lstm": ["long-short-term-memory"],
+    "embedding": ["임베딩", "워드임베딩"],
+    "tokenization": ["토큰화"],
+    "overfitting": ["과적합"],
+    "padding": ["패딩"],
+    "softmax": ["소프트맥스"],
+    "one-hot": ["onehot", "원핫", "원-핫"]
+  },
+  "grade_modes": {},
+  "leitner": {
+    "boxes": 3,
+    "intervals_days": [1, 3, 7],
+    "dday_compress": true,
+    "promote_on": "cold_first_correct"
+  },
+  "dday": {
+    "enabled": false,
+    "date": null
+  }
+}

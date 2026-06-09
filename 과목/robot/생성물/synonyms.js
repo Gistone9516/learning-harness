@@ -1,0 +1,1 @@
+(window.SYNONYMS = window.SYNONYMS || {})["robot"] = {"forward kinematics":"정기구학","fk":"정기구학","inverse kinematics":"역기구학","ik":"역기구학","end-effector":"끝점","end effector":"끝점","엔드이펙터":"끝점","joint":"관절","조인트":"관절","link":"링크","dof":"자유도","degrees of freedom":"자유도","coordinate frame":"좌표계","frame":"좌표계","rotation":"회전","rotate":"회전"};

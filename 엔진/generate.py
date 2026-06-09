@@ -1007,6 +1007,34 @@ def validate_concept_refs(decks: list[dict], section_ids: set[str] | None, repor
 
 
 # ──────────────────────────────────────────────
+# 개념서 파일 감지 헬퍼 (§16-skip)
+# ──────────────────────────────────────────────
+def _is_concept_doc(md_path) -> bool:
+    """
+    front-matter에 section_id는 있고 deck_id는 없는 파일 → 개념서 문서.
+    generate 대상에서 경고 후 스킵.
+    """
+    try:
+        text = Path(md_path).read_text(encoding='utf-8')
+        lines = text.splitlines()
+        if not lines or lines[0].strip() != '---':
+            return False
+        has_section_id = False
+        has_deck_id = False
+        for line in lines[1:]:
+            s = line.strip()
+            if s == '---':
+                break
+            if s.startswith('section_id:'):
+                has_section_id = True
+            if s.startswith('deck_id:'):
+                has_deck_id = True
+        return has_section_id and not has_deck_id
+    except Exception:
+        return False
+
+
+# ──────────────────────────────────────────────
 # build 커맨드
 # ──────────────────────────────────────────────
 def cmd_build(args, reporter: Reporter):
@@ -1080,6 +1108,11 @@ def cmd_build(args, reporter: Reporter):
     decks = []
 
     for md_path in md_files:
+        # §16-skip: section_id 있고 deck_id 없는 개념서 파일은 경고 후 스킵
+        if _is_concept_doc(md_path):
+            reporter.warn('W_CONCEPT_DOC_SKIP', '-:-',
+                          f"개념서 파일 스킵 (deck_id 없음, section_id 감지): {md_path.name}")
+            continue
         deck = parse_md_file(md_path, subject_id, reporter, seen_card_ids, seen_deck_ids,
                              normalize_config=normalize_config)
         if deck is not None:
@@ -1173,6 +1206,10 @@ def cmd_verify(args, reporter: Reporter):
     seen_card_ids: set[str] = set()
     seen_deck_ids: set[str] = set()
     for md_path in md_files:
+        if _is_concept_doc(md_path):
+            reporter.warn('W_CONCEPT_DOC_SKIP', '-:-',
+                          f"개념서 파일 스킵: {md_path.name}")
+            continue
         parse_md_file(md_path, subject_id, reporter, seen_card_ids, seen_deck_ids,
                       normalize_config=normalize_config)
     if not reporter.has_error():
