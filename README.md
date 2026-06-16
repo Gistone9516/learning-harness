@@ -1,87 +1,114 @@
-# 학습 프레임워크 (Discord 네이티브)
+# Learning Harness (Discord-native)
 
-> **Discord 위에서 도는 개인 학습 하네스(범용 프레임워크).** 카드 인출·간격반복(Leitner)·진단·AI 학습을
-> 파이썬 봇 + Discord로 제공한다. **과목·콘텐츠가 없는 도구 키트** — 다른 프로젝트가 복사·소비하며 과목을 붙인다.
-> (v5. 이전 정적 HTML 버전 v4는 `_archive_v4/`에 보존.)
+> **A personal learning harness that runs on Discord (general-purpose framework).** Card retrieval,
+> spaced repetition (Leitner), diagnostics, and AI-assisted study delivered through a Python bot plus
+> Discord. **A tool kit with no subject or content of its own** — other projects copy and consume it,
+> attaching their own subject. (v5. The earlier static-HTML version v4 is preserved under `_archive_v4/`.)
 
 ---
 
-## 1. 한눈에
+## 1. At a glance
 
-- **무엇** — 결정적 채점·Leitner·대시보드(토큰 0) + AI 학습 모드(`claude -p` 구독 토큰, 선택)를 Discord 네이티브로.
-- **왜 Discord** — 멀티기기(폰·PC)와 UI를 Discord가 흡수(자동 동기화·네이티브 컴포넌트). 옆 폴더 `Discord Agents/harness` 카탈로그를 복사해 만든다.
-- **과목 무관** — 엔진·봇·하네스에 과목 어휘 하드코딩 0. 콘텐츠·config는 소비 프로젝트가 JSON으로 주입(성격부여).
-- **배포 모델** — `discord-bridge`처럼 고정 APP 키트 + 콘텐츠 폴더 마운트. 구동 skill 동봉.
+- **What** — deterministic grading, Leitner, and dashboards (zero tokens), plus an optional AI study mode
+  (`claude -p`, uses subscription tokens), delivered Discord-native.
+- **Why Discord** — multi-device (phone and PC) and UI are absorbed by Discord (automatic sync, native
+  components). Built by copying the sibling `Discord Agents/harness` catalog.
+- **Subject-agnostic** — zero subject vocabulary hard-coded into the engine, bot, or harness. Content and
+  config are injected as JSON by the consuming project (that is what gives it a personality).
+- **Distribution model** — like `discord-bridge`: a fixed APP kit plus a mounted content folder. Ships with
+  a launch skill.
 
-## 2. 빠른 시작 (실행)
+## 2. Quick start (running it)
 
-**선행조건(사용자 액션):**
-1. Discord 개발자포털에서 **새 봇 앱 생성·토큰 발급**(기존 discord-bridge와 별개).
-2. **학습 전용 새 서버(길드) 신설** + 봇 초대(필요 권한 + `applications.commands` 스코프).
-3. 루트 `.env` 작성(`​.env.example` 복사) — `DISCORD_BOT_TOKEN`·`DISCORD_GUILD_ID`·`DISCORD_CHANNEL_ID`·`DISCORD_ALLOWED_USER_ID`(+ 선택 `USER_LANG`·`MOUNT`).
+**Prerequisites (user actions):**
+1. Create a **new bot app and issue a token** in the Discord Developer Portal (separate from discord-bridge).
+2. Create a **new server (guild) dedicated to learning** and invite the bot (required permissions plus the
+   `applications.commands` scope).
+3. Write the root `.env` (copy `.env.example`) — `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`,
+   `DISCORD_CHANNEL_ID`, `DISCORD_ALLOWED_USER_ID` (plus optional `USER_LANG`, `MOUNT`).
 4. `pip install -U "discord.py>=2.6" python-dotenv`.
 
-**구동:**
+**Run:**
 ```bash
-python "봇/main.py" [콘텐츠폴더]      # 폴더 생략 시 현재 폴더. 예시: python "봇/main.py" _예시
+python "bot/main.py" [content-folder]      # omit the folder to use the current folder. Example: python "bot/main.py" examples
 ```
-콘텐츠 폴더의 `manifest.json`·`decks/`·`config/`을 로드해 그 과목을 Discord에 올린다. 진도는 그 폴더 `_상태/`에 저장.
+Loads the content folder's `manifest.json`, `decks/`, and `config/` and puts that subject on Discord.
+Progress is saved under that folder's `_state/`.
 
-**소비 프로젝트에서:** `python skills/install.py` 1회 → 전역 skill 생성 → 어느 과목 폴더에서든 한 줄로 구동.
+**From a consuming project:** run `python skills/install.py` once to create the global skill, then launch
+the bot from any subject folder with a single line.
 
-## 3. 폴더 구조
+## 3. Folder structure
 
 ```
-학습 프레임워크 제작/           ← 범용 프레임워크 리포(실제 과목 콘텐츠 없음)
-├ README.md                    ← 이 문서
-├ .env.example                 ← .env 템플릿(토큰 빈값)
-├ 기획_v5_discord.md           ← ① 기획(의도·아키텍처·스코프)
-├ _이데이션_능력카탈로그.md     ← 4계층 학습 능력 카탈로그(+ _이데이션_원본.json)
-├ 규격/                        ← ② 명세(계약, SoT-first)
-│   ├ _인터페이스계약.md        코어 SoT(공유 타입·영속·와이어링·능력 레지스트리·AI 어댑터·에러·불변)
-│   ├ 주입인터페이스.md         소비 프로젝트 콘텐츠·config 주입 포맷
-│   ├ 엔진계약.md / 봇계약.md   엔진(순수)·봇(discord.py) 계약
-│   ├ 학습타입규격.md           4계층 능력 레지스트리
-│   ├ AI모드골격.md             _invoke 어댑터·토큰 통제
-│   └ 구동skill규격.md          global skill·install
-├ 엔진코어/                    ← 순수 파이썬 코어(discord·파일 I/O 0): scoring·leitner·selection·dashboard·migrate
-├ 봇/                          ← discord.py 셸: boot·session·dispatch·handlers·persist·ai·commands
-│   └ harness/                 Discord harness 카탈로그(복사본 59파일)
-├ skills/                      ← 구동 skill 소스 + install.py
-├ _예시/                       ← 개발·검증용 목업 콘텐츠(실제 과목 아님)
-├ 웹/                          ← (예약) frontend-design 작업공간 — 연속 인터랙티브 실습·장문 정독, 후순위
-└ _archive_v4/                 ← 옛 정적 HTML 프레임워크(포팅·참고 소스)
+learning-harness/              the general-purpose framework repo (no real subject content)
+├ README.md                    this document
+├ .env.example                 .env template (blank tokens)
+├ docs/                        planning and ideation (Korean, kept as-is)
+│   ├ 기획_v5_discord.md        planning (intent, architecture, scope)
+│   ├ _이데이션_능력카탈로그.md   four-layer learning capability catalog
+│   └ _이데이션_원본.json        raw ideation data
+├ specs/                       contracts (SoT-first)
+│   ├ _interface-contract.md   core SoT (shared types, persistence, wiring, capability registry, AI adapter, errors, invariants)
+│   ├ injection-interface.md   content and config injection format for consuming projects
+│   ├ engine-contract.md       engine (pure) contract
+│   ├ bot-contract.md          bot (discord.py) contract
+│   ├ learning-types.md        four-layer capability registry
+│   ├ ai-mode.md               _invoke adapter and token control
+│   └ launch-skill.md          global skill and install
+├ engine/                      pure Python core (zero discord, zero file I/O): scoring, leitner, selection, dashboard, migrate
+├ bot/                         discord.py shell: boot, session, dispatch, handlers, persist, ai, commands
+│   └ harness/                 Discord harness catalog (copied, 59 files)
+├ skills/                      launch skill source plus install.py
+├ examples/                    mock content for development and verification (not a real subject)
+├ web/                         (reserved) frontend-design workspace for continuous interactive practice and long-form reading, deferred
+└ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
-## 4. 기획·설계 핵심
+## 4. Design core
 
-**두 기둥**
-- **A. 결정적 학습**(토큰 0) — 채점 4모드(exact/keyword/cloze/self)·정규화·Leitner·출제큐(인터리빙·D-day)·대시보드 집계. v4 JS 코어를 파이썬 순수 함수로 포팅.
-- **B. AI 학습 모드**(선택 토큰) — `claude -p --input-format stream-json` `_invoke` 어댑터 패턴 복제(브리지 import·실행 0). 토큰 통제(짧은 preamble·effort low·저렴 모델·조건부 미호출).
+**Two pillars**
+- **A. Deterministic learning** (zero tokens) — four grading modes (exact/keyword/cloze/self), normalization,
+  Leitner, a question queue (interleaving, due-first, D-day), and dashboard aggregation. The v4 JS core ported
+  to pure Python functions.
+- **B. AI study mode** (optional tokens) — replicates the `claude -p --input-format stream-json` `_invoke`
+  adapter pattern (zero bridge import or execution). Token control (short preamble, low effort, cheap model,
+  conditional skip).
 
-**4계층 능력 카탈로그**(소비 config로 켜고 끔) — ① 엔진 코어 ② Discord 학습(harness 프리미티브) ③ AI ④ 인프라(gating·heartbeat 등). 상세 = `_이데이션_능력카탈로그.md`.
+**Four-layer capability catalog** (toggled by the consuming config) — (1) engine core, (2) Discord learning
+(harness primitives), (3) AI, (4) infrastructure (gating, heartbeat, and so on). Details in
+`docs/_이데이션_능력카탈로그.md`.
 
-**불변 경계**(SoT `규격/_인터페이스계약.md §7`)
-- 과목 무관(어휘 하드코딩 0, 전부 주입) · 복사 모델(discord-bridge 런타임 의존 0) · 봇 격리(새 앱·토큰·서버) ·
-  **엔진 vs harness 경계**(학습 알고리즘=엔진코어 완전 순수, Discord I/O·파일 저장=harness/봇) · 이진 채점(부분점수·합격확률 없음) · card_id 안정 id · 결정적=토큰0.
+**Invariant boundaries** (SoT `specs/_interface-contract.md §7`)
+- Subject-agnostic (zero hard-coded vocabulary, everything injected); copy model (zero discord-bridge runtime
+  dependency); bot isolation (new app, token, server); **engine vs harness boundary** (learning algorithms live
+  in a fully pure engine core, Discord I/O and file storage live in harness/bot); binary grading (no partial
+  credit, no pass probability); stable card_id; deterministic means zero tokens.
 
-**의존 방향**: `봇 → 엔진코어(순수) · harness · 콘텐츠(주입)`. 엔진코어는 누구에도 의존하지 않는다(파일 I/O·discord·harness import 0).
+**Dependency direction:** `bot -> engine (pure), harness, content (injected)`. The engine core depends on
+nothing (zero file I/O, discord, or harness imports).
 
-## 5. 개발·테스트
+## 5. Development and testing
 
 ```bash
-cd 엔진코어 && python -m pytest tests/ -q      # 엔진 순수 회귀 159
-cd 봇       && python -m pytest tests/ -q      # 봇 헤드리스 부트·세션 + _예시 통합 13
+cd engine && python -m pytest tests/ -q      # 159 pure-engine regression tests
+cd bot    && python -m pytest tests/ -q      # 13 headless boot/session plus examples integration tests
 ```
-- 엔진코어 = 순수 함수(`now` 주입 결정성). 봇 = discord 없이 부트·세션 루프 헤드리스 검증(Discord I/O는 라이브 전용).
+- The engine core is pure functions (`now` is injected for determinism). The bot is verified headless without
+  discord (boot and the session loop); Discord I/O is live-only.
 
-## 6. 현재 상태
+## 6. Current status
 
-- ✅ **① 기획 · ② 명세(7종, 적대 무결성 통과) · ③ 구현**(엔진코어 + 봇 셸 + 목업 + skill) 완료.
-- ✅ **회귀 172 green**(엔진 159 + 봇 13). 결정적 전 루프(부트→큐→채점→Leitner→영속) 헤드리스 증명.
-- ⏳ **라이브 Discord 검증** — 사용자 선행조건(봇 앱·토큰·서버). Discord I/O 핸들러는 라이브에서만 검증.
-- ⏳ **남은 능력 증분** — mcq_select·seq_modal·AI 모드·SRS 푸시·대시보드 렌더 등(카탈로그 ~30종). 웹(frontend-design) 후순위.
+- Done: (1) planning, (2) specs (7 documents, passed adversarial integrity review), (3) implementation
+  (engine core, bot shell, mock content, skill).
+- 172 regression tests green (159 engine plus 13 bot). The full deterministic loop
+  (boot, queue, grade, Leitner, persist) is proven headless.
+- Pending: live Discord verification (needs the user prerequisites: bot app, token, server). Discord I/O
+  handlers are only verified live.
+- Pending: remaining capability increments (mcq_select, seq_modal, AI mode, SRS push, dashboard rendering, and
+  so on; about 30 in the catalog). The web (frontend-design) workspace is deferred.
 
-## 7. 어디부터 읽나 (AI·신규 기여자)
+## 7. Where to start (for AI and new contributors)
 
-1. `기획_v5_discord.md` — 큰 그림. 2. `규격/_인터페이스계약.md` — 코어 SoT(타입·계약). 3. `규격/주입인터페이스.md` — 과목을 붙이는 법. 4. `엔진코어/`·`봇/` 코드 + 테스트.
+1. `docs/기획_v5_discord.md` — the big picture. 2. `specs/_interface-contract.md` — the core SoT (types and
+contracts). 3. `specs/injection-interface.md` — how to attach a subject. 4. `engine/` and `bot/` code plus tests.

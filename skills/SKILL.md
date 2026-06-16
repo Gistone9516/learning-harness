@@ -1,57 +1,57 @@
 ---
-name: v5-study-bot
-description: 소비 과목 폴더를 Discord 학습 봇 위에 올린다. 봇 앱은 한 곳에 설치돼 있고 콘텐츠 폴더만 갈아끼워 구동한다. "이 과목을 디스코드로", "학습 봇 띄워", "v5 구동", "학습 프레임워크 구동" 같은 요청에 사용.
+name: learning-harness
+description: Mounts a subject folder onto a Discord learning bot. The bot app is installed in one place; only the content folder is swapped to launch. Use for requests like "put this subject on Discord", "start the learning bot", "run v5", "launch the learning framework".
 ---
 
-# v5-study-bot (전역 스킬)
+# learning-harness (global skill)
 
-학습 봇 앱은 아래 폴더에 설치돼 있다(코드·엔진·harness·토큰이 여기 있음):
+The learning bot app is installed in the folder below (code, engine, harness, and token live here):
 
 ```
 APP = <APP>
 ```
 
-앱(코드·토큰)과 데이터(콘텐츠 폴더)는 분리돼 있다. 앱은 고정, 콘텐츠 폴더만 갈아끼운다. 토큰과 `.env`는 APP에서 읽으므로 과목 폴더마다 재설정할 필요 없다.
+The app (code and token) and data (content folder) are separated. The app is fixed; only the content folder is swapped. The token and `.env` are read from APP, so there is no need to reconfigure them for each subject folder.
 
-## 선행조건 (미충족 시 구동 거부)
+## Prerequisites (bot will not start if any are missing)
 
-아래 세 가지가 모두 갖춰져야 봇이 뜬다. 하나라도 없으면 구동하지 말고 사용자에게 안내한다.
+All three of the following must be in place before the bot can start. If any are missing, do not launch and inform the user instead.
 
-1. **Discord 개발자 포털에서 새 봇 앱 생성·토큰 발급.** discord-bridge와 별개 앱·토큰·서버를 써야 한다(같은 토큰 재사용 불가).
-2. **학습 전용 새 Discord 서버(길드) 신설.** 봇을 그 서버에 초대할 때 `bot` + `applications.commands` 스코프, 메시지 읽기·쓰기·스레드·파일 첨부 권한을 부여한다.
-3. **APP 폴더의 `.env`에 필수 4키 기입.** `.env.example`을 복사해 값을 채운다.
+1. **Create a new bot app and issue a token in the Discord Developer Portal.** Use a separate app, token, and server from discord-bridge (reusing the same token is not allowed).
+2. **Create a new Discord server (guild) dedicated to learning.** When inviting the bot to that server, grant `bot` + `applications.commands` scopes and message read/write, thread, and file attachment permissions.
+3. **Fill in the four required keys in the `.env` file inside the APP folder.** Copy `.env.example` and fill in the values.
 
-권한·스코프가 부족하면 스레드·슬래시 등 일부 기능이 비활성화되고 경고가 뜨지만 기본 동작은 유지된다.
+If permissions or scopes are insufficient, some features such as threads and slash commands will be disabled with a warning, but basic operation is maintained.
 
-## 과목 폴더를 Discord에 올리기
+## Mounting a subject folder to Discord
 
-소비 과목 폴더에서 다음을 실행한다. 그 폴더의 manifest·deck·config가 봇에 주입된다.
-
-```
-python "<APP>/봇/main.py"
-```
-
-다른 폴더를 대상으로 할 때는 경로를 명시한다.
+Run the following from the subject folder you want to use. That folder's manifest, deck, and config will be injected into the bot.
 
 ```
-python "<APP>/봇/main.py" "C:\경로\과목폴더"
+python "<APP>/bot/main.py"
 ```
 
-- 폴더 생략 시 현재 cwd가 마운트 대상이 된다.
-- 진도는 그 콘텐츠 폴더 `_상태/` 하위에 저장된다. 과목별로 진도가 격리된다.
-- 중지는 터미널에서 Ctrl+C. 봇은 토큰 하나라 동시 1개 인스턴스만 실행한다.
-
-## 실행 인자 정리
+To target a different folder, specify the path explicitly.
 
 ```
-python "<APP>/봇/main.py" [콘텐츠폴더]
+python "<APP>/bot/main.py" "C:\path\to\subject-folder"
 ```
 
-- **콘텐츠폴더**: 생략하면 현재 cwd. 명시하면 그 절대·상대 경로가 마운트 대상.
-- 마운트 우선순위: 인자 > `.env MOUNT` > cwd.
+- If the folder is omitted, the current cwd is used as the mount target.
+- Progress is saved under the `_state/` subdirectory of that content folder. Progress is isolated per subject.
+- To stop, press Ctrl+C in the terminal. Because only one token is used, only one instance can run at a time.
 
-## 메모
+## Command-line arguments
 
-- 토큰 등 비밀값은 APP의 `.env`에만 두고 노출하지 않는다.
-- AI 기능(layer 3 능력)은 `claude` CLI가 PATH에 있어야 동작한다. 없으면 해당 능력만 비활성화된다.
-- install은 `python "<APP>/skills/install.py"`로 1회 실행해 이 skill을 `~/.claude/skills/`에 등록한다.
+```
+python "<APP>/bot/main.py" [content-folder]
+```
+
+- **content-folder**: Omit to use the current cwd. If provided, that absolute or relative path is used as the mount target.
+- Mount priority: argument > `.env MOUNT` > cwd.
+
+## Notes
+
+- Keep secrets such as the token only in the APP's `.env` and never expose them.
+- AI features (layer 3 capabilities) require the `claude` CLI to be on PATH. If it is absent, only those capabilities are disabled.
+- Run `python "<APP>/skills/install.py"` once to register this skill under `~/.claude/skills/`.
