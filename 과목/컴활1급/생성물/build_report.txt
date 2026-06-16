@@ -1,1 +1,0 @@
-WARN W_SECTION_INDEX_ABSENT -:- 개념서 인덱스 미제공 — concept_ref 검증 스킵

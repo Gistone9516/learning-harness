@@ -1,0 +1,24 @@
+{
+  "normalize_profiles": {
+    "func":  ["nfkc", "trim", "collapse_space", "lower"],
+    "proc":  ["nfkc", "trim", "collapse_space", "lower"],
+    "cloze": ["nfkc", "trim", "strip_all_space", "lower"],
+    "judge": ["nfkc", "trim", "collapse_space", "lower"]
+  },
+  "synonyms": {
+    "0도": ["영도", "0°c", "0c"],
+    "프록시마 켄타우리": ["proxima centauri", "프록시마켄타우리"],
+    "비누": ["soap"],
+    "건조": ["말린다", "닦는다"]
+  },
+  "pass_targets": {
+    "물리화학": 70,
+    "천문": 60,
+    "위생": 50,
+    "자기점검": 40
+  },
+  "leitner": {
+    "intervals_days": {"1": 1, "2": 3, "3": 7},
+    "dday_compress_days": 1
+  }
+}

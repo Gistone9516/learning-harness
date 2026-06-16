@@ -1,0 +1,176 @@
+{
+  "namespace": "demo-core",
+  "cards": [
+    {
+      "card_id": "demo-func-exact-01",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-01",
+      "type": "func",
+      "grade_mode": "exact",
+      "front": {
+        "prompt": "물의 어는점은 섭씨 몇 도인가?"
+      },
+      "back": {
+        "detail": "물은 표준 대기압(1atm) 기준 섭씨 0도에서 얼기 시작한다.",
+        "note": "기압이 달라지면 어는점도 달라진다."
+      },
+      "answer_spec": {
+        "accepted": ["0", "0도", "영도", "0°c"],
+        "required_keywords": null,
+        "blanks": null,
+        "sequence": null,
+        "normalize": ["nfkc", "trim", "collapse_space", "lower"]
+      },
+      "tags": {
+        "weight": 5,
+        "area": "기초과학",
+        "subarea": "물리화학"
+      },
+      "links": {},
+      "enabled": true
+    },
+    {
+      "card_id": "demo-func-exact-02",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-01",
+      "type": "func",
+      "grade_mode": "exact",
+      "front": {
+        "prompt": "지구에서 가장 가까운 항성의 이름은?",
+        "hint": "태양계 밖에 있는 별"
+      },
+      "back": {
+        "detail": "프록시마 켄타우리(Proxima Centauri)는 지구로부터 약 4.24광년 거리에 있다.",
+        "why": "알파 켄타우리 3중성계 중 하나로 태양에서 가장 가까운 별이다."
+      },
+      "answer_spec": {
+        "accepted": ["프록시마 켄타우리", "proxima centauri", "프록시마켄타우리"],
+        "required_keywords": null,
+        "blanks": null,
+        "sequence": null,
+        "normalize": ["nfkc", "trim", "collapse_space", "lower"]
+      },
+      "tags": {
+        "weight": 6,
+        "area": "기초과학",
+        "subarea": "천문"
+      },
+      "links": {},
+      "enabled": true
+    },
+    {
+      "card_id": "demo-cloze-01",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-02",
+      "type": "cloze",
+      "grade_mode": "cloze",
+      "front": {
+        "text": "지구는 태양계의 {{0}} 번째 행성이며, 표면의 약 {{1}} 퍼센트가 물로 덮여 있다."
+      },
+      "back": {
+        "detail": "지구는 내행성 중 가장 크고 표면의 71%가 바다다.",
+        "note": "금성·화성과 함께 암석형 행성으로 분류된다."
+      },
+      "answer_spec": {
+        "accepted": null,
+        "required_keywords": null,
+        "blanks": [["3", "세", "셋", "세번째", "3번째"], ["71", "칠십일"]],
+        "sequence": null,
+        "normalize": ["nfkc", "trim", "strip_all_space", "lower"]
+      },
+      "tags": {
+        "weight": 5,
+        "area": "기초과학",
+        "subarea": "천문"
+      },
+      "links": {},
+      "enabled": true
+    },
+    {
+      "card_id": "demo-judge-01",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-02",
+      "type": "judge",
+      "grade_mode": "exact",
+      "front": {
+        "scenario": "다음 중 태양계 행성에 해당하지 않는 것은?",
+        "options": ["화성", "명왕성", "목성", "토성"]
+      },
+      "back": {
+        "detail": "명왕성은 2006년 국제천문연맹(IAU) 결의에 따라 왜소행성으로 재분류되었다.",
+        "why": "공전 궤도 청소 조건을 충족하지 못해 행성 지위를 잃었다."
+      },
+      "answer_spec": {
+        "accepted": ["명왕성"],
+        "required_keywords": null,
+        "blanks": null,
+        "sequence": null,
+        "normalize": ["nfkc", "trim", "collapse_space", "lower"]
+      },
+      "tags": {
+        "weight": 4,
+        "area": "기초과학",
+        "subarea": "천문"
+      },
+      "links": {},
+      "enabled": true
+    },
+    {
+      "card_id": "demo-proc-keyword-01",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-03",
+      "type": "proc",
+      "grade_mode": "keyword",
+      "front": {
+        "prompt": "일반적인 손씻기 절차를 순서대로 설명하시오.",
+        "hint": "비누 사용 기준"
+      },
+      "back": {
+        "detail": "물로 손을 적신다 → 비누를 묻혀 20초 이상 문지른다 → 흐르는 물로 헹군다 → 종이타월 등으로 건조한다.",
+        "note": "손가락 사이, 손톱 주변, 손등도 포함해야 한다."
+      },
+      "answer_spec": {
+        "accepted": null,
+        "required_keywords": [["물", "적신다", "적시"], ["비누", "20초", "문지른다", "문지르"], ["헹군다", "헹굼", "씻는다"], ["건조", "말린다", "닦는다"]],
+        "blanks": null,
+        "sequence": null,
+        "normalize": ["nfkc", "trim", "collapse_space", "lower"]
+      },
+      "tags": {
+        "weight": 3,
+        "area": "생활",
+        "subarea": "위생"
+      },
+      "links": {},
+      "enabled": true
+    },
+    {
+      "card_id": "demo-self-01",
+      "schema_version": 1,
+      "subject": "demo",
+      "unit": "unit-03",
+      "type": "func",
+      "grade_mode": "self",
+      "front": {
+        "prompt": "오늘 배운 내용 중 가장 기억에 남는 것을 자유롭게 서술하시오."
+      },
+      "back": {
+        "detail": "정해진 정답이 없는 자유 서술 카드입니다. 스스로 확인하고 채점하세요.",
+        "note": "자기 설명(elaboration) 효과를 위한 카드 유형이다."
+      },
+      "answer_spec": null,
+      "tags": {
+        "weight": 2,
+        "area": "메타인지",
+        "subarea": "자기점검"
+      },
+      "links": {},
+      "enabled": true
+    }
+  ]
+}

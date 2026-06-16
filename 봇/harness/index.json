@@ -1,0 +1,677 @@
+{
+  "version": "0.1.0",
+  "count": 58,
+  "files": [
+    {
+      "path": "automation/digest.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Accumulates events and posts them as a summary card periodically (or on flush) to reduce spam.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/driver.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Runs a queue of attempts in its OWN process (host or docker). It survives",
+      "deps": "(standard library only - json, urllib). Your attempt() may use anything.",
+      "perms": "none for the driver itself. The webhook ping needs a Discord channel",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/events.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "A collection of common discord event hook examples (join/leave/voice/",
+      "deps": "discord.py>=2.6",
+      "perms": "Enable the intents matching each event (members, message_content,",
+      "intents": [
+        "members         -- on_member_join",
+        "on_member_remove (privileged)"
+      ],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/filedrop.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Polls a directory and uploads any newly-appeared files as Discord",
+      "deps": "discord.py>=2.6",
+      "perms": "Attach Files",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/gating.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Guard that restricts commands and interactions to permitted users and channels only.",
+      "deps": "discord.py>=2.6",
+      "perms": "",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/heartbeat.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "If beat() is not called again within the timeout window, the allowed user",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/metricpush.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Accepts named numeric pushes from multiple callers and aggregates",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/ratelimit.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "A coalescer that collapses frequent calls into one action per interval.",
+      "deps": "(standard library only)",
+      "perms": "",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/scheduler.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Runs a callback every N seconds, or once daily at a fixed HH:MM time,",
+      "deps": "(standard library only)",
+      "perms": "",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/store.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Saves and loads small state (settings, counters, etc.) as a JSON file so",
+      "deps": "(standard library only)",
+      "perms": "",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "automation/watcher.py",
+      "category": "automation",
+      "tier": "main",
+      "what": "Calls check() on each interval; if it returns a truthy value the",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "channels/channels.py",
+      "category": "channels",
+      "tier": "main",
+      "what": "Looks up a channel by name or creates one, and edits topic/slowmode/etc.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Channels",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "channels/forum.py",
+      "category": "channels",
+      "tier": "main",
+      "what": "Creates a post (thread) in a forum channel and applies available tags.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages (to post in a forum), Manage Threads (to manage tags)",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "channels/threads.py",
+      "category": "channels",
+      "tier": "main",
+      "what": "Create threads from a message or a channel, then archive or lock them.",
+      "deps": "discord.py>=2.6",
+      "perms": "Create Public Threads, Send Messages in Threads, (archive/lock) Manage Threads",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "channels/webhook.py",
+      "category": "channels",
+      "tier": "main",
+      "what": "Creates a webhook in a channel and sends messages with an arbitrary",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Webhooks",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "community/audit.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Reads guild audit log entries (who did what).",
+      "deps": "discord.py>=2.6",
+      "perms": "View Audit Log",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "community/automod.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Fetch guild AutoMod rules (keyword filtering, etc.).",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Guild",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "niche"
+      ]
+    },
+    {
+      "path": "community/categories.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Create channel categories and move channels under them.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Channels",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "community/emoji.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Find guild custom emojis for use in messages/reactions, and create new ones.",
+      "deps": "discord.py>=2.6",
+      "perms": "(admin) Manage Expressions",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "community/invites.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Create channel invites and retrieve the full invite list for a guild.",
+      "deps": "discord.py>=2.6",
+      "perms": "Create Instant Invite, (listing) Manage Guild",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "community/moderation.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Kick, ban, timeout, bulk-delete messages, and set nicknames for guild members.",
+      "deps": "discord.py>=2.6",
+      "perms": "Kick Members, Ban Members, Moderate Members, Manage Messages, Manage Nicknames",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "community/monetization.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Premium SKU purchase button and entitlement lookup. Only useful for monetized apps.",
+      "deps": "discord.py>=2.6",
+      "perms": "The app must have monetization enabled in the developer portal.",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "niche"
+      ]
+    },
+    {
+      "path": "community/permissions.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Overwrite channel-level permissions for a specific role or member.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Roles / Manage Channels",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "community/roles.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Create guild roles and add/remove them from members.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Roles",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "community/scheduledevents.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Create and retrieve guild scheduled events.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Events",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "community/soundboard.py",
+      "category": "community",
+      "tier": "community",
+      "what": "List guild soundboard sounds (playback requires a voice connection;",
+      "deps": "discord.py>=2.6",
+      "perms": "Use Soundboard",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "niche",
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "community/stickers.py",
+      "category": "community",
+      "tier": "community",
+      "what": "Looks up a guild sticker by name and sends it as a message.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages; (admin) Manage Expressions",
+      "intents": [],
+      "pip": [],
+      "flags": [
+        "non-mainstream"
+      ]
+    },
+    {
+      "path": "interaction/buttons.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Build callback buttons, link (URL) buttons, and emoji buttons, then",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/confirm.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Show Yes/No buttons and return the allowed user's choice as a bool (default on timeout).",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/contextmenu.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "App commands triggered by right-clicking a message or user.",
+      "deps": "discord.py>=2.6",
+      "perms": "applications.commands scope",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/form.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Opens a pop-up form to collect structured input (multiple text fields, etc.)",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/paginator.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Page through a list of text pages with Prev/Next buttons in one message.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/persistviews.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Uses timeout=None and fixed custom_id buttons so that buttons on",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/poll.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Creates a Discord built-in poll (with deadline and vote tallying) and",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "interaction/selects.py",
+      "category": "interaction",
+      "tier": "main",
+      "what": "Drop-downs to pick options / users / roles / channels / mentionables; returns the choice.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "live/livecard.py",
+      "category": "live",
+      "tier": "main",
+      "what": "Posts one message and edits it each time new data arrives, so the card's values",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages, Send Messages in Threads (only needed when posting into a thread)",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "live/livechart.py",
+      "category": "live",
+      "tier": "main",
+      "what": "Renders a matplotlib chart as PNG and replaces the image in a single",
+      "deps": "discord.py>=2.6, matplotlib (graceful fallback if missing)",
+      "perms": "Send Messages, Attach Files",
+      "intents": [],
+      "pip": [
+        "matplotlib"
+      ],
+      "flags": []
+    },
+    {
+      "path": "live/livetable.py",
+      "category": "live",
+      "tier": "main",
+      "what": "Feed rows via set_row(); a single card (code-block-aligned table) refreshes",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "live/logtail.py",
+      "category": "live",
+      "tier": "main",
+      "what": "Push lines in; the latest N lines are shown as a code block in a single rolling message (remote log monitor).",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "live/progressbar.py",
+      "category": "live",
+      "tier": "main",
+      "what": "Displays a long-running task's progress as a bar (e.g. [######....] 60%)",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "media/files.py",
+      "category": "media",
+      "tier": "main",
+      "what": "Send a file from the working directory to a Discord channel.",
+      "deps": "discord.py>=2.6",
+      "perms": "Attach Files",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "media/imagesend.py",
+      "category": "media",
+      "tier": "main",
+      "what": "Send an image (file path or BytesIO) to a channel, and replace",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages, Attach Files",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "media/voice.py",
+      "category": "media",
+      "tier": "main",
+      "what": "Connect to a voice channel and play audio files or streams (basic music-bot functionality).",
+      "deps": "discord.py>=2.6, PyNaCl, system ffmpeg",
+      "perms": "Connect, Speak",
+      "intents": [
+        "voice_states"
+      ],
+      "pip": [
+        "PyNaCl"
+      ],
+      "flags": []
+    },
+    {
+      "path": "meta/botinvite.py",
+      "category": "meta",
+      "tier": "main",
+      "what": "Builds a bot invite URL with the required permissions and scopes",
+      "deps": "(standard library only)",
+      "perms": "See _PERMS dict below for the individual permission bits used.",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "meta/checklist.py",
+      "category": "meta",
+      "tier": "main",
+      "what": "Helper that verifies required intents and permissions before or after the bot starts.",
+      "deps": "discord.py>=2.6",
+      "perms": "",
+      "intents": [
+        "message_content",
+        "members (privileged - must be enabled in the Developer Portal)"
+      ],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "meta/dm.py",
+      "category": "meta",
+      "tier": "main",
+      "what": "Send a DM to a user and receive replies from DM channels.",
+      "deps": "discord.py>=2.6",
+      "perms": "No special guild permissions needed to send DMs; receiving message",
+      "intents": [
+        "message_content (required to read incoming DM body text)"
+      ],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "meta/presence.py",
+      "category": "meta",
+      "tier": "main",
+      "what": "Sets the bot's activity (playing/watching/listening/custom) and status (online/idle/dnd).",
+      "deps": "discord.py>=2.6",
+      "perms": "",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/cards.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Build cards using V2 LayoutView (Container / Section / Separator / MediaGallery / Thumbnail / TextDisplay).",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/chunk.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Safely splits long text into pieces that fit Discord's 2000-character",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/embeds.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Builds Discord embeds (legacy format, alternative to V2 cards)",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages, Embed Links",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/mention.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Bot messages without an actual @mention do not trigger push notifications.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/pins.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Pin or unpin an important message in a text channel.",
+      "deps": "discord.py>=2.6",
+      "perms": "Manage Messages (or the newer Pin Messages permission)",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/reactions.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Adds emoji reactions to a message and waits for a permitted user to",
+      "deps": "discord.py>=2.6",
+      "perms": "Add Reactions, Read Message History; the 'reactions' gateway intent",
+      "intents": [
+        "reactions"
+      ],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/reply.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Reply to a specific message with a reference, or forward a message to another channel.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages, Read Message History",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/suppress.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Prevents URL auto-embeds from leaking content externally (security).",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages; post-send suppression also requires Manage Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "output/typing_indicator.py",
+      "category": "output",
+      "tier": "main",
+      "what": "Shows 'typing...' in a Discord channel while a task or response is being generated.",
+      "deps": "discord.py>=2.6",
+      "perms": "Send Messages",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "slash/installctx.py",
+      "category": "slash",
+      "tier": "main",
+      "what": "Configures a slash command so it can be installed and used not only in",
+      "deps": "discord.py>=2.6",
+      "perms": "applications.commands; User Install must be enabled in the Developer Portal.",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    },
+    {
+      "path": "slash/slash.py",
+      "category": "slash",
+      "tier": "main",
+      "what": "Collection of app_commands slash-command authoring and sync patterns.",
+      "deps": "discord.py>=2.6",
+      "perms": "applications.commands OAuth2 scope (include when re-inviting the bot)",
+      "intents": [],
+      "pip": [],
+      "flags": []
+    }
+  ]
+}

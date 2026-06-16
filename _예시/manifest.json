@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "subject": "demo",
+  "decks": [
+    {
+      "namespace": "demo-core",
+      "title": "데모 핵심 카드",
+      "card_count": 6,
+      "config_ref": "config/demo-core.json",
+      "built_at": 1749600000000
+    }
+  ]
+}

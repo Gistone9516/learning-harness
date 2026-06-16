@@ -1,0 +1,1673 @@
+{
+  "summary": "Discord harness 전수 기반 학습 능력 카탈로그 멀티렌즈 이데이션 + 완결성 비평 (과목 무관 프레임워크, 핵심 학습만)",
+  "agentCount": 7,
+  "logs": [],
+  "result": {
+    "lenses": [
+      {
+        "lens": "category-census (전수 58파일 매핑, coverage=census)",
+        "capabilities": [
+          {
+            "name": "문제카드 렌더링 (V2 Card)",
+            "learning_purpose": "앞면(문제)·뒷면(해설)·채점결과를 Discord 네이티브 카드로 표시. Container/Section/TextDisplay로 exact/keyword/cloze/self 4모드 피드백 레이아웃 구성.",
+            "primitives": [
+              "output/cards.py"
+            ],
+            "interaction": "봇이 카드를 send(view=titled_card()) 로 제시 → 학습자가 답변 입력",
+            "tier": "core"
+          },
+          {
+            "name": "채점 피드백 Embed 출력",
+            "learning_purpose": "채점결과·개념 해설을 fields(area/subarea/unit 분류)·thumbnail·timestamp 포함 embed로 구조화 출력. V2 카드와 상호배타적으로 선택 가능.",
+            "primitives": [
+              "output/embeds.py"
+            ],
+            "interaction": "score() 결과 → build_embed(verdict, matched, missed) → channel.send(embed=)",
+            "tier": "core"
+          },
+          {
+            "name": "긴 해설·개념 분할 전송",
+            "learning_purpose": "2000자 초과 개념 설명·오답노트를 2000자 단위로 분할 전송. send_code()로 예시코드·수식 블록 전송.",
+            "primitives": [
+              "output/chunk.py"
+            ],
+            "interaction": "개념 조회 → await send_chunks(channel, long_text) 또는 send_code(channel, code)",
+            "tier": "core"
+          },
+          {
+            "name": "세션 완료 푸시알림 (멘션)",
+            "learning_purpose": "채점 완료·세션 요약·복습 알림 시 @mention으로 모바일 푸시 알림 트리거. 중간 단계에서는 호출 자제(알림 피로 방지).",
+            "primitives": [
+              "output/mention.py"
+            ],
+            "interaction": "세션 종료 시 await ping(channel, user_id, '[세션완료] ...')",
+            "tier": "core"
+          },
+          {
+            "name": "문제에 답변 인라인 연결 (Reply)",
+            "learning_purpose": "학습자 답변 메시지에 채점 결과를 reply로 연결하여 질문-답-채점을 스레드처럼 시각적으로 연결. forward로 오답을 오답채널에 전달.",
+            "primitives": [
+              "output/reply.py"
+            ],
+            "interaction": "on_message(answer) → await reply_to(message, score_result_text)",
+            "tier": "core"
+          },
+          {
+            "name": "반응(이모지) 즉각 응답 채점",
+            "learning_purpose": "O/X·True/False·번호 선택 등 리액션 기반 경량 퀴즈. wait_choice()로 self 모드 self-verdict 수집(사용자가 이모지 클릭 = 자가판정).",
+            "primitives": [
+              "output/reactions.py"
+            ],
+            "interaction": "add(msg, '⭕','❌') → wait_choice(client, msg, user_id, emojis) → verdict",
+            "tier": "core"
+          },
+          {
+            "name": "핵심 카드 고정 (Pin)",
+            "learning_purpose": "오늘의 최다오답 카드·졸업카드·핵심 개념 카드를 채널에 핀 고정하여 반복 노출.",
+            "primitives": [
+              "output/pins.py"
+            ],
+            "interaction": "await pin(message) → 핀 목록에 유지 → 필요시 unpin",
+            "tier": "extension"
+          },
+          {
+            "name": "AI 응답 생성 중 타이핑 표시",
+            "learning_purpose": "claude -p stream-json 호출 대기 중 'typing...' 표시로 학습자가 대기 인지. 불필요한 idle 중 표시 방지(규칙 준수).",
+            "primitives": [
+              "output/typing_indicator.py"
+            ],
+            "interaction": "async with typing(channel): await ai_generate_feedback()",
+            "tier": "core"
+          },
+          {
+            "name": "URL 억제 (Suppress)",
+            "learning_purpose": "개념 설명 속 참고 URL이 카드 렌더링을 방해하는 embed auto-preview를 억제. 학습 콘텐츠 시각 노이즈 감소.",
+            "primitives": [
+              "output/suppress.py"
+            ],
+            "interaction": "send(wrap_urls(content)) 또는 post-send suppress(message)",
+            "tier": "extension"
+          },
+          {
+            "name": "실시간 채점 진행 카드 (LiveCard)",
+            "learning_purpose": "Leitner 전이 진행·box 현황·세션 점수를 단일 카드에 실시간 in-place 업데이트. 코알레싱으로 rate-limit 안전. 세션 진행 상황 시각화 핵심.",
+            "primitives": [
+              "live/livecard.py"
+            ],
+            "interaction": "LiveCard.start() → 채점루프에서 card.set(box=, correct=, elapsed=) → finalize()",
+            "tier": "core"
+          },
+          {
+            "name": "Leitner 박스 분포 실시간 테이블",
+            "learning_purpose": "box1/2/3 카드 수·mastery_rate·by_area retrieval_rate를 행별 실시간 갱신 테이블로 표시(getDashboardData 시각화).",
+            "primitives": [
+              "live/livetable.py"
+            ],
+            "interaction": "LiveTable(ch, columns=['unit','box1','box2','box3','rate']).start() → set_row() per unit",
+            "tier": "core"
+          },
+          {
+            "name": "세션 진행률 바 (ProgressBar)",
+            "learning_purpose": "세션 내 카드 소화율(cold_attempts/전체)을 진행바로 실시간 표시. update(current, total, note) API가 채점루프와 1:1 연결.",
+            "primitives": [
+              "live/progressbar.py"
+            ],
+            "interaction": "ProgressBar.start() → 카드마다 pb.update(i, total) → finalize('세션 완료')",
+            "tier": "core"
+          },
+          {
+            "name": "AI 스트리밍 로그 실시간 출력 (LogTail)",
+            "learning_purpose": "claude -p stream-json 출력 라인을 LogTail.push()로 실시간 스크롤 표시. AI 생성 피드백·개념 설명의 스트리밍 UX 구현.",
+            "primitives": [
+              "live/logtail.py"
+            ],
+            "interaction": "lt = LogTail(ch).start() → for line in ai_stream: lt.push(line) → finalize()",
+            "tier": "core"
+          },
+          {
+            "name": "학습 지표 차트 업데이트 (LiveChart)",
+            "learning_purpose": "cold_correct률·박스분포 변화를 matplotlib 꺾은선 차트로 in-place 교체. 학습 곡선 시각화.",
+            "primitives": [
+              "live/livechart.py"
+            ],
+            "interaction": "LiveChart(ch).start() → lc.push(retrieval_rate) per session → finalize()",
+            "tier": "extension",
+            "notes": "matplotlib 필요(pip). 학습 분석 시각화 optional."
+          },
+          {
+            "name": "O/X 자가채점 확인 버튼 (Confirm)",
+            "learning_purpose": "self 모드 자가판정: '맞았나요?' 카드에 Yes/No 버튼 → bool 반환 → verdict=correct/incorrect로 Leitner 전이. 타임아웃 시 기본값 설정.",
+            "primitives": [
+              "interaction/confirm.py"
+            ],
+            "interaction": "ok = await confirm(ch, user_id, '정답이었나요?') → verdict = 'correct' if ok else 'incorrect'",
+            "tier": "core"
+          },
+          {
+            "name": "채점 모드 / 세션 옵션 버튼 선택",
+            "learning_purpose": "세션 시작 시 ScoreMode 선택(exact/keyword/cloze/self), D-day 모드 토글, 신규/복습 전용 선택 버튼 UI. button_card()로 최대 5개 선택지.",
+            "primitives": [
+              "interaction/buttons.py"
+            ],
+            "interaction": "button_card('채점 방식 선택', [('exact',cb_exact),('keyword',cb_kw),...]) → callback에서 QueueOptions 세팅",
+            "tier": "core"
+          },
+          {
+            "name": "드롭다운 Deck/단원 선택 (Selects)",
+            "learning_purpose": "여러 deck namespace·unit·area/subarea를 드롭다운으로 선택. pick_string()으로 최대 25항목 선택 지원.",
+            "primitives": [
+              "interaction/selects.py"
+            ],
+            "interaction": "ns = await pick_string(ch, user_id, 'Deck 선택', list(manifest.keys())) → loadDeck(ns)",
+            "tier": "core"
+          },
+          {
+            "name": "단답형·빈칸 입력 폼 (Form/Modal)",
+            "learning_purpose": "exact·keyword 모드 단답형 입력, cloze 다중 빈칸 동시 입력(blanks 배열)을 Modal 팝업으로 수집. ask_form() → dict → score() 연결.",
+            "primitives": [
+              "interaction/form.py"
+            ],
+            "interaction": "data = await ask_form(interaction, 'Q', [('ans','정답입력',{})]) → score(ScoreInput(userAnswer=data['ans']))",
+            "tier": "core"
+          },
+          {
+            "name": "원투표 Quiz Poll (Poll)",
+            "learning_purpose": "객관식 카드(judge 유형 등)를 Discord 네이티브 poll로 제시. 최대 10선택지·기한 설정·투표 집계 → exact 모드 채점 연결.",
+            "primitives": [
+              "interaction/poll.py"
+            ],
+            "interaction": "await send_poll(ch, front.prompt, options, hours=1) → on_raw_poll_vote_add → score()",
+            "tier": "core"
+          },
+          {
+            "name": "개념서·오답노트 페이지 넘기기 (Paginator)",
+            "learning_purpose": "긴 개념 설명·오답 목록·Leitner 약점 리포트를 Prev/Next 버튼으로 페이지 탐색. buildQueue 결과 카드 목록 브라우징에도 사용.",
+            "primitives": [
+              "interaction/paginator.py"
+            ],
+            "interaction": "await send_paginator(ch, user_id, [page1, page2, ...]) → 버튼 클릭으로 페이지 이동",
+            "tier": "core"
+          },
+          {
+            "name": "메시지 우클릭 즉시 오답추가 (ContextMenu)",
+            "learning_purpose": "기존 채팅 메시지를 우클릭 → '오답 카드에 추가' / '개념 조회' 컨텍스트 메뉴. 학습 외 대화 중 즉시 카드화.",
+            "primitives": [
+              "interaction/contextmenu.py"
+            ],
+            "interaction": "make_message_menu('오답 추가', on_add_wrong) → tree.add_command → on_add_wrong(interaction, message)",
+            "tier": "extension"
+          },
+          {
+            "name": "재시작 후에도 살아있는 자가채점 버튼 (PersistentViews)",
+            "learning_purpose": "봇 재시작 후에도 이전에 보낸 O/X 자가채점 버튼이 유효. timeout=None + fixed custom_id로 Leitner 상태 업데이트 지속.",
+            "primitives": [
+              "interaction/persistviews.py"
+            ],
+            "interaction": "PersistentButtons(custom_id='self:correct'/'self:incorrect') → add_view() on_ready → 클릭 시 score() 연결",
+            "tier": "core"
+          },
+          {
+            "name": "슬래시 커맨드 학습 인터페이스 (Slash)",
+            "learning_purpose": "/quiz, /review, /status, /deck, /score 등 슬래시 커맨드로 세션 시작·상태 조회·deck 전환. choices/autocomplete로 deck namespace·ScoreMode 자동완성.",
+            "primitives": [
+              "slash/slash.py"
+            ],
+            "interaction": "@tree.command('quiz') + @quiz.autocomplete('deck') → session 시작 → defer 후 stream AI",
+            "tier": "core"
+          },
+          {
+            "name": "DM 채널 퀴즈 모드 (InstallCtx)",
+            "learning_purpose": "서버 없이 DM에서도 /quiz 가능(user-install). 이동 중 학습·단일 봇 토큰으로 여러 컨텍스트 수용.",
+            "primitives": [
+              "slash/installctx.py"
+            ],
+            "interaction": "@allowed_installs(users=True) + @allowed_contexts(dms=True) → DM /quiz",
+            "tier": "extension"
+          },
+          {
+            "name": "과목별 학습 채널 자동 생성 (Channels)",
+            "learning_purpose": "deck namespace별 전용 채널 자동 생성(#컴활1급-퀴즈, #nlp-review 등). get_or_create()로 중복 방지.",
+            "primitives": [
+              "channels/channels.py"
+            ],
+            "interaction": "ch = await get_or_create(client, guild_id, f'{deck_ns}-quiz') → 세션 채널로 사용",
+            "tier": "extension"
+          },
+          {
+            "name": "카드·단원별 학습 스레드 (Threads)",
+            "learning_purpose": "단원(unit)별 또는 오답 카드별로 스레드 생성하여 해당 카드의 Q&A 격리. close_thread()로 세션 종료 시 아카이브.",
+            "primitives": [
+              "channels/threads.py"
+            ],
+            "interaction": "th = await thread_from_message(quiz_msg, f'card:{card_id}') → 스레드 내 채점 대화",
+            "tier": "core"
+          },
+          {
+            "name": "오답 노트 포럼 포스트 (Forum)",
+            "learning_purpose": "오답 카드를 forum channel에 태그(unit, area, subarea)별 포스트로 자동 아카이브. 추후 약점 단원 탐색 가능.",
+            "primitives": [
+              "channels/forum.py"
+            ],
+            "interaction": "await create_post(forum_ch, card_id, wrong_detail, tag_names=[unit, area])",
+            "tier": "extension"
+          },
+          {
+            "name": "다중 화자 Webhook 출력 (Webhook)",
+            "learning_purpose": "AI 피드백을 '채점봇', 개념 설명을 '개념봇' 등 다른 webhook 이름/아바타로 출력하여 피드백 출처 시각화.",
+            "primitives": [
+              "channels/webhook.py"
+            ],
+            "interaction": "hook = await get_webhook(ch, 'grader-bot') → hook.send(feedback, username='채점')",
+            "tier": "extension"
+          },
+          {
+            "name": "학습 파일 첨부 전송 (Files)",
+            "learning_purpose": "생성된 오답노트 PDF·CSV·텍스트 파일을 Discord에 전송. 민감파일 guard + 용량한도 자동 체크.",
+            "primitives": [
+              "media/files.py"
+            ],
+            "interaction": "ok, err = await send_file(ch, workdir, 'export_wrong.csv')",
+            "tier": "extension"
+          },
+          {
+            "name": "차트 이미지 첨부 전송 (ImageSend)",
+            "learning_purpose": "matplotlib로 렌더한 학습 곡선·박스분포 차트 PNG를 채널에 전송하거나 in-place 교체.",
+            "primitives": [
+              "media/imagesend.py"
+            ],
+            "interaction": "msg = await send_image(ch, buf, 'chart.png') → await replace_image(msg, new_buf)",
+            "tier": "extension"
+          },
+          {
+            "name": "음성 리스닝 (Voice)",
+            "learning_purpose": "범위 제외(PyNaCl+ffmpeg heavy). 음성 재생 기반 리스닝·발음 학습은 제약(나)에 해당.",
+            "primitives": [
+              "media/voice.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "core",
+            "notes": "제외사유: 제약(나) — voice(리스닝·발음, PyNaCl/ffmpeg heavy) 범위 제외"
+          },
+          {
+            "name": "사용자·채널 입력 게이팅 (Gating)",
+            "learning_purpose": "모든 입력 경로(on_message/슬래시/버튼)에 ALLOWED_USER_ID 검증 적용. 학습 봇의 1인 전용 원칙 구현.",
+            "primitives": [
+              "automation/gating.py"
+            ],
+            "interaction": "if not allowed_msg(msg, ALLOWED_USER_ID): return 을 모든 핸들러 첫 줄에 배치",
+            "tier": "core"
+          },
+          {
+            "name": "Discord 이벤트 기반 학습 트리거 (Events)",
+            "learning_purpose": "on_message로 자유형 답변 수신, on_raw_reaction_add로 리액션 채점, on_thread_create로 스레드 세션 감지. 이벤트 카탈로그에서 학습봇에 필요한 패턴만 선별.",
+            "primitives": [
+              "automation/events.py"
+            ],
+            "interaction": "@client.event on_message → 답변 파싱 → score() / on_raw_poll_vote_add → exact 채점",
+            "tier": "core"
+          },
+          {
+            "name": "일일 복습 스케줄러 (Scheduler)",
+            "learning_purpose": "매일 HH:MM에 due 카드 큐 빌드 + 세션 시작 알림. every(N, job)로 세션 중 진행률 주기 업데이트.",
+            "primitives": [
+              "automation/scheduler.py"
+            ],
+            "interaction": "daily('09:00', send_due_reminder) → due 카드 count 멘션 / every(3600, push_stats)",
+            "tier": "core"
+          },
+          {
+            "name": "학습 조건 감시 알림 (Watcher)",
+            "learning_purpose": "due 카드 수가 임계치 초과·mastery_rate 하락·미완료 복습 등 조건 발생 시 1회 엣지 트리거 멘션 알림.",
+            "primitives": [
+              "automation/watcher.py"
+            ],
+            "interaction": "Watcher(ch, user_id, check=lambda: len(due_cards)>10, label='복습폭탄').start()",
+            "tier": "core"
+          },
+          {
+            "name": "학습 루프 생존 감지 (Heartbeat)",
+            "learning_purpose": "AI 채점 루프·세션 스크립트가 죽으면 멘션 알림. 긴 driver 루프·AI 스트리밍 세션의 무음 소멸 방지.",
+            "primitives": [
+              "automation/heartbeat.py"
+            ],
+            "interaction": "hb = Heartbeat(ch, user_id, timeout=120).start() → 채점루프에서 hb.beat() 주기 호출",
+            "tier": "core"
+          },
+          {
+            "name": "세션 요약 다이제스트 (Digest)",
+            "learning_purpose": "세션 중 발생한 오답·승급·졸업 이벤트를 모아 주기적(또는 세션 종료 시 flush)으로 요약 카드 발송. 채팅 스팸 방지.",
+            "primitives": [
+              "automation/digest.py"
+            ],
+            "interaction": "d = Digest(ch, '세션 요약', interval=3600) → d.add(f'{card_id} 오답') → await d.flush()",
+            "tier": "core"
+          },
+          {
+            "name": "생성 결과 파일 자동 전송 (FileDrop)",
+            "learning_purpose": "generate.py가 content/ 폴더에 새 deck JSON을 생성하면 자동 감지하여 Discord에 전송(덱 업데이트 알림).",
+            "primitives": [
+              "automation/filedrop.py"
+            ],
+            "interaction": "FileDrop(ch, './content/', interval=10).start() → 새 deck 파일 감지 → 알림 전송",
+            "tier": "extension"
+          },
+          {
+            "name": "학습 지표 실시간 대시보드 (MetricPush)",
+            "learning_purpose": "cold_correct률·due 카드수·box 분포를 push()로 공급하여 단일 대시보드 카드에 집계 표시(getDashboardData 연결).",
+            "primitives": [
+              "automation/metricpush.py"
+            ],
+            "interaction": "dash = MetricDashboard(ch, '학습통계').start() → dash.push('due', n_due) → dash.push('rate', rate)",
+            "tier": "core"
+          },
+          {
+            "name": "Leitner 진도 영속화 (Store)",
+            "learning_purpose": "CardProgress·ProgressStore를 JSON 파일에 원자적 저장(봇 재시작 후 복구). HTML 엔진규격 localStorage의 Python 포트 역할. 엔진규격 §4의 핵심 포팅 대상.",
+            "primitives": [
+              "automation/store.py"
+            ],
+            "interaction": "store = Store('state.json') → store.set(card_id, card_progress_dict) → store.save()",
+            "tier": "core"
+          },
+          {
+            "name": "장기 AI 채점 루프 드라이버 (Driver)",
+            "learning_purpose": "대량 카드 AI 채점·생성 루프를 세션 독립 프로세스로 실행. 크래시 후 resume, 진행 상태 JSON 영속화, webhook 마일스톤 핑. '_invoke' 어댑터 패턴의 실행 엔진.",
+            "primitives": [
+              "automation/driver.py"
+            ],
+            "interaction": "Driver('ai_gen.json', webhook=URL).run(card_ids, attempt=call_claude_api)",
+            "tier": "core"
+          },
+          {
+            "name": "채점 업데이트 코알레싱 (RateLimit)",
+            "learning_purpose": "고빈도 채점 결과가 동시에 도착해도 Discord 편집을 초당 1회로 제한. LiveCard·LiveTable 내부 메커니즘의 독립 추출 버전.",
+            "primitives": [
+              "automation/ratelimit.py"
+            ],
+            "interaction": "Coalescer(1.0, do_edit).start() → touch() 매 채점마다 → 실제 편집은 1초에 1회",
+            "tier": "core"
+          },
+          {
+            "name": "봇 상태 표시 (Presence)",
+            "learning_purpose": "세션 중 '학습 중', 대기 중 '대기', 에러 시 'dnd' 등 봇 상태를 학습 상태와 연동. 학습자가 봇 가용 여부 즉시 파악.",
+            "primitives": [
+              "meta/presence.py"
+            ],
+            "interaction": "await set_activity(client, '퀴즈 세션 중', kind='playing') → 세션 종료 시 idle",
+            "tier": "extension"
+          },
+          {
+            "name": "DM 프라이빗 피드백 채널 (DM)",
+            "learning_purpose": "오답 상세·AI 개인 피드백을 DM으로 전송(서버 공개 채널 노이즈 분리). DM으로 자유형 답변 수신도 가능.",
+            "primitives": [
+              "meta/dm.py"
+            ],
+            "interaction": "await dm_user(client, user_id, ai_feedback_text) → 또는 DM on_message 핸들러",
+            "tier": "extension"
+          },
+          {
+            "name": "봇 권한 초대 URL 생성 (BotInvite)",
+            "learning_purpose": "학습봇 배포 시 필요 권한(Threads, Webhooks, Attach Files, Reactions 등) 포함 초대 URL 자동 생성.",
+            "primitives": [
+              "meta/botinvite.py"
+            ],
+            "interaction": "print(invite_url(CLIENT_ID)) → URL로 봇 재초대",
+            "tier": "extension"
+          },
+          {
+            "name": "인텐트·권한 사전 검증 (Checklist)",
+            "learning_purpose": "on_ready 시 message_content 인텐트·Attach Files·Add Reactions 등 필수 권한 검증. 배포 후 조용한 실패 방지.",
+            "primitives": [
+              "meta/checklist.py"
+            ],
+            "interaction": "missing = check_permissions(channel, client, ['send_messages','attach_files']) → 경고",
+            "tier": "extension"
+          },
+          {
+            "name": "서버 모더레이션 (Moderation)",
+            "learning_purpose": "범위 제외(community/ 비주류). kick/ban/timeout/purge는 학습 핵심 기능 아님.",
+            "primitives": [
+              "community/moderation.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: 학습 핵심 밖, community 비주류. 학습봇은 단일 사용자 전용이므로 모더레이션 불필요."
+          },
+          {
+            "name": "AutoMod 키워드 필터 (AutoMod)",
+            "learning_purpose": "범위 제외(niche/community). 학습 맥락 무관.",
+            "primitives": [
+              "community/automod.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: niche, community 비주류. 학습봇 무관."
+          },
+          {
+            "name": "감사 로그 조회 (Audit)",
+            "learning_purpose": "범위 제외(community 비주류). 학습 이벤트 감사보다 Store.py가 적합.",
+            "primitives": [
+              "community/audit.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: community 비주류. 학습봇 이벤트 로그는 automation/store.py + automation/driver.py.log로 충분."
+          },
+          {
+            "name": "역할 부여 (Roles)",
+            "learning_purpose": "범위 제외(게이미피케이션). 학습 달성 시 역할 부여는 제약(나) 게이미피케이션.",
+            "primitives": [
+              "community/roles.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: 제약(나) 게이미피케이션(roles) 범위 제외."
+          },
+          {
+            "name": "채널 권한 오버라이트 (Permissions)",
+            "learning_purpose": "학습 채널을 ALLOWED_USER_ID 전용으로 잠금. 다인 서버에서 학습 채널 프라이버시 보장.",
+            "primitives": [
+              "community/permissions.py"
+            ],
+            "interaction": "await set_overwrite(quiz_ch, everyone_role, view_channel=False) → 봇+학습자만 접근",
+            "tier": "extension"
+          },
+          {
+            "name": "서버 초대 관리 (Invites)",
+            "learning_purpose": "범위 제외(community 비주류). 학습봇 단일 사용자 전용으로 초대 관리 불필요.",
+            "primitives": [
+              "community/invites.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: community 비주류. 단일 사용자 봇에서 invite 관리 학습 기능 없음."
+          },
+          {
+            "name": "학습 이벤트 일정 등록 (ScheduledEvents)",
+            "learning_purpose": "시험일·복습 세션 일정을 Discord 서버 이벤트로 등록. 알림 연동.",
+            "primitives": [
+              "community/scheduledevents.py"
+            ],
+            "interaction": "await create_external(guild, '컴활 모의시험', start, end, location='Discord') → 서버 이벤트 알림",
+            "tier": "extension",
+            "notes": "non-mainstream 레이블이나 학습 일정 관리 맥락에서 소비 과목이 선택 가능."
+          },
+          {
+            "name": "과목별 채널 카테고리 구성 (Categories)",
+            "learning_purpose": "여러 deck namespace를 카테고리(#필기, #실기 등)로 구조화. get_or_create_category + move_to로 채널 자동 정리.",
+            "primitives": [
+              "community/categories.py"
+            ],
+            "interaction": "cat = await get_or_create_category(guild, '필기') → await move_to(quiz_ch, cat)",
+            "tier": "extension"
+          },
+          {
+            "name": "스티커 전송 (Stickers)",
+            "learning_purpose": "범위 제외(게이미피케이션). 정답 시 스티커 전송은 제약(나) 게이미피케이션.",
+            "primitives": [
+              "community/stickers.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: 제약(나) 게이미피케이션(stickers) 범위 제외."
+          },
+          {
+            "name": "커스텀 이모지 채점 반응 (Emoji)",
+            "learning_purpose": "길드 커스텀 이모지(⭕️_correct 등)를 reactions.wait_choice()의 채점 리액션으로 사용. add_emoji()로 학습봇 전용 채점 이모지 생성.",
+            "primitives": [
+              "community/emoji.py"
+            ],
+            "interaction": "e = find_emoji(guild, 'correct_check') → await add(msg, str(e)) → wait_choice 판정",
+            "tier": "extension",
+            "notes": "non-mainstream이나 reactions.py와 결합 시 채점 이모지 커스터마이징 가능. 게이미피케이션 아님(채점 도구 용도)."
+          },
+          {
+            "name": "사운드보드 (Soundboard)",
+            "learning_purpose": "범위 제외(voice 종속 + niche). 음성 재생 없이는 무의미.",
+            "primitives": [
+              "community/soundboard.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: niche + voice 종속. 제약(나) 범위 제외."
+          },
+          {
+            "name": "프리미엄 구독 버튼 (Monetization)",
+            "learning_purpose": "범위 제외(niche). 학습봇 단일 사용자 전용이므로 monetization 불필요.",
+            "primitives": [
+              "community/monetization.py"
+            ],
+            "interaction": "해당없음(범위 제외)",
+            "tier": "extension",
+            "notes": "제외사유: niche, 단일 사용자 봇 무관."
+          }
+        ],
+        "coverage_note": "census — harness/ 전수 58파일 100% 개방·확인. output(9) + live(5) + interaction(8) + slash(2) + channels(4) + media(3) + automation(11) + meta(4) + community(12) = 58. 누락 0. 범위제외 명시: voice.py(PyNaCl/ffmpeg), soundboard.py(voice종속+niche), stickers.py(게이미피케이션), roles.py(게이미피케이션), monetization.py(niche), moderation/automod/audit/invites(community비주류·학습무관). 학습 능력 후보로는 전부 열거했으며 tier 구분과 notes로 제외사유 표기."
+      },
+      {
+        "lens": "learning-science",
+        "capabilities": [
+          {
+            "name": "Retrieval-Practice Engine (Deterministic)",
+            "learning_purpose": "Core retrieval practice: forcing active recall from memory rather than passive re-reading. The generation effect compounds with spaced repetition — the act of retrieving, not just reviewing, drives long-term retention. Binary correct/incorrect verdict with no partial credit enforces full retrieval, not approximation.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py",
+              "interaction/form.py",
+              "interaction/buttons.py",
+              "interaction/confirm.py",
+              "automation/store.py"
+            ],
+            "interaction": "Bot posts front-only card (output/cards.py titled_card). User types answer via modal (interaction/form.py ask_form). Bot scores deterministically (exact/keyword/cloze/self engine — Python port of 엔진규격 §3), posts back card with verdict + correct answer reveal. Leitner state written atomically via store.py.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.1 defines 4 scoring modes all binary (correct/incorrect), partial credit explicitly excluded. [fact-cited] Generation effect requires answer production before reveal — form.py modal enforces this: answer collected before bot posts back the correct answer. [inference] cards.py titled_card with only front text implements the 'question-only' first screen required by retrieval practice; back is shown only after answer submission."
+          },
+          {
+            "name": "Spaced Repetition Scheduler (Leitner + Watcher Alert)",
+            "learning_purpose": "Spaced repetition: review intervals expand as mastery grows (box1→1d, box2→3d, box3→7d). Prevents massed practice. Due-first queue ensures overdue cards are served before new cards, maintaining the SRS contract. Watcher alert surfaces the moment due cards exist, preventing drift.",
+            "primitives": [
+              "automation/store.py",
+              "automation/scheduler.py",
+              "automation/watcher.py",
+              "output/mention.py"
+            ],
+            "interaction": "store.py holds CardProgress (box, due_at, cold_attempts, graduated). scheduler.py daily() checks at configured time (e.g. 09:00) whether any cards are due (isDue = now >= due_at). watcher.py edge-triggers on due-count > 0 and fires mention.py ping to user. User then initiates session slash command.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §0 BOX_INTERVALS_DAYS {1:1, 2:3, 3:7} and §1.3 cold-correct-only promotion rule. [fact-cited] watcher.py edge=True prevents repeat spam (fires once on rising edge, re-arms only when condition drops to false). [fact-cited] scheduler.py daily(hhmm, job) runs a callback at fixed local time. [inference] Combining watcher + scheduler gives 'poll on each scheduler tick, alert only when new due cards appear' — this is the minimum-push-notification SRS surface."
+          },
+          {
+            "name": "Interleaving Queue (Unit Shuffle)",
+            "learning_purpose": "Interleaving: mixing cards from different units/topics within a session. Research (Rohrer & Taylor 2007; Kornell & Bjork 2008) shows blocked practice overestimates learning; interleaved practice produces superior transfer. The Leitner due-first queue naturally interleaves if cards from multiple units have the same due date — but active shuffling across unit boundaries must be enforced during buildQueue.",
+            "primitives": [
+              "automation/store.py",
+              "slash/slash.py",
+              "interaction/selects.py"
+            ],
+            "interaction": "User invokes /session with optional --interleave flag (slash/slash.py autocomplete lists unit names). Bot's buildQueue Python port reads all due+new cards from store.py, then shuffles across units (weight-descending within unit group, then round-robin across units) rather than serving all unit-A cards then unit-B. selects.py can offer a unit-filter menu if the user wants to constrain scope.",
+            "tier": "core",
+            "notes": "[inference] The 엔진규격 §2.2 queue priority is due-first then weight DESC then card_id — this does NOT interleave units explicitly. The interleaving capability is an extension of buildQueue that must be layered on top: after the due-first selection, the ordered list is re-interleaved by unit round-robin. [assumption] 엔진규격 does not forbid this reordering within the due group; it only mandates due > new and weight priority within each group. [learning-science] Interleaving is one of the highest-evidence desirable difficulties."
+          },
+          {
+            "name": "Metacognition / Confidence Rating (Pre-Answer Buttons)",
+            "learning_purpose": "Metacognitive monitoring: learner rates subjective confidence (e.g. 1-Easy/2-Medium/3-Hard) BEFORE seeing the answer. This is a standalone learning intervention — the act of predicting one's performance drives deeper encoding (Koriat 2012). Confidence-accuracy calibration data (stored per card) identifies overconfident weaknesses. This is the capability most likely to be MISSED by a pure category-census approach.",
+            "primitives": [
+              "interaction/buttons.py",
+              "output/cards.py",
+              "automation/store.py",
+              "live/livecard.py"
+            ],
+            "interaction": "Bot posts front-only card. Before 'Submit Answer' button, a separate ActionRow shows confidence buttons: [Easy] [Medium] [Hard] [Skip]. User clicks confidence FIRST (interaction/buttons.py button_card callback). Bot stores confidence level in store.py alongside the attempt. Then the answer modal opens. Post-scoring, bot shows verdict + confidence-accuracy comparison in livecard.py finalize step.",
+            "tier": "core",
+            "notes": "[learning-science] Confidence rating before answer exposure is distinct from self-grading (grade_mode=self). Self-grading replaces objective scoring; confidence rating precedes it. Both coexist. [inference] buttons.py supports up to 5 per ActionRow — Easy/Medium/Hard/Skip fits cleanly. [fact-cited] 엔진규격 §3.1 grade_mode=self allows user's own verdict; confidence rating is a separate metacognitive layer that wraps any scoring mode. [assumption] store.py can carry a 'confidence' field alongside CardProgress without modifying the engine schema — it is a UI-layer annotation."
+          },
+          {
+            "name": "Immediate Corrective Feedback Display",
+            "learning_purpose": "Feedback timing: immediate feedback (< 1 s after answer) maximally accelerates learning for factual/procedural knowledge (Kulik & Kulik 1988; Butler & Roediger 2008). Delayed feedback increases for concept-level material but is harmful for rote/procedural items. The harness enables real-time card editing so the verdict + correct-answer card appears in the same Discord message, avoiding the scroll/search tax of a new message.",
+            "primitives": [
+              "live/livecard.py",
+              "output/cards.py",
+              "output/embeds.py",
+              "interaction/buttons.py"
+            ],
+            "interaction": "After scoring, bot calls livecard.py finalize() (or directly edits the question message via discord.Message.edit) to replace the front-only card with a feedback card showing: verdict (correct/incorrect), normalized user answer, matched/missed keywords (from ScoreResult), and the canonical correct answer. Color coding: COLOR_DONE (green) for correct, COLOR_WARN (yellow) for incorrect.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.5 ScoreResult.matched/missed/highlightMissed/normalizedUser are exactly the data needed for immediate feedback display. [fact-cited] livecard.py set_text() + finalize() edits in place (coalesced, ≤1 s). [inference] In-place edit (same message) vs. new message: same message keeps context; user sees question and feedback together, which is cognitively superior to scrolling to a new post."
+          },
+          {
+            "name": "Session Progress Bar (Desirable Difficulty Visibility)",
+            "learning_purpose": "Metacognitive awareness of session position reduces anxiety and maintains effort calibration. Knowing '7/20 cards remaining' prevents premature stopping and helps learners regulate their pace. The progress bar is also a desirable-difficulty signal: tracking error rate in real time makes the difficulty visible and actionable, rather than invisible.",
+            "primitives": [
+              "live/progressbar.py",
+              "live/livecard.py"
+            ],
+            "interaction": "Session start: ProgressBar(channel, title='Session: {deck_name}') posts once. After each card verdict: pb.update(current=cards_done, total=session_total, note=f'correct: {n_correct}/{cards_done}'). pb runs its own coalesced 1-s edit loop. livecard.py can run in parallel for a separate 'accuracy rate' metric card.",
+            "tier": "core",
+            "notes": "[fact-cited] progressbar.py update(current, total, note) exactly supports this pattern. [inference] Two live cards can coexist in the same channel: one for progress bar, one for per-card feedback. Rate-limit headroom at ≤2 edits/s total is safe within Discord's 5 edits/5s per-channel limit. [learning-science] Progress visibility is a metacognitive support; the note field showing error rate adds self-monitoring of accuracy."
+          },
+          {
+            "name": "Distributed Practice Alert + Daily Session Gate",
+            "learning_purpose": "Distributed practice effect: same total study time spread across days >> massed in one session. The scheduler enforces a daily session boundary and the watcher ensures the learner is prompted when due cards accumulate. This is the harness-level implementation of the spacing principle at the session level (as opposed to the card level handled by Leitner).",
+            "primitives": [
+              "automation/scheduler.py",
+              "automation/watcher.py",
+              "output/mention.py",
+              "automation/store.py"
+            ],
+            "interaction": "scheduler.py daily('09:00', check_due) runs every morning. check_due reads store.py for n_due cards. watcher.py (edge=True) fires mention.py ping when n_due > 0 for the first time that day. store.py records last_session_date; if today == last_session_date and n_studied >= daily_limit, bot replies 'today's session complete' to any /study command.",
+            "tier": "core",
+            "notes": "[fact-cited] scheduler.py daily(hhmm, job) and watcher.py edge-trigger are purpose-built for this. [inference] The daily_limit cap requires a session counter in store.py (not in 엔진규격 schema — UI layer addition). [learning-science] Session gating (daily limit) is a deliberate constraint that forces distributed practice; without it learners binge and lose the spacing benefit."
+          },
+          {
+            "name": "Cloze / Keyword Mode Delivery (Desirable Difficulty Grading)",
+            "learning_purpose": "Desirable difficulty: cloze (fill-in-blank) and keyword modes are harder than MCQ or exact-match single-answer because they require generative recall without scaffolding. This difficulty is desirable — it increases encoding strength at the cost of apparent performance. The bot must present these modes distinctly: cloze shows blanked text with {{N}} markers; keyword shows the question with no answer hint.",
+            "primitives": [
+              "output/cards.py",
+              "interaction/form.py",
+              "output/embeds.py"
+            ],
+            "interaction": "For grade_mode=cloze: cards.py renders the front text with {{0}}, {{1}} markers visible. form.py ask_form generates one TextInput per blank (field key = '0', '1', ...) matching blanks count from answer_spec.blanks. For grade_mode=keyword: single TextInput modal, no hints. Returned dict maps to string[] for cloze scoring engine. Color-coded missed blanks shown in feedback (highlightMissed = blank index strings).",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.2 cloze userAnswer = string[] (blank count must match). form.py generates exactly N TextInput fields. [fact-cited] 엔진규격 §3.5 highlightMissed for cloze = '0','1',... blank index strings — directly usable in feedback card rendering. [learning-science] Cloze > MCQ for retention (McDaniel & Fisher 1991); keyword (all-or-nothing) > partial credit for encoding depth."
+          },
+          {
+            "name": "Sequence / Recall-Seq Mode (Ordered Retrieval)",
+            "learning_purpose": "Ordered retrieval practice: for procedural knowledge (step sequences, algorithms), recalling steps in the correct ORDER is itself the learning target. This is distinct from keyword mode (which ignores order). The sequence mode tests both recall of individual steps AND their temporal/causal structure. High desirable difficulty.",
+            "primitives": [
+              "interaction/form.py",
+              "output/cards.py",
+              "interaction/paginator.py"
+            ],
+            "interaction": "For type=recall_seq (grade_mode=exact with sequence[]): form.py generates N TextInput fields (one per expected step, field keys '0'..'N-1'). Bot scores via exact match element-by-element against answer_spec.sequence[]. If incorrect, paginator.py can display the correct sequence step-by-step (prev/next) as a teaching moment post-feedback.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.3 recall_seq exact scoring: user step array vs sequence[] element-wise with normalization, length mismatch = incorrect. [inference] paginator.py post-feedback step review is a dual-coding enhancement: user re-traces the correct sequence interactively after error. [learning-science] Procedural sequence learning requires ordered retrieval; presenting the correct sequence as navigable steps after error supports error correction without re-reading."
+          },
+          {
+            "name": "Dual Coding: Visual Summary Chart",
+            "learning_purpose": "Dual coding theory (Paivio 1971): combining verbal (text card) with visual (chart/image) representations uses two distinct memory channels, strengthening encoding. For quantitative progress data (box distribution, error rate by unit), a chart supplements the text dashboard. The image is not decorative — it is a second encoding channel.",
+            "primitives": [
+              "live/livechart.py",
+              "media/imagesend.py",
+              "automation/metricpush.py"
+            ],
+            "interaction": "End-of-session: Python generates a matplotlib bar chart via livechart.py (box distribution: box1/box2/box3 counts by unit) as PNG BytesIO. imagesend.py send_image posts it. For ongoing sessions, livechart.py LiveChart.push(error_rate) plots rolling accuracy trend live. metricpush.py MetricDashboard provides the complementary text metric card alongside the chart.",
+            "tier": "extension",
+            "notes": "[fact-cited] livechart.py depends on matplotlib (optional dep, graceful fallback). [fact-cited] imagesend.py send_image accepts BytesIO — compatible with matplotlib fig.savefig(buf). [inference] The dual-coding benefit requires the chart to encode the same information as the text dashboard in visual form, not just cosmetic. Box distribution bar chart is the minimal meaningful visual that complements the text completion stats. [learning-science] Dual coding is most effective when verbal and visual channels carry complementary (not identical) information."
+          },
+          {
+            "name": "Session Digest / Spaced Review Summary",
+            "learning_purpose": "Spaced retrieval requires knowing WHAT to review next, not just when. A session-end digest (cards studied, breakdown by verdict, next-due dates, weakest units) supports metacognitive planning and distributed practice — the learner can decide whether to D-day-trigger or follow normal SRS. The digest is also a knowledge-of-results signal, which is a distinct feedback type from per-card immediate feedback.",
+            "primitives": [
+              "automation/digest.py",
+              "output/cards.py",
+              "live/livetable.py",
+              "automation/store.py"
+            ],
+            "interaction": "digest.py Digest accumulates per-card result lines during a session (add('card_id: correct, box 1->2') etc.). On session end (all cards done or /end command): flush() posts summary card. livetable.py LiveTable renders a per-unit error rate table (columns: unit, n_cards, n_correct, wrong_rate, next_due). store.py provides all data via ProgressStore.",
+            "tier": "extension",
+            "notes": "[fact-cited] digest.py Digest.add() + flush() is designed for exactly this roll-up pattern. [fact-cited] livetable.py set_row(key, **cols) supports per-unit rows. [inference] The weakness-by-unit table (wrong_rate DESC) directly corresponds to 엔진규격 §7.2 WeaknessEntry — getDashboardData ported to Python generates this. [learning-science] Knowledge of results at session level is a higher-order feedback loop than per-card feedback — it drives scheduling decisions, not individual card adjustments."
+          },
+          {
+            "name": "Warm-Up / Requeue (Session-Internal Corrective Loop)",
+            "learning_purpose": "Error correction within a session: cards answered incorrectly (cold incorrect) are re-queued within the same session (warm attempts). This is the 엔진규격's designed-in mechanism for immediate error correction WITHOUT changing the Leitner box (warm attempts don't affect box state). Learning science: corrective retrieval practice immediately after error is more effective than waiting for the next SRS interval — it prevents the error from consolidating.",
+            "primitives": [
+              "interaction/buttons.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "After cold-incorrect verdict: bot appends card_id back to session queue (in-memory list). Requeue button on feedback card ([Try Again Later] button via buttons.py) lets user confirm requeue. When card appears again (warm attempt), scoring proceeds identically but Leitner state is NOT updated (warm rule from 엔진규격 §1.3). Bot labels the card '[Requeue]' visually to distinguish warm from cold attempts.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §1.3: warm correct/incorrect → no box/due change. §1.2: warm = same session, same card_id appearing after first seen. [fact-cited] The requeue mechanism is the designed corrective device: 'warm requeue가 교정장치다 (v4 §3)'. [inference] The [Try Again Later] button (buttons.py) makes the requeue explicit rather than automatic — learner agency in correction is itself beneficial (metacognitive regulation). [learning-science] Immediate error correction retrieval is more effective than delayed (Kornell & Bjork 2008)."
+          },
+          {
+            "name": "D-Day Mode (Total Recall Drill)",
+            "learning_purpose": "Massed review of all cards regardless of Leitner box — surfaces even box3 graduated cards for full rehearsal. Appropriate immediately before a high-stakes exam. The interval compression (due_at compressed to DDAY_COMPRESS_DAYS) during D-day mode prevents newly encountered cards from disappearing into long intervals. Desirable difficulty: weak-box-first ordering (box ASC → weight DESC) prioritizes known weak cards.",
+            "primitives": [
+              "slash/slash.py",
+              "automation/store.py",
+              "output/cards.py",
+              "output/mention.py"
+            ],
+            "interaction": "User runs /dday slash command (slash/slash.py). Bot sets dDayMode=true in session QueueOptions. buildQueue Python port ignores due_at, pulls all cards ordered box ASC → weight DESC → card_id ASC. Interval compression applied on cold-correct. mention.py ping fires at session end with count of cards still in box1 (remaining weak cards). store.py persists compressed due_at values.",
+            "tier": "extension",
+            "notes": "[fact-cited] 엔진규격 §2.4 D-day mode: due ignored, box ASC sort, DDAY_COMPRESS_DAYS interval cap on correct, normal incorrect rule unchanged. [inference] slash/slash.py /dday with app_commands.describe enables a clean UX entry point. [learning-science] Total recall drill before exam is a spacing + testing effect application; the desirability of the difficulty is highest here because the exam is imminent and consolidation time is short."
+          },
+          {
+            "name": "Persistent Flash-Card Thread (Bot-Restart-Proof Study)",
+            "learning_purpose": "Continuity of study environment: if the bot restarts mid-session, persistent views (buttons, requeue controls) remain functional on previously sent messages. This removes a failure mode that would break the SRS contract — a restart should not lose session context or strand the learner mid-card with dead buttons.",
+            "primitives": [
+              "interaction/persistviews.py",
+              "automation/store.py",
+              "channels/threads.py"
+            ],
+            "interaction": "Study session runs in a dedicated thread (channels/threads.py thread_in_channel). Cards are posted as messages with PersistentButtons (timeout=None, fixed custom_id). Bot registers the view at startup (client.add_view). If bot restarts, user can still click [Submit Answer] / [Skip] / [Try Again Later] on old messages. store.py holds session state to resume the queue after restart.",
+            "tier": "extension",
+            "notes": "[fact-cited] persistviews.py requires timeout=None and stable custom_id — the interaction/persistviews.py file shows exactly this pattern. [fact-cited] channels/threads.py thread_in_channel creates an isolated study thread per session, preventing pollution of the main channel. [inference] Session queue state must be persisted in store.py (not in memory) for restart-resilience — this is an extension of the core SRS persistence design. [assumption] custom_id must encode card_id + session_id to disambiguate concurrent sessions; this requires a naming convention not specified in the harness."
+          },
+          {
+            "name": "AI Elaboration Feedback (Keyword/Self-Mode AI Pillar)",
+            "learning_purpose": "Elaborative interrogation: after a correct keyword answer, AI explains WHY the answer is correct and HOW it connects to related concepts. After an incorrect attempt, AI pinpoints the specific misconception. This targets elaboration (one of the highest-effect study strategies per Dunlosky et al. 2013) which keyword/self modes otherwise leave unsupported — the engine scores but does not explain.",
+            "primitives": [
+              "output/typing_indicator.py",
+              "output/cards.py",
+              "output/chunk.py",
+              "automation/driver.py"
+            ],
+            "interaction": "After scoring (correct or incorrect), bot checks if grade_mode in (keyword, self) or if incorrect on any mode. If so: typing_indicator.py async with channel.typing() while calling subprocess: claude -p stream-json with prompt='Explain why [correct_answer] is correct for [question]. User answered: [user_answer]. Missed: [missed]'. Response streams via driver.py or direct stdout capture. chunk.py splits long explanation into ≤1990-char messages. Cards.py titled_card presents explanation.",
+            "tier": "extension",
+            "notes": "[fact-cited] 엔진규격 mentions '②AI 학습(claude -p stream-json _invoke 어댑터 패턴 복제, 구독 토큰)' as the second pillar alongside deterministic scoring. [fact-cited] output/typing_indicator.py is specifically designed for 'while a response is being generated' — exact use case. [fact-cited] chunk.py handles 2000-char Discord limit for long AI explanations. [inference] driver.py's crash-tolerant attempt() wrapper is suitable for AI calls that may timeout or fail. [learning-science] Elaboration (explaining why) is more effective than re-reading and produces stronger retention than correct-only confirmation."
+          },
+          {
+            "name": "Pinned Mastery Reference Card (Long-Term Memory Anchor)",
+            "learning_purpose": "Encoding specificity and retrieval cue: a pinned message showing currently graduated (box3) cards acts as a long-term memory anchor — the learner can glance at what they have 'mastered'. More importantly, the pin creates a persistent retrieval cue in the channel: each time the user scrolls past the pinned card, they passively rehearse the graduated item list. This is incidental spaced retrieval.",
+            "primitives": [
+              "output/pins.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "When a card reaches graduated=true (cold-correct at box3): bot builds a 'Mastered' card (cards.py titled_card, COLOR_DONE) listing the card's front text. pins.py pin() pins it to the study channel. When a graduated card later cold-incorrect-regresses (box→BOX_MIN, graduated=false): pins.py unpin() removes it. store.py ProgressStore.graduated field drives this.",
+            "tier": "extension",
+            "notes": "[fact-cited] 엔진규격 §1.1: graduated=true only on cold-correct at BOX_MAX; regression to false on cold-incorrect. [fact-cited] pins.py pin()/unpin() directly implement this. [inference] The pin count is capped by Discord's channel pin limit (50). For large decks, this capability should be gated to graduation milestones (e.g. every 5 new graduations) rather than per-card. [learning-science] Incidental rehearsal via environment cues is a weak but cost-free retrieval practice supplement."
+          },
+          {
+            "name": "Skip + Confidence Skip Tracking (Desirable Difficulty Regulation)",
+            "learning_purpose": "Learner regulation of difficulty: skip allows deferral without penalty (no box change, no cold_correct), but counts as a cold_attempt — preserving denominator integrity for accuracy metrics. The metacognitive value: a learner who skips frequently on a unit signals overconfidence or unfamiliarity. Tracking skip rate per unit exposes avoidance behavior.",
+            "primitives": [
+              "interaction/buttons.py",
+              "automation/store.py",
+              "output/cards.py"
+            ],
+            "interaction": "Each card card shows [Submit Answer] and [Skip] buttons (buttons.py button_card). On [Skip] click: verdict=skip is written directly to store.py (no scoring engine call per 엔진규격 §3.2). cold_attempts += 1, cold_correct unchanged, box/due unchanged. End-of-session digest shows skip_rate per unit — high skip_rate units flagged as 'avoidance pattern'.",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.2: 'skip은 채점 입력이 아니다 — 호출측이 직접 verdict=skip을 Leitner/저장에 전달한다'. §1.3: cold skip → cold_attempts+1, no box/due change. [inference] Skip rate as an avoidance signal is a UI-layer metric computed from store.py data — not in 엔진규격 but derivable from cold_attempts vs cold_correct vs skip counts. [learning-science] Skip behavior is a metacognitive signal; making it visible to the learner (via digest) supports self-regulation."
+          },
+          {
+            "name": "Forum Post per Deck / Unit (Topic-Separated Study Threads)",
+            "learning_purpose": "Encoding context: different study contexts for different units reduce cross-unit interference (context-dependent memory). A dedicated forum post per deck/unit creates a distinct visual context for each topic's study session, leveraging context-dependent retrieval without requiring physical location changes.",
+            "primitives": [
+              "channels/forum.py",
+              "channels/threads.py",
+              "automation/store.py"
+            ],
+            "interaction": "When a new deck is activated (/deck switch), bot calls forum.py create_post(forum_channel, title=deck.title, content=deck.summary, tag_names=[unit_id]) to create a tagged forum post for that deck. Each session within the deck runs inside this thread (threads.py). store.py deckNamespace maps to the forum thread id for routing.",
+            "tier": "extension",
+            "notes": "[inference] Context-dependent memory benefit is modest in magnitude (Smith & Vela 2001) but zero-cost here since forum infrastructure already exists. [fact-cited] channels/forum.py create_post() applies available_tags — tag by unit_id enables filtering. [assumption] The forum channel must exist and bot must have Manage Threads permission. This is an optional structural enhancement; core SRS works in any channel."
+          },
+          {
+            "name": "DM Fallback Study (Private Retrieval Context)",
+            "learning_purpose": "Privacy and focus: some learners perform better in private (DM) contexts where social desirability pressure is absent. DM-based retrieval practice removes the anxiety of incorrect answers being visible in a server channel. Research on test anxiety shows private testing reduces performance-inhibiting anxiety without affecting encoding.",
+            "primitives": [
+              "meta/dm.py",
+              "output/cards.py",
+              "interaction/form.py"
+            ],
+            "interaction": "User runs /study --private slash command. Bot sends cards via dm_user() (meta/dm.py) to user's DM channel. form.py ask_form opens modal from a DM-originating button interaction. Feedback posted back to DM. store.py state is the same JSON file regardless of DM vs channel delivery — the storage layer is channel-agnostic.",
+            "tier": "extension",
+            "notes": "[fact-cited] meta/dm.py dm_user() sends to any user and receives replies via on_message with isinstance(message.channel, discord.DMChannel) check. [inference] DM delivery requires the bot to have already established a DM channel with the user (user must have DMs enabled from server members). [learning-science] Reducing evaluation apprehension in test-like conditions is a well-established variable in achievement motivation literature; DM mode is a minimal implementation."
+          }
+        ],
+        "coverage_note": "Census: all 45 non-voice, non-community harness files inspected (output/*, live/*, interaction/*, slash/*, channels/*, automation/*, meta/*). Voice (media/voice.py, PyNaCl/ffmpeg) and gamification (community/roles, stickers, emoji) excluded per task constraints. Gaps: (1) webhook.py (channels/webhook.py — webhook identity posting) has no direct learning-science application beyond DM fallback; not mapped. (2) contextmenu.py (right-click context menu) could serve 'flag this card for review' but is too niche for a core catalog entry — excluded. (3) logtail.py (live log tail) has no learning-science primary use; secondary use as debug view excluded. (4) heartbeat.py — bot liveness monitoring, no learning-science mapping. (5) filedrop.py — content import (deck files auto-detected and imported when dropped into watched folder) is a content-pipeline capability, not a learning capability per se — excluded as out of lens. Likely underrepresented area: the interleaving capability (#3) is an INFERENCE from the queue ordering contract — no harness primitive directly implements cross-unit shuffling; it requires custom Python in the bot's buildQueue port. The D-day mode (#13) similarly requires the full 엔진규격 §2.4 Python port, not a harness primitive alone."
+      },
+      {
+        "lens": "interaction-taxonomy",
+        "capabilities": [
+          {
+            "name": "Free-Recall Drill (자유회상 드릴)",
+            "learning_purpose": "인출 강도 최대화 — 단서 없이 답을 생성해야 하므로 재인보다 장기기억 고착 효과가 높음(테스트 효과). exact/keyword/recall_seq 채점 모드에 직결.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py",
+              "output/typing_indicator.py",
+              "output/reply.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 카드 앞면(prompt)을 card/embed로 송출 → 사용자가 채널 텍스트로 자유 응답 → on_message에서 수신 → score(exact|keyword|recall_seq) → 판정 + 피드백 카드 reply_to로 즉시 반환; Store에 CardProgress 저장",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.1 exact/keyword/recall_seq 모드 정의. [inference] on_message 수신은 harness에서 automation/events.py 패턴으로 처리 가능 — dm.py의 DM 채널 분기와 동일 구조. [fact-cited] output/reply.py reply_to()로 즉시 피드백 스레드 연결."
+          },
+          {
+            "name": "Recognition (재인 — 객관식 선택)",
+            "learning_purpose": "선택지 제시로 접근성을 낮추는 대신 변별 훈련. 간격반복 초기 박스나 어려운 카드의 워밍업에 적합. 엔진규격 self 모드 + 외부 옵션 렌더링 조합.",
+            "primitives": [
+              "interaction/selects.py",
+              "interaction/buttons.py",
+              "interaction/poll.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 카드 앞면 + 선택지 리스트를 pick_string(selects) 또는 button_card(buttons)로 송출 → 사용자가 드롭다운/버튼 클릭 → 콜백에서 정답 비교(exact) 또는 self 판정 → 즉시 피드백 카드로 편집; Store 저장",
+            "tier": "core",
+            "notes": "[fact-cited] interaction/selects.py pick_string 최대 25옵션, buttons.py 최대 5버튼/행. [inference] 선택지 4개 이하 → buttons(시각적), 5-25개 → selects(드롭다운)로 분기하는 것이 UX 최적. [fact-cited] interaction/poll.py도 선택 입력으로 쓸 수 있으나 vote는 즉각 점수화 API가 없어(on_raw_poll_vote_add 이벤트 필요) 즉시 피드백에 불리함 — poll은 비동기 의견수집에 적합, 채점용은 selects/buttons 우선."
+          },
+          {
+            "name": "Cloze Recall (빈칸 채우기 — 단서회상)",
+            "learning_purpose": "맥락 단서를 남겨 인출 단서를 제공하되 핵심 항목은 은닉 — 자유회상과 재인의 중간 난이도. 엔진규격 cloze 모드와 1:1 대응.",
+            "primitives": [
+              "interaction/form.py",
+              "output/cards.py",
+              "output/embeds.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 빈칸 마커({{0}}, {{1}}…) 포함 문장을 card로 송출 후 '답 입력' 버튼 → ask_form(form.py)으로 모달 팝업(각 빈칸 = TextInput 1개) → on_submit에서 blanks[] 배열 수집 → score(cloze) → 빈칸별 matched/missed 하이라이트 피드백 카드",
+            "tier": "core",
+            "notes": "[fact-cited] form.py ask_form: fields=[(key, label, kw)] 로 빈칸 수만큼 TextInput 생성, 최대 5필드(Discord 모달 제한). [fact-cited] 엔진규격 §3.1 cloze: blanks[] 배열 원소별 이진판정, 하나라도 불일치→incorrect. [inference] 빈칸 6개 이상 카드는 복수 모달 순차실행 또는 메시지 분할 텍스트 입력 fallback 필요 — v1에서는 빈칸 ≤5로 카드 제작 제약을 권고."
+          },
+          {
+            "name": "Sequence Recall (순서 회상 — 단계 재구성)",
+            "learning_purpose": "절차 지식의 순서 정합성 검증. 단순 키워드 포함이 아니라 '순서 포함 완전일치'를 요구하므로 procedural 학습에 특화. 엔진규격 recall_seq + exact 채점.",
+            "primitives": [
+              "interaction/form.py",
+              "output/cards.py",
+              "output/paginator.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 순서 재배열 과제를 card로 제시(단계 목록 섞어 표시) → ask_form으로 '1번 단계, 2번 단계…' 다중 TextInput 수집 → score(recall_seq: sequence 순서포함 완전일치) → 판정 + 정답 순서 피드백; paginator로 긴 절차 사전 학습 제공 가능",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.3 recall_seq: sequence[] 순서포함 원소단위 완전일치, 길이불일치→incorrect. [inference] 단계 수 ≤5이면 form 1회, >5이면 분할 또는 드래그 불가(Discord 텍스트 UI 한계)로 번호입력 방식 사용. [assumption] paginator로 절차 개념 먼저 제공하고 이후 form 채점 패턴이 학습 효과 높을 것."
+          },
+          {
+            "name": "Production / Essay Submission (산출 — 서술형 제출)",
+            "learning_purpose": "자기설명·서술 산출은 정교화 인출로 이해 깊이를 측정. self 모드로 채점: 정답 없이 학습자가 O/X 자가판정. 단답 외 긴 답안·풀이 과정 캡처에도 적합.",
+            "primitives": [
+              "interaction/form.py",
+              "media/files.py",
+              "output/cards.py",
+              "interaction/confirm.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 서술 과제 카드 송출 → ask_form으로 긴 TextInput 수집(paragraph style) 또는 files.py로 파일 첨부 수신 → 정답 공개 카드 → confirm(O/X 자가판정) → score(self) → Store 저장",
+            "tier": "core",
+            "notes": "[fact-cited] form.py TextInput은 style=paragraph 지원(긴 텍스트). [fact-cited] 엔진규격 §3.1 self: userAnswer=correct|incorrect 그대로 verdict 채택, 앱 정답 미보유. [inference] 파일 첨부(필기 사진 등)는 files.py Attach Files 권한 필요 — 파일 내용 채점은 범위 밖(self 판정으로 처리). [fact-cited] confirm.py Yes/No 버튼이 O/X 자가판정 UI와 정확히 매핑됨."
+          },
+          {
+            "name": "Self-Assessment / Confidence Rating (자신감 평정)",
+            "learning_purpose": "메타인지 훈련 — 응답 전후 자신감 수준을 수집해 calibration 데이터로 활용. 과자신감 카드 식별, 자기모니터링 능력 강화.",
+            "primitives": [
+              "interaction/selects.py",
+              "interaction/buttons.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "카드 앞면 송출 전 또는 채점 직후 '이 문제에 얼마나 자신 있나요?' 버튼(확실/보통/불안) → 선택 값을 Store에 별도 필드로 저장 → 피드백 카드에 자신감 vs 실제 정오 비교 표시",
+            "tier": "extension",
+            "notes": "[inference] 3-5단계 자신감 척도는 buttons.py(5버튼 이하) 또는 selects.py(더 많은 레이블)로 구현. [assumption] 자신감 필드는 CardProgress 확장 필드로 Store에 저장 — 엔진규격 CardProgress에는 없으므로 봇 레이어에서 추가 저장 필요. [inference] 자신감·정오 불일치(high-conf wrong) 카드를 Watcher로 탐지해 우선 재출제 큐 삽입 가능."
+          },
+          {
+            "name": "Immediate Keyword-Highlight Feedback (키워드 강조 즉시 피드백)",
+            "learning_purpose": "keyword 모드 오답 시 누락 키워드를 시각적으로 강조 — 정확히 어느 개념이 빠졌는지 즉각 인식시켜 수정적 인출 기회 제공. FeedbackPayload.highlightMissed 활용.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py",
+              "output/reply.py"
+            ],
+            "interaction": "score(keyword) → ScoreResult.missed[] 배열 → 피드백 카드에 ```누락: 키워드A, 키워드B``` 인라인 강조 + 정답 공개 → reply_to(원문제 메시지)로 스레드 연결",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.5 FeedbackPayload.highlightMissed: 누락 키워드 강조 항목 배열. [fact-cited] output/cards.py titled_card/container로 색상구분(COLOR_WARN=주의, COLOR_DONE=정답). [inference] Discord 마크다운 볼드(**키워드**)를 missed 목록에 적용하면 별도 이미지 없이 강조 효과 달성 — 이미지 렌더링 불필요."
+          },
+          {
+            "name": "Cloze Blank Highlight Feedback (빈칸 위치 강조 피드백)",
+            "learning_purpose": "cloze 오답 시 어느 빈칸이 틀렸는지 인덱스 단위로 알려줘 부분 성공 지점 인식 → 타겟 수정. 전체 오답으로 처리되어도 피드백은 세분화.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py"
+            ],
+            "interaction": "score(cloze) → ScoreResult.missed[] (0-based 인덱스 문자열 배열) → 피드백 카드에 '빈칸 0 틀림, 빈칸 2 틀림' 형태로 강조 표시 + 각 빈칸 정답 공개",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.5 cloze matched/missed: 빈칸 인덱스(0-based) 문자열화. [inference] Discord 카드에 빈칸별 ✓/✗ 표를 코드블록으로 렌더링하면 인덱스 매핑이 명확 — imagesend.py로 PNG 표 생성도 가능하나 overkill."
+          },
+          {
+            "name": "Scenario / Judgment Question (상황판단 — judge 카드)",
+            "learning_purpose": "맥락 내 의사결정 능력 측정. 단순 지식 재인이 아닌 응용 판단. 카드 type=judge, grade_mode=exact(O/X 선택) 또는 self 조합.",
+            "primitives": [
+              "interaction/confirm.py",
+              "interaction/buttons.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 시나리오 카드(judge) front.scenario 텍스트 송출 → confirm(O/X) 또는 button_card(선택지 버튼 2-3개) → 선택 결과 score(exact) → 판정 + 해설(back.detail) 피드백 카드",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §5.3 CardDef type 'judge', grade_mode='exact'(또는 self). [fact-cited] confirm.py: Yes/No 버튼 bool 반환 → correct/incorrect 매핑 직접 가능. [inference] 선택지 2개(O/X)는 confirm, 3-4개 선택지는 buttons가 더 명확."
+          },
+          {
+            "name": "Matching (매칭 — 쌍 연결)",
+            "learning_purpose": "개념-정의, 용어-예시 등의 쌍 관계 학습. 재인의 변형이나 더 많은 변별자를 동시에 처리. 복수 cloze 또는 복수 selects로 구현.",
+            "primitives": [
+              "interaction/selects.py",
+              "interaction/form.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "봇이 'A-B 쌍 매칭' 카드 송출 → 각 항목(A, B, C)에 대응 선택지를 selects.py의 복수 pick_string 순차 호출로 수집 OR ask_form(빈칸=각 매칭 항목) → 전체 정오 이진 판정(keyword 모드로 모든 쌍 포함 여부 확인)",
+            "tier": "extension",
+            "notes": "[inference] Discord는 네이티브 드래그-드롭 없음 → 텍스트 번호 입력(1-A, 2-B)이나 복수 selects 순차 실행으로 대리. [inference] 매칭 채점은 keyword 모드(모든 쌍 키워드 포함 필수) 또는 다중 exact 검사를 봇 레이어에서 루프로 구현. [assumption] UX 복잡도가 높아 소비 과목 프로젝트에서 선택 사용하는 extension 기능."
+          },
+          {
+            "name": "In-Session Re-queue Drill (세션내 재큐 — warm 반복)",
+            "learning_purpose": "오답 카드를 세션 내에서 즉시 재출제해 교정 기회 제공. 엔진규격 warm attempt 개념의 Discord 구현 — warm은 Leitner 박스에 영향 없이 인출 반복만.",
+            "primitives": [
+              "automation/store.py",
+              "automation/driver.py",
+              "output/cards.py",
+              "output/mention.py"
+            ],
+            "interaction": "채점 incorrect → session.seen_card_ids에 card_id 추가(cold→warm 전환) + 현 큐 말미에 card_id 재삽입 → 세션 종료까지 재출제 반복; driver.py 패턴으로 job 큐 crash-tolerant 관리",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §1.2: warm attempt = 같은 세션 내 재큐 재시도, 박스/due 무변화. [fact-cited] 엔진규격 §1.3: warm correct/incorrect 모두 박스변화 없음. [inference] driver.py의 job queue + done dict 패턴을 세션 큐 관리자로 차용 가능 — 세션 내 메모리 큐로 사용(파일저장 불필요, 세션 휘발)."
+          },
+          {
+            "name": "Spaced Review Session (간격반복 복습 세션)",
+            "learning_purpose": "Leitner 박스 기반 due 카드 선별 → 최적 망각 시점 직전 재활성화. 장기기억 효율 극대화 핵심 메커니즘. 엔진규격 §2 buildQueue와 직결.",
+            "primitives": [
+              "automation/store.py",
+              "automation/scheduler.py",
+              "output/mention.py",
+              "output/cards.py",
+              "live/progressbar.py"
+            ],
+            "interaction": "scheduler.daily(hhmm, job)으로 매일 특정 시간에 due 카드 buildQueue 실행 → mention.ping으로 복습 알림 → 드릴 루프 실행 → progressbar로 진행률 표시; Store에서 ProgressStore 로드/저장",
+            "tier": "core",
+            "notes": "[fact-cited] automation/scheduler.py: daily(hhmm, job) 매일 고정 시각 콜백. [fact-cited] 엔진규격 §2.1: review = cold_attempts>0 & isDue==true. [fact-cited] live/progressbar.py: 세션 진행률 실시간 표시. [inference] scheduler + mention 조합이 '복습 알림 → 세션 시작' 전체 루프를 자동화."
+          },
+          {
+            "name": "New-Card Introduction Session (신규 카드 도입 세션)",
+            "learning_purpose": "cold_attempts==0 카드의 첫 노출 — 첫 cold 시도에서만 Leitner 박스 상향. 세션당 신규 카드 수 제어로 인지부하 관리.",
+            "primitives": [
+              "automation/store.py",
+              "automation/scheduler.py",
+              "output/cards.py",
+              "live/progressbar.py"
+            ],
+            "interaction": "buildQueue(opts.newCardLimit=N)으로 신규 카드 상한 적용 → 도입 세션 진행 → 최초 cold attempt 기록 → Store 저장; progressbar로 '오늘 신규 N개' 표시",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §2.1 new = cold_attempts==0. [fact-cited] 엔진규격 §2.5 QueueOptions.newCardLimit: 세션당 신규 상한. [inference] 신규 도입 세션 + 복습 세션을 scheduler로 분리 운영 가능(아침=신규, 저녁=복습)."
+          },
+          {
+            "name": "D-day Total Recall Session (D-day 전박스 총정리 세션)",
+            "learning_purpose": "시험 임박 시 due 무시 전박스 소환 — box 오름차순(약한 것 먼저) 집중 복습. 간격압축으로 하루 내 반복 가능.",
+            "primitives": [
+              "automation/store.py",
+              "output/cards.py",
+              "live/progressbar.py",
+              "output/mention.py",
+              "interaction/confirm.py"
+            ],
+            "interaction": "confirm으로 'D-day 모드 진입 확인' → buildQueue(dDayMode=true) 전박스 소환 → box ASC/weight DESC 정렬 드릴 → 정답 시 간격압축(DDAY_COMPRESS_DAYS=1일); progressbar로 전체 카드 대비 진행률",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §2.4 D-day 모드: 전박스 소환, box ASC 정렬, 정답 시 min(원간격, DDAY_COMPRESS_DAYS). [fact-cited] confirm.py: 모드 진입 전 확인 게이트. [inference] D-day 진입 판정은 UI/봇 레이어 책임(엔진은 opts.dDayMode 주입받기만 함)."
+          },
+          {
+            "name": "Mixed Drill Session (드릴/믹스 세션 구조)",
+            "learning_purpose": "새 카드 + 복습 카드를 섞어 interleaving 효과 — 단일 유형 반복보다 판별 능력 향상. buildQueue의 review-first 우선순위가 믹스를 자동 구성.",
+            "primitives": [
+              "automation/store.py",
+              "output/cards.py",
+              "live/progressbar.py",
+              "live/livetable.py"
+            ],
+            "interaction": "buildQueue(review+new 혼합) → 카드 유형별(func/proc/cloze/judge) 다양한 채점 모드로 순차 드릴 → livetable로 '이번 세션: 복습 N | 신규 M | 정답 K' 실시간 집계표",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §2.2: review > new 우선순위, weight DESC 정렬. [inference] livetable.py의 set_row()로 카드 유형별 통계를 세션 중 실시간 갱신 가능. [inference] 믹스 세션에서 채점 모드(grade_mode)가 카드마다 달라지므로 봇 라우터가 CardDef.grade_mode를 읽어 분기."
+          },
+          {
+            "name": "Exam-Mode Session (시험 모드 세션 — 즉시 피드백 지연)",
+            "learning_purpose": "실제 시험 조건 모사: 채점 결과를 세션 종료 후 일괄 공개. 즉시 피드백이 없으면 정답을 기억에서 끌어올려야 하므로 메타인지 강화.",
+            "primitives": [
+              "automation/store.py",
+              "automation/digest.py",
+              "output/cards.py",
+              "live/livetable.py",
+              "output/mention.py"
+            ],
+            "interaction": "시험 세션 진행 중 각 채점 결과를 digest.add()로 누적(즉시 표시 않음) → 세션 종료 시 digest.flush()로 전체 결과 일괄 카드 송출 + mention.ping으로 알림; 세션 중 progressbar는 진행률만 표시(정오 숨김)",
+            "tier": "extension",
+            "notes": "[fact-cited] automation/digest.py: 이벤트 누적 → flush() 일괄 송출. [inference] 즉시 피드백 억제는 채점 결과를 메모리 버퍼에 유지하고 세션 말에 flush하는 패턴으로 구현 — digest.py가 정확히 이 역할. [inference] 시험 모드 중에도 Store 저장은 매 문제 후 하되 Discord 피드백만 지연."
+          },
+          {
+            "name": "Case-by-Case Feedback (케이스별 피드백 — 분기 해설)",
+            "learning_purpose": "정답·오답·스킵 각각 다른 해설 경로 제공. 오답 시 힌트 레벨, 정답 시 심화 확장, 스킵 시 개념 링크 제시 등 맞춤 피드백으로 인출 후 정교화.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py",
+              "output/reply.py",
+              "interaction/paginator.py",
+              "output/pins.py"
+            ],
+            "interaction": "verdict 분기: correct → back.detail 포함 성공 카드(COLOR_DONE); incorrect → missed 강조 + 힌트(back.note) 카드(COLOR_WARN) + 재큐 안내; skip → 개념 설명 paginator 제공; 중요 오답 해설은 pins.py로 핀 고정",
+            "tier": "core",
+            "notes": "[fact-cited] 엔진규격 §3.5: ScoreResult.matched/missed/feedback 피드백 페이로드. [fact-cited] output/cards.py COLOR_DONE/COLOR_WARN/COLOR_DANGER로 판정별 시각 구분. [fact-cited] interaction/paginator.py: 긴 해설을 페이지로 분할 제공. [inference] output/pins.py로 자주 틀리는 개념 해설을 채널에 고정해 참고 자료화 가능."
+          },
+          {
+            "name": "Live Session Dashboard (세션 실시간 대시보드)",
+            "learning_purpose": "진행 중인 드릴 세션의 누적 지표(정답률·완료율·박스 분포)를 실시간 표시 → 학습자의 자기조절 피드백 루프 형성.",
+            "primitives": [
+              "live/livecard.py",
+              "live/livetable.py",
+              "live/progressbar.py",
+              "automation/store.py"
+            ],
+            "interaction": "세션 시작 시 LiveCard.start() → 매 채점 후 card.set(correct=N, wrong=M, skip=K, box=...) → 1초 코어징으로 Discord 편집; livetable로 카드별 박스·due 현황 표; 세션 종료 시 card.finalize()",
+            "tier": "extension",
+            "notes": "[fact-cited] live/livecard.py: set() 고빈도 호출 → 1초 인터벌 코어징 편집. [fact-cited] live/livetable.py: set_row()로 multi-row 통계표. [inference] 대시보드와 드릴 루프를 별도 asyncio Task로 분리해야 Discord rate limit 충돌 방지 — livecard는 자체 loop task를 갖고 있어 분리 용이."
+          },
+          {
+            "name": "Post-Session Summary Report (세션 종료 요약 리포트)",
+            "learning_purpose": "세션 후 성과 가시화 — 정답률·박스 이동·졸업 카드·약점 단원을 요약하여 다음 세션 전략 수립 지원. getDashboardData 집계 결과의 Discord 렌더.",
+            "primitives": [
+              "output/cards.py",
+              "output/embeds.py",
+              "automation/store.py",
+              "output/mention.py"
+            ],
+            "interaction": "세션 종료 → getDashboardData(deck, progress, now) 호출 → by_area·weakness 집계 → titled_card로 세션 요약 카드 송출(박스 분포·정답률) + mention.ping으로 푸시 알림",
+            "tier": "extension",
+            "notes": "[fact-cited] 엔진규격 §7: getDashboardData 순수 집계 함수, by_area/weakness/pass_path/completion 반환. [fact-cited] output/mention.py ping(): 세션 종료 시 한 번만 호출(알림 피로 방지). [inference] embeds.py fields[]로 by_area 테이블, weakness 상위 3개 등 구조화 표현 가능."
+          },
+          {
+            "name": "Progress Trend Chart (진도 추세 차트)",
+            "learning_purpose": "시간 축에 따른 cold_correct율, 박스 분포 변화를 시각화 — 학습 속도·정체 구간을 직관적 확인. 비교 참조가 텍스트 숫자보다 패턴 인식에 효과적.",
+            "primitives": [
+              "live/livechart.py",
+              "media/imagesend.py",
+              "automation/store.py"
+            ],
+            "interaction": "Store에서 날짜별 cold_correct 이력 로드 → livechart.py(matplotlib) 또는 imagesend.py로 PNG 차트 생성 → 채널 송출 또는 주기적 교체(replace_image); livechart.py는 주기적 자동 갱신",
+            "tier": "extension",
+            "notes": "[fact-cited] live/livechart.py: matplotlib PNG 주기적 렌더·교체, matplotlib 미설치 시 graceful fallback. [fact-cited] media/imagesend.py: replace_image()로 기존 차트 메시지 업데이트. [assumption] 날짜별 이력 저장은 엔진규격 ProgressStore에 없으므로 봇 레이어 확장 Store(별도 JSON)로 기록 필요."
+          },
+          {
+            "name": "DM-Mode Private Drill (DM 채널 프라이빗 드릴)",
+            "learning_purpose": "공용 서버 채널과 분리된 1:1 DM에서 학습 — 다른 멤버에게 오답 노출 없이 집중 환경 제공. 출제·채점·피드백 전 과정을 DM에서 수행.",
+            "primitives": [
+              "meta/dm.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "on_message(DMChannel) 분기로 DM 수신 → 채점 → dm_user()로 피드백 카드 DM 송신; 모든 학습 인터랙션이 DM 채널에서 완결 — 서버 채널 없이도 동작",
+            "tier": "extension",
+            "notes": "[fact-cited] meta/dm.py: dm_user() + isinstance(channel, DMChannel) 분기로 DM 수신/송신. [fact-cited] dm.py USAGE: message_content intent 필요(DM 본문 읽기). [inference] DM 모드는 멀티기기 동기화 없이도 Discord 앱(모바일/PC) 어디서나 접근 — 제약(나) '멀티기기·UI는 Discord가 흡수'와 일치."
+          },
+          {
+            "name": "Thread-Isolated Card Session (스레드 격리 카드 세션)",
+            "learning_purpose": "카드별 또는 단원별로 스레드를 생성해 채점·피드백 대화를 격리 — 세션 로그 검색 가능, 오답 리뷰 스레드로 활용.",
+            "primitives": [
+              "channels/threads.py",
+              "output/cards.py",
+              "output/reply.py",
+              "automation/store.py"
+            ],
+            "interaction": "단원 시작 시 thread_in_channel()으로 단원 스레드 생성 → 모든 카드 출제·채점·피드백을 해당 스레드에 reply_to로 누적 → 세션 종료 시 close_thread(archived=True)",
+            "tier": "extension",
+            "notes": "[fact-cited] channels/threads.py: thread_in_channel(), close_thread(archived, locked). [inference] 스레드당 단원 격리는 오답 복기 검색에 유리 — Discord 스레드 내 메시지 검색 가능. [inference] 각 스레드 ID를 Store에 저장해 세션 재개 시 기존 스레드 이어쓰기 가능."
+          },
+          {
+            "name": "Due-Alert Watcher (due 알림 와처)",
+            "learning_purpose": "복습 due 카드 발생을 능동 감지해 사용자에게 푸시 — '앱 열기'를 기다리지 않고 최적 타이밍에 인터럽트. Leitner 간격의 실용적 강제.",
+            "primitives": [
+              "automation/watcher.py",
+              "output/mention.py",
+              "automation/store.py"
+            ],
+            "interaction": "Watcher(check=lambda: len(buildQueue(dDayMode=False))>0, interval=300) → due 카드 발생 상승 엣지에서 mention.ping() → 사용자 복습 세션 시작",
+            "tier": "extension",
+            "notes": "[fact-cited] automation/watcher.py: edge-trigger(상승엣지에서만 1회 알림, 중복 스팸 없음). [fact-cited] output/mention.py ping(): 푸시 알림 트리거. [inference] watcher check 함수가 Store를 읽어 buildQueue 길이를 반환하면 due 감지가 가능 — 5분 폴링 간격이 합리적(너무 빈번한 알림 방지)."
+          },
+          {
+            "name": "Persistent Between-Session Resume (세션간 재개 — 영속뷰)",
+            "learning_purpose": "봇 재시작 후에도 채점 버튼이 살아있어 학습 흐름 단절 없음. 특히 장시간 드릴이나 overnight 복습에 필수.",
+            "primitives": [
+              "interaction/persistviews.py",
+              "automation/store.py",
+              "output/cards.py"
+            ],
+            "interaction": "PersistentButtons(timeout=None, custom_id 고정)로 카드 버튼 렌더 → bot.add_view(PersistentButtons()) on_ready에 등록 → 재시작 후에도 이전 메시지 버튼 콜백 동작; Store에서 카드 상태 복원",
+            "tier": "extension",
+            "notes": "[fact-cited] interaction/persistviews.py: timeout=None + 고정 custom_id로 재시작 생존. [fact-cited] persistviews.py USAGE: on_ready에서 client.add_view() 1회 등록 필수. [inference] custom_id에 card_id를 인코딩하면 재시작 후에도 어느 카드 버튼인지 식별 가능."
+          },
+          {
+            "name": "Autocomplete-Driven Slash Entry (자동완성 슬래시 입력)",
+            "learning_purpose": "슬래시 명령어에 자동완성을 붙여 덱 이름·단원 ID 오타 방지 및 빠른 탐색 — 세션 진입 마찰 최소화.",
+            "primitives": [
+              "slash/slash.py",
+              "automation/store.py"
+            ],
+            "interaction": "/review, /drill, /status 등 슬래시 명령어에 autocomplete 훅 → 덱 namespace·단원 목록을 Store/메모리에서 실시간 필터링해 25개 이하 Choice 반환; is_user() 게이팅",
+            "tier": "extension",
+            "notes": "[fact-cited] slash/slash.py: autocomplete 패턴, is_user() 허용 사용자 검증. [inference] 덱 목록 자동완성은 getManifest() 결과를 Choice 리스트로 변환하면 됨. [assumption] 자동완성은 실시간 Store 읽기이므로 Store 파일 I/O 빈도 고려 필요 — 메모리 캐시 권장."
+          }
+        ],
+        "coverage_note": "전수(census) 검토 — harness 58개 파일 전체를 README/index.json으로 확인하고 interaction·output·live·automation·slash·channels·meta 카테고리 핵심 파일을 직접 읽음(community 제외 = 제약(나) 범위 밖). 누락 영역: (1) media/files.py·media/imagesend.py는 파일첨부/차트 보조 역할로 별도 능력에 녹임(독립 능력으로 열거 불필요). (2) automation/heartbeat.py·ratelimit.py·gating.py는 인프라/안전 레이어로 학습 상호작용 타입에 해당 안 함 — 모든 능력의 전제 인프라로 메모. (3) channels/forum.py·channels/webhook.py는 채널 구조화 도구로 학습 상호작용 타입과 직접 매핑 안 됨 — 소비 프로젝트에서 과목별 포럼 채널 구성 시 활용 가능(범용 프레임워크 레이어 밖). (4) meta/presence.py는 봇 상태 표시용으로 학습 능력 아님. voice(PyNaCl/ffmpeg)는 제약(나)로 명시 제외."
+      },
+      {
+        "lens": "composition — 단일 프리미티브가 아니라 여러 harness 파일 조합에서 창발하는 학습 능력 카탈로그. 결정적 채점(Leitner Python 포트) + AI 학습(_invoke 어댑터) 두 기둥 위에서 composable 능력을 발굴함.",
+        "capabilities": [
+          {
+            "name": "자가갱신 SRS (Self-Updating Spaced Repetition)",
+            "learning_purpose": "콘텐츠 폴더만 마운트하면 덱이 자동 반영되는 제로-운영 SRS 루프 — 파일 추가 = 카드 추가, 스케줄러 = due 판정 주기. 단일 프리미티브로는 '파일 감지'나 '저장'이나 '주기 실행' 중 하나만 되지만, 셋을 묶어야 '갱신-저장-소환'의 폐루프가 완성된다.",
+            "primitives": [
+              "automation/filedrop.py",
+              "automation/store.py",
+              "automation/scheduler.py"
+            ],
+            "interaction": "FileDrop이 콘텐츠 디렉터리를 폴링 → 새 파일 감지 시 Store에 덱 네임스페이스 등록 → scheduler.daily가 매일 due 카드 목록을 buildQueue로 계산해 채널에 게시",
+            "tier": "core",
+            "notes": "[fact-cited] filedrop._loop polls dir; store atomic save (os.replace); scheduler.daily fires HH:MM callback. 세 파일을 별도로 쓰면 '파일감지만' '저장만' '주기실행만'이지만 조합하면 '덱이 스스로 자라는 SRS'가 된다."
+          },
+          {
+            "name": "영속 SRS 버튼 (Restart-Proof Answer Buttons)",
+            "learning_purpose": "봇 재시작 후에도 이전 세션에서 보낸 정답/오답/스킵 버튼이 살아있어 학습자가 언제든 응답 가능 — persistviews의 timeout=None+stable custom_id와 Store의 atomic write가 결합해야 응답이 Leitner 전이로 이어진다.",
+            "primitives": [
+              "interaction/persistviews.py",
+              "automation/store.py"
+            ],
+            "interaction": "PersistentButtons(custom_id='srs:correct'|'srs:incorrect'|'srs:skip') 를 카드 메시지에 부착 → 클릭 시 콜백에서 leitnerTransition 호출 → store.set(card_id, new_state) → store.save(). 재시작 후 client.add_view(PersistentButtons()) 한 번으로 복원.",
+            "tier": "core",
+            "notes": "[fact-cited] persistviews: timeout=None, is_persistent()=True, stable custom_id. store: atomic os.replace. [inference] Leitner 전이는 Python 포트 코어 함수를 콜백에서 직접 호출."
+          },
+          {
+            "name": "자신감 태그 회상 (Confidence-Tagged Recall)",
+            "learning_purpose": "정/오 이진 판정 외에 자기효능감(자신있음/애매함/몰랐음) 레이어를 추가해 weakness 집계를 보강 — reactions의 이모지 선택 + store 저장이 결합해야 '자신감 히스토리'가 persistence에 누적된다. 단독으로는 반응 수집뿐이거나 저장뿐이다.",
+            "primitives": [
+              "output/reactions.py",
+              "automation/store.py"
+            ],
+            "interaction": "카드 채점 후 wait_choice(client, msg, user_id, ['😊','🤔','😰']) → 반환 이모지를 confidence 레이블로 매핑 → store.set(f'{card_id}:conf', label) → 대시보드 집계 시 confidence 분포 포함",
+            "tier": "extension",
+            "notes": "[inference] reactions.wait_choice는 이미 gating 내장(user_id 체크). [assumption] 이모지-레이블 매핑 테이블은 소비 과목 프로젝트가 부여. confidence는 엔진규격 CardProgress에 없으므로 store 사이드카로 유지."
+          },
+          {
+            "name": "사용자 큐레이션 덱 (Right-Click Card Curation)",
+            "learning_purpose": "채널 대화 속 메시지(공지, 교수 메모 등)를 우클릭 한 번으로 복습 덱에 편입 — contextmenu가 메시지를 후킹하고 store가 card_id를 저장해야 '임시 메모 → SRS 카드'의 경로가 생긴다. 단독 contextmenu는 행동만 트리거하고 persistence가 없다.",
+            "primitives": [
+              "interaction/contextmenu.py",
+              "automation/store.py"
+            ],
+            "interaction": "make_message_menu('덱에 추가', handler) 등록 → handler에서 message.content를 임시 card_id로 해시 → store.get('curated', []) + [card_id] → store.save() → 봇이 다음 세션에 curated 목록을 queue에 병합",
+            "tier": "extension",
+            "notes": "[inference] message.content를 front로 쓰는 경우 grade_mode=self가 가장 자연스럽다(앱 정답 미보유). [assumption] card_id 생성 규칙은 소비 프로젝트가 정의."
+          },
+          {
+            "name": "AI 튜터 페르소나 (Webhook-Fronted AI Explainer)",
+            "learning_purpose": "오답 카드에 대해 claude -p stream-json '_invoke' 어댑터가 해설을 생성하고, webhook이 특정 이름/아바타로 게시 — 단일 채널에서 '봇(채점)' + '튜터(해설)' 두 목소리를 분리해 학습자 경험을 향상. webhook 없이는 모든 메시지가 동일 봇 아이덴티티다.",
+            "primitives": [
+              "channels/webhook.py",
+              "automation/driver.py"
+            ],
+            "interaction": "driver.run(wrong_cards, attempt=invoke_claude) 로 배치 해설 생성 → 각 결과를 webhook.send(explanation, username='튜터', avatar_url=...) 로 게시 → 해설 스레드는 threads.thread_from_message로 원 카드 메시지에 부착",
+            "tier": "extension",
+            "notes": "[inference] driver.attempt()가 subprocess로 claude -p stream-json을 호출하는 _invoke 어댑터 패턴. [fact-cited] driver: crash-tolerant, resumable, webhook ping on milestone. webhook: arbitrary username/avatar per send."
+          },
+          {
+            "name": "단원 태그 오답 위키 (Forum-Based Error Encyclopedia)",
+            "learning_purpose": "오답 카드를 단원·영역별로 태그된 포럼 스레드에 자동 분류 — selects가 단원을 선택하고 forum이 태그 포럼 포스트를 생성해야 '단원별 오답 아카이브'가 생긴다. 둘 중 하나만으로는 선택UI만 또는 태그없는 포스트만 생긴다.",
+            "primitives": [
+              "channels/forum.py",
+              "interaction/selects.py"
+            ],
+            "interaction": "오답 발생 → pick_string(channel, user_id, '단원 선택', unit_list) → 선택된 unit을 tag_name으로 forum.create_post(FORUM_CH, card_id, wrong_detail, tag_names=[unit]) → 포럼에 단원별 오답 스레드 축적",
+            "tier": "extension",
+            "notes": "[fact-cited] forum.create_post: tag_names=[] maps to forum.available_tags. selects.pick_string: returns selected string. [assumption] FORUM_CH의 available_tags는 단원 id와 일치하도록 미리 생성."
+          },
+          {
+            "name": "시간차 자기퀴즈 (Delayed-Result Self-Quiz via Poll)",
+            "learning_purpose": "카드를 poll로 게시하고 N시간 후 결과를 digest가 취합해 정답률 요약 — poll의 deadline 메커니즘이 '지연 채점'을 만들고, digest의 주기 flush가 '일괄 피드백'을 만든다. 각각만으로는 투표 UI 또는 요약 채널 중 하나뿐이다.",
+            "primitives": [
+              "interaction/poll.py",
+              "automation/digest.py"
+            ],
+            "interaction": "send_poll(channel, card_front, options, hours=4) → on_raw_poll_vote_add 핸들러에서 digest.add(f'{card_id}:{answer}') → digest.flush()가 주기 만료 시 집계 카드 게시 → 정답 비율 계산 후 livecard 업데이트",
+            "tier": "extension",
+            "notes": "[fact-cited] poll.make_poll: duration up to 7 days. digest.add/flush: accumulates then posts. [inference] on_raw_poll_vote_add는 events.py 카탈로그 패턴으로 연결."
+          },
+          {
+            "name": "읽기위치 재개 (Session-Resume Paginator)",
+            "learning_purpose": "긴 개념 노트·해설을 paginator로 페이지 단위로 읽다가 봇 재시작 또는 세션 종료 후 마지막 읽은 페이지에서 재개 — paginator.idx를 store에 저장/복원해야 '재개' 능력이 생긴다. paginator 단독은 세션 휘발이다.",
+            "primitives": [
+              "interaction/paginator.py",
+              "automation/store.py"
+            ],
+            "interaction": "send_paginator 반환된 Paginator.idx 변경 시마다 store.set(f'{deck}:read_pos', idx) → store.save() → 다음 세션 시작 시 idx = store.get(f'{deck}:read_pos', 0) 로 Paginator 초기화",
+            "tier": "core",
+            "notes": "[fact-cited] paginator.idx: int, Prev/Next로 변경. store.set/save: atomic. [inference] Paginator._go 콜백을 래핑해 store 호출 추가. 이 조합으로 '읽기 진도'가 영속화된다."
+          },
+          {
+            "name": "배치 AI 카드 생성 (Crash-Tolerant Batch AI Card Gen)",
+            "learning_purpose": "수백 개 카드를 claude -p stream-json으로 생성할 때 중간 충돌을 허용하고 재시작 시 이어서 진행 — driver의 keyed resumable loop + _invoke 어댑터 패턴이 결합해야 '대규모 AI 생성의 신뢰성'이 생긴다. _invoke 단독으로는 단건 생성이고, driver 단독으로는 AI 호출이 없다.",
+            "primitives": [
+              "automation/driver.py",
+              "automation/store.py"
+            ],
+            "interaction": "Driver(state_path, webhook=CHANNEL_WEBHOOK) → driver.run(raw_topics, attempt=lambda t: invoke_claude(t, prompt='카드 생성'), is_solution=lambda r: r.get('card_id')) → 생성된 카드를 store(또는 JSON 파일)에 누적 → filedrop이 감지해 덱에 자동 편입",
+            "tier": "core",
+            "notes": "[fact-cited] driver: crash-tolerant, keyed by job id, atomic state save, webhook ping on milestone. [inference] attempt()가 subprocess claude -p stream-json을 호출하는 _invoke 어댑터. store는 driver state_path와 별개로 completed cards를 관리."
+          },
+          {
+            "name": "실시간 세션 대시보드 (Live Session Metrics Card)",
+            "learning_purpose": "채점 이벤트가 발생할 때마다 정답수·오답수·due 잔여 등을 실시간으로 업데이트하는 단일 카드 — livecard의 코어레싱 루프와 metricpush의 멀티소스 집계가 결합해야 '다수 이벤트 → 단일 카드 live update'가 가능하다.",
+            "primitives": [
+              "live/livecard.py",
+              "automation/metricpush.py"
+            ],
+            "interaction": "세션 시작 시 MetricDashboard(channel, '세션 현황') + LiveCard(channel, '진도') 동시 기동 → 채점 콜백에서 dash.push('correct', n) / card.set(due=k) → 두 루프가 1초 코어레싱으로 Discord rate-limit 내에서 갱신",
+            "tier": "core",
+            "notes": "[fact-cited] livecard: dirty-flag + 1s interval loop, coalesces any freq updates. metricpush: push() marks dirty, same loop pattern. [inference] 둘을 동일 채널에 배치하거나 livecard를 metricpush의 render 백엔드로 사용."
+          },
+          {
+            "name": "Due 카드 멘션 알림 (Due-Card Push Alert)",
+            "learning_purpose": "학습자가 Discord를 열지 않아도 due 카드가 쌓이면 @멘션 푸시 알림 — watcher의 edge-trigger가 '새로 due가 생긴 시점 한 번만'을 보장하고 mention이 실제 알림을 발송한다. watcher 단독으로는 출력이 없고 mention 단독으로는 조건 판정이 없다.",
+            "primitives": [
+              "automation/watcher.py",
+              "output/mention.py",
+              "automation/store.py"
+            ],
+            "interaction": "Watcher(channel, user_id, check=lambda: count_due(store)>0, label='복습 대기', interval=300) → 조건 참 rising edge 시 channel.send(f'<@{user_id}> due 카드 {n}장 대기') → store.set('last_notified', now)",
+            "tier": "core",
+            "notes": "[fact-cited] watcher: edge=True prevents repeat spam; _alert sends @mention text. mention.py: sends actual @mention payload. store: last_notified deduplicate. [inference] count_due는 Python 포트 Leitner 코어의 buildQueue 결과를 이용."
+          },
+          {
+            "name": "세션 스레드 아카이브 (Auto-Archived Session Thread)",
+            "learning_purpose": "각 학습 세션을 독립 스레드에 격리해 나중에 리뷰 가능 — threads가 세션 컨테이너를 만들고 scheduler가 자동 아카이빙을 수행한다. 단독 스레드는 수동 관리, 단독 스케줄러는 아카이빙 대상을 모른다.",
+            "primitives": [
+              "channels/threads.py",
+              "automation/store.py",
+              "automation/scheduler.py"
+            ],
+            "interaction": "세션 시작 시 thread_in_channel(CHANNEL, f'세션_{date}') → store.set('active_thread', thread.id) → scheduler.daily('02:00', close_fn) → close_fn에서 store.get('active_thread')로 thread id 조회 → close_thread(thread, locked=False)",
+            "tier": "extension",
+            "notes": "[fact-cited] threads.thread_in_channel + close_thread(archived=True). store: atomic. scheduler.daily fires at HH:MM. [inference] thread id를 store에 저장하는 것이 두 프리미티브를 잇는 핵심 글루."
+          },
+          {
+            "name": "학습 설정 편집 (Slash-Form Config Editor)",
+            "learning_purpose": "LeitnerConfig(intervals_days, newCardLimit 등)를 사용자가 슬래시 커맨드 → 모달 폼으로 편집하고 store에 저장 — form의 구조화 입력과 slash의 엔트리포인트와 store의 영속화 세 개가 결합해야 'UI를 통한 설정 저장'이 된다.",
+            "primitives": [
+              "slash/slash.py",
+              "interaction/form.py",
+              "automation/store.py"
+            ],
+            "interaction": "/설정 슬래시 커맨드 → ask_form(interaction, 'Leitner 설정', [('intervals', '박스 간격(일,콤마)', {}), ('limit', '세션 신규 상한', {})]) → 반환 dict 파싱 → store.set('leitner_cfg', parsed) → store.save()",
+            "tier": "core",
+            "notes": "[fact-cited] form.ask_form: returns dict or None on timeout. slash.py: registration/sync/defer. store: atomic. [inference] parsed dict는 엔진규격 LeitnerConfig 스키마에 맞게 소비 프로젝트가 변환."
+          },
+          {
+            "name": "DM 조용한 복습 알림 (Silent DM Due-Alert with Dedup)",
+            "learning_purpose": "채널 메시지 대신 DM으로 알림을 보내 채널 노이즈 없이 복습 촉진 — watcher가 due 조건을 감지하고 dm.py가 조용한 DM을 발송하며 store가 중복 알림을 방지한다. 세 프리미티브가 없으면 '조건 감지 + 개인 전달 + 중복방지' 중 하나라도 빠진다.",
+            "primitives": [
+              "automation/watcher.py",
+              "meta/dm.py",
+              "automation/store.py"
+            ],
+            "interaction": "Watcher(..., check=lambda: new_due_since(store, 'last_dm_at')) → rising edge 시 watcher._alert를 override해 dm_user(client, user_id, f'오늘 due 카드 {n}장') → store.set('last_dm_at', now) → store.save()",
+            "tier": "extension",
+            "notes": "[fact-cited] watcher: edge-trigger, _alert is overridable. dm.dm_user: get_user or fetch_user then .send(). store: last_dm_at dedup. [inference] check 함수가 last_dm_at 이후 새로 due가 된 카드 수를 반환."
+          }
+        ],
+        "coverage_note": "전수 검토 기준: harness/index.json의 58개 파일 중 community/ 12개(강한 길드 권한 필요, 범위 제외)와 media/voice.py(PyNaCl/ffmpeg heavy, 제약(나) 제외)를 제외한 45개 파일을 검토함. output/cards·embeds·chunk·pins·suppress·typing_indicator·reply, live/livetable·logtail·livechart, meta/presence·botinvite·checklist, slash/installctx, automation/heartbeat·gating·ratelimit, automation/events는 단독 유틸리티 성격이 강해 조합 창발 능력의 '재료'로는 쓰이지만 독자적 학습 능력 카테고리를 이루지 않아 명시적 능력 항목에서 제외함. 빠뜨린 잠재 조합: heartbeat+store(세션 중단 감지), ratelimit+driver(API 호출 속도 제어), logtail+store(채점 로그 롤링 뷰) 등은 인프라 보조 조합으로 학습 능력 자체보다는 신뢰성 레이어에 해당해 이번 렌즈에서 제외함."
+      },
+      {
+        "lens": "ai-pillar: claude -p stream-json '_invoke' 어댑터 패턴으로 구현 가능한 AI 주도 학습 능력 전수 카탈로그. driver(배치)+typing_indicator+webhook(페르소나)+form(입력)+cards(출력)에 매핑. 토큰비용 통제 포인트 명시.",
+        "capabilities": [
+          {
+            "name": "AI 오픈엔드 채점 (서술·번역·단답)",
+            "learning_purpose": "exact/keyword 결정적 채점이 불가능한 자유서술·번역·단답 응답을 LLM이 판정(correct/incorrect)하여 이진 verdict를 Leitner 코어에 전달. 자동채점 불가 영역을 self 모드 없이 커버함으로써 카드 유형 커버리지 확장. [fact-cited: 엔진규격 §3.1 self 모드는 앱이 정답 미보유일 때, AI 채점은 정답 보유+LLM 판정으로 다른 경로]",
+            "primitives": [
+              "output/typing_indicator.py",
+              "output/cards.py",
+              "interaction/form.py",
+              "automation/store.py"
+            ],
+            "interaction": "form으로 서술 입력 수집 → typing_indicator 중 claude -p stream-json 호출 → ScoreResult{verdict, feedback} 파싱 → cards로 판정+근거 렌더",
+            "tier": "core",
+            "notes": "토큰비용 통제: system preamble 100토큰 이내(정답+채점기준만), max_tokens=150, effort=low 또는 haiku-tier 모델. verdict를 JSON {\"verdict\":\"correct\"|\"incorrect\",\"reason\":\"...\"}로 강제 → 파싱 실패 시 self-fallback. [inference: claude -p stream-json 어댑터가 JSON 모드 지원 가정]"
+          },
+          {
+            "name": "소크라테스 대화 (AI 대화형 개념 탐구)",
+            "learning_purpose": "학생이 개념을 설명하면 AI가 후속 질문을 생성하여 이해 깊이를 스스로 드러내게 함. 수동적 암기가 아닌 능동적 설명 능력 훈련. 멀티턴 대화이므로 context window 관리가 핵심 [inference: 소크라테스 모드는 '설명하기(elaboration)' 효과가 크다는 인지과학 근거에서 추론]",
+            "primitives": [
+              "channels/threads.py",
+              "output/typing_indicator.py",
+              "channels/webhook.py",
+              "interaction/buttons.py",
+              "automation/store.py",
+              "interaction/paginator.py"
+            ],
+            "interaction": "thread_in_channel으로 1학생:1세션 격리 → webhook persona('Tutor AI')로 질문 발화 → form/메시지로 학생 답 수신 → store에 대화 턴 누적(최대 N턴 슬라이딩 윈도우) → typing_indicator 후 다음 질문 생성 → paginator로 대화 히스토리 탐색",
+            "tier": "core",
+            "notes": "토큰비용 통제: 대화 히스토리 슬라이딩 윈도우 최근 4턴만 컨텍스트에 포함. 시스템 프롬프트를 고정 짧은 preamble(역할+종료조건)로 제한. [inference: 슬라이딩 윈도우 크기는 설계 선택, 비용-품질 트레이드오프]"
+          },
+          {
+            "name": "AI 힌트 생성 (점진적 단서 공개)",
+            "learning_purpose": "즉시 정답 공개 없이 단계별 힌트를 AI가 동적으로 생성, 학생 스스로 인출을 시도하게 함. 힌트 수 = 인출 강도의 역지표로 진단에도 활용 가능. [inference: 점진적 힌트는 desirable difficulty 원리에 기반]",
+            "primitives": [
+              "interaction/buttons.py",
+              "output/typing_indicator.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "cards에 '힌트 1 보기' 버튼 → callback에서 store에 hint_level 증가 저장 → typing_indicator 후 claude -p로 level-aware 힌트 생성 → 힌트 카드 append, 다음 레벨 버튼 렌더",
+            "tier": "core",
+            "notes": "토큰비용: 힌트 1개당 max_tokens=80. 시스템 프롬프트에 카드 정답+현재 힌트 레벨만 주입. 레벨 상한 3으로 고정하면 카드당 최대 3호출. [inference: 레벨 3 상한은 설계 선택]"
+          },
+          {
+            "name": "AI 항목/예문 생성 (시드 리스트 기반 덱 확장)",
+            "learning_purpose": "콘텐츠 저자가 시드 리스트(개념 키워드 목록)를 제공하면 AI가 카드 초안(front/back/answer_spec)을 배치 생성. 과목별 콘텐츠를 프레임워크와 분리하여 범용 파이프라인으로 제공. [fact-cited: 엔진규격 CardDef 스키마 §5.3, driver.py DEPS=stdlib only 배치 패턴]",
+            "primitives": [
+              "automation/driver.py",
+              "automation/store.py",
+              "channels/webhook.py",
+              "live/progressbar.py"
+            ],
+            "interaction": "시드 리스트 JSON → driver.run(jobs=seeds, attempt=claude_invoke) → 진행중 progressbar 실시간 업데이트 → 완료 시 webhook ping → store에 생성된 카드 초안 저장",
+            "tier": "core",
+            "notes": "토큰비용 통제: job 단위로 1시드=1호출, 배치 직렬화. system preamble = CardDef 스키마 요약(~200토큰). 저렴 모델(haiku tier) 우선. driver 자체는 stdlib-only이므로 추가 의존 없음. [fact-cited: driver.py DEPS=(standard library only)]"
+          },
+          {
+            "name": "AI 개인화 피드백 (오답 원인 분석 + 교정 설명)",
+            "learning_purpose": "incorrect verdict 후 단순 정답 공개가 아닌 오개념 진단과 교정 설명을 AI가 생성. 학생의 이전 오답 패턴(store에서 로드)을 컨텍스트로 제공해 반복 오류를 명시적으로 지적. [inference: 피드백의 설명 깊이가 장기 기억 전이에 영향 — elaborative feedback 연구에서 추론]",
+            "primitives": [
+              "output/typing_indicator.py",
+              "output/cards.py",
+              "automation/store.py",
+              "channels/webhook.py"
+            ],
+            "interaction": "incorrect 판정 후 자동 트리거 → store에서 해당 card_id의 last_verdict 이력 로드 → typing_indicator 후 claude -p 호출(오답 답변+정답+이력 컨텍스트) → 개인화 설명 cards 렌더 → webhook persona('Coach')로 발화",
+            "tier": "core",
+            "notes": "토큰비용: max_tokens=250. 이력 컨텍스트는 최근 3오답만 포함(토큰 절약). 반복 오답이 없으면 일반 설명으로 폴백(LLM 미호출 = 토큰 0). [inference: 3오답 임계는 설계 파라미터]"
+          },
+          {
+            "name": "AI 적응형 난이도 조절 (퍼포먼스 기반 weight 재산출)",
+            "learning_purpose": "cold_correct / cold_attempts 비율을 실시간으로 읽어 카드 weight를 AI가 재평가하거나 규칙 기반으로 재산출. 고숙달 영역은 신규 카드 도입을 가속, 저숙달은 현재 박스를 집중. 엔진규격 §2.3 weight [1,10] 범위와 연동. [fact-cited: 엔진규격 §2.3 weight가 큐 정렬에 직접 영향]",
+            "primitives": [
+              "automation/store.py",
+              "automation/scheduler.py",
+              "automation/metricpush.py",
+              "output/cards.py"
+            ],
+            "interaction": "scheduler.daily('22:00', adapt_fn) → store에서 진도 로드 → 영역별 retrieval_rate 계산 → 약점 영역 카드 weight 상향 조정(규칙기반 or claude -p 소량 호출) → store 저장 → metricpush로 weight 변동 대시보드 업데이트",
+            "tier": "core",
+            "notes": "규칙 기반 구현 시 토큰 0. AI 호출은 임계값 미달 영역에 대한 '학습 전략 제안' 텍스트 생성에만 선택적 사용. [inference: weight 산출을 규칙 vs AI 중 선택 가능 — 범용 능력이 목적이므로 양방향 기술]"
+          },
+          {
+            "name": "AI 스트리밍 응답 렌더 (토큰 단위 실시간 출력)",
+            "learning_purpose": "claude -p stream-json으로 AI 응답을 스트리밍 수신하여 LiveCard에 점진적으로 렌더. 학생 체감 지연 최소화, 긴 설명도 즉시 시작됨을 체감하게 함. [fact-cited: livecard.py의 LiveCard.set_text()가 임의 빈도 업데이트를 1초 코어싱으로 흡수]",
+            "primitives": [
+              "live/livecard.py",
+              "output/typing_indicator.py",
+              "automation/store.py"
+            ],
+            "interaction": "typing_indicator 시작 → claude -p stream-json 프로세스 spawn → stdout 행별 파싱 → LiveCard.set_text(accumulated) 호출(임의 빈도 가능) → 완료 시 LiveCard.finalize()",
+            "tier": "core",
+            "notes": "토큰비용 측면에서 스트리밍은 비용 자체를 줄이지 않으나, 체감 UX와 중간 취소 가능성을 높임. livecard 코어싱(1초)이 Discord rate limit(5msg/5s)를 자동 흡수. [fact-cited: livecard.py '5 edits per 5 seconds' 주석]"
+          },
+          {
+            "name": "AI 세션 요약 (학습 종료 후 자동 다이제스트)",
+            "learning_purpose": "세션 종료 시 당일 시도·정오답·박스 이동 내역을 AI가 요약하여 학습 일지로 제공. 메타인지(내가 무엇을 알고 모르는가) 강화. digest로 이벤트를 먼저 누적, 세션 종료 트리거에서 한번만 AI 호출. [inference: 메타인지 피드백이 학습 효율 향상 — Self-regulated learning 연구에서 추론]",
+            "primitives": [
+              "automation/digest.py",
+              "automation/store.py",
+              "output/typing_indicator.py",
+              "output/cards.py"
+            ],
+            "interaction": "세션 중 digest.add(event) → 종료 커맨드 시 digest 버퍼 flush 대신 버퍼를 claude -p 에 컨텍스트로 주입 → AI 요약 텍스트 생성 → cards로 학습 일지 카드 렌더 → store에 저장",
+            "tier": "extension",
+            "notes": "토큰비용: digest 버퍼(최대 100 이벤트 × ~20토큰) + 요약 system preamble(~100토큰). max_tokens=300. 세션당 AI 1회 호출만 발생 = 비용 예측 가능. [fact-cited: digest.py items[:100] 제한]"
+          },
+          {
+            "name": "AI 오개념 탐지 (반복 오답 패턴 분석)",
+            "learning_purpose": "동일 단원의 카드들에 걸쳐 반복되는 오답 패턴을 AI가 분석하여 근본 오개념을 진단. 카드 단위 feedback이 아닌 단원 단위 메타 분석. store의 last_verdict 이력이 핵심 데이터 소스. [inference: 오개념 클러스터링은 AI 없이 통계로도 가능하지만 자연어 설명은 AI가 필요]",
+            "primitives": [
+              "automation/store.py",
+              "automation/scheduler.py",
+              "output/cards.py",
+              "channels/webhook.py"
+            ],
+            "interaction": "scheduler.daily로 주기적 실행 → store에서 unit별 incorrect 카드 집합 로드 → incorrect rate 상위 단원 → claude -p로 오개념 패턴 설명 요청 → cards로 '약점 리포트' 렌더 → webhook으로 전달",
+            "tier": "extension",
+            "notes": "토큰비용: 단원당 대표 카드 front/back 최대 5개만 컨텍스트에 포함(슬라이싱). 전체 덱 컨텍스트 주입 금지 = 토큰 상한 제어. [inference: 5개 슬라이싱은 설계 파라미터]"
+          },
+          {
+            "name": "AI 페르소나 멀티스피커 (webhook identity 전환)",
+            "learning_purpose": "같은 채널에서 '출제자', '채점관', '코치' 등 역할별 webhook persona를 분리하여 학습 인터랙션의 맥락을 구분. 학생이 어떤 단계(출제/채점/피드백)에 있는지 시각적으로 즉시 인식. [fact-cited: webhook.py hook.send(..., username=..., avatar_url=...) 지원]",
+            "primitives": [
+              "channels/webhook.py",
+              "output/cards.py",
+              "output/typing_indicator.py"
+            ],
+            "interaction": "상황별 hook 인스턴스 사전 등록(Examiner/Grader/Coach) → AI 역할에 맞는 hook.send() 선택 → 같은 discord.py 채널 내 세 개 persona가 순차 발화",
+            "tier": "extension",
+            "notes": "webhook은 bot token과 무관한 URL 기반이므로 단일 봇 토큰 제약 내에서 멀티 페르소나 가능. Manage Webhooks 권한 필요. [fact-cited: webhook.py PERMS: Manage Webhooks]"
+          },
+          {
+            "name": "AI 질문 생성 (카드 front 자동 변형)",
+            "learning_purpose": "동일 개념에 대해 표현 방식을 AI가 변형한 질문을 추가 생성하여 표층 암기가 아닌 개념 이해를 검증. 원본 카드 card_id를 유지하며 변형 질문을 ephemeral 세션 전용으로 사용. [inference: 변형 질문은 transfer-appropriate processing 원리에서 추론]",
+            "primitives": [
+              "automation/driver.py",
+              "output/typing_indicator.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "interaction": "box3 도달 카드 목록 → driver 배치로 변형 질문 생성(1카드=1호출) → 결과를 store에 variant_q 키로 저장 → 세션 중 원본 카드 대신 변형 질문 렌더",
+            "tier": "extension",
+            "notes": "토큰비용: max_tokens=100/카드, haiku 모델. box3 도달 카드에만 적용 → 초기 학습 비용 0. [inference: box3 트리거는 설계 선택]"
+          },
+          {
+            "name": "AI 프로액티브 리마인더 (시간 기반 AI 푸시)",
+            "learning_purpose": "scheduler.daily로 due 카드가 있을 때 AI가 개인화된 학습 독려 메시지+당일 due 요약을 자동 발송. 수동 접근 없이 스페이스드 리피티션 루프를 닫음. [fact-cited: scheduler.py daily(hhmm, job) 지원]",
+            "primitives": [
+              "automation/scheduler.py",
+              "automation/store.py",
+              "output/cards.py",
+              "output/mention.py"
+            ],
+            "interaction": "scheduler.daily('08:00', push_fn) → store에서 due 카드 수·영역 집계 → claude -p로 당일 학습 동기부여 메시지 생성(due 요약 컨텍스트) → mention + cards로 전달",
+            "tier": "extension",
+            "notes": "토큰비용: max_tokens=120, 1일 1회 고정. due 카드 없으면 LLM 미호출(토큰 0). [inference: due=0이면 push 스킵 = 비용 절감 설계]"
+          }
+        ],
+        "coverage_note": "전수 검토 기준: harness 58개 파일 중 AI 학습 기둥에 직접 연관되는 driver/typing_indicator/webhook/form/cards/livecard/store/scheduler/digest/buttons/selects/paginator/progressbar/metricpush/threads/mention 16개 파일을 열람·분석함. community/ 폴더(roles/stickers 등)는 제약(나)에 따라 의도적으로 제외. voice.py는 제약(나) 명시 제외. 누락 가능 영역: (1) interaction/persistviews.py — 봇 재시작 후에도 버튼 유지되는 AI 대화형 뷰(학습 지속성)는 별도 능력으로 분리 가능하나 livecard/buttons로 대부분 커버 가능하여 통합 처리. (2) live/livechart.py+matplotlib — AI 생성 학습 곡선 시각화는 추가 능력으로 가능하나 matplotlib 의존이 있어 범용성 낮다 판단해 제외. (3) interaction/poll.py — AI가 선택지를 생성하는 native poll 패턴은 별도 능력으로 발굴 여지 있음."
+      }
+    ],
+    "critiques": [
+      {
+        "gaps": [
+          {
+            "capability": "이벤트 기반 세션 자동 진입 (Event-Triggered Session Gate)",
+            "why_missing": "automation/events.py는 census에 이름만 등장('Discord 이벤트 기반 학습 트리거')하고 learning-science·interaction-taxonomy·composition·ai-pillar 4개 렌즈 어디에도 쓰이지 않았다. [fact-cited: events.py 실제 코드 확인 — on_member_join / on_message_delete / on_raw_reaction_add / on_thread_create / on_guild_join 8종 훅 패턴 보유]. 실현 가능 능력: 신규 멤버 진입 시 온보딩 덱 자동 시작, 특정 채널 메시지 게시 이벤트로 세션 트리거, 스레드 생성 이벤트로 단원 학습 루프 자동 시작. on_raw_reaction_add와 gating 결합 시 '이모지 반응 = 세션 시작' 패턴 구현 가능. automation/gating.py 없이는 이 훅들이 무결성 없이 실행되므로 두 파일은 쌍으로 묶여야 한다.",
+            "primitives": [
+              "automation/events.py",
+              "automation/gating.py",
+              "automation/store.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "입력 게이팅 컴포지션 (Per-Command Auth Gate)",
+            "why_missing": "automation/gating.py는 allowed_msg / allowed_interaction 두 함수만 포함한 단순 가드 모듈이나 [fact-cited: 코드 직접 확인], 모든 슬래시 커맨드·버튼 콜백·폼 제출 경로에 공통 삽입되어야 하는 핵심 안전장치다. 4개 렌즈에서 단 한 번도 명시적 primitives 목록에 등장하지 않았다. 이는 학습 세션 보안(1인 봇에서 본인 외 타인이 버튼 누르는 경우 차단)의 결정적 실수다. [inference: 단일 사용자 학습봇이라도 공유 서버에서 타인 interact 가능성 존재]",
+            "primitives": [
+              "automation/gating.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "봇 생존 감지 + 자동 재알림 (Heartbeat Dead-Man Alert)",
+            "why_missing": "automation/heartbeat.py는 beat() 미호출 시 멘션 알림 + 복구 알림을 보내는 완전한 구현체를 갖고 있다 [fact-cited: Heartbeat class, beat(), _loop(), _send() 확인]. 그러나 4개 렌즈에서 완전 미사용. 실현 능력: 장기 AI 채점 드라이버(driver.py)나 SRS 스케줄러가 침묵하면 즉시 알림 — '배치 AI 카드 생성'이나 '자가갱신 SRS' 능력과 반드시 조합되어야 한다. driver.py가 crash-tolerant라고 해도 asyncio event loop 자체가 죽으면 heartbeat만이 감지 가능. [inference: 야간 배치 학습봇에서 가장 치명적 누락]",
+            "primitives": [
+              "automation/heartbeat.py",
+              "automation/driver.py",
+              "output/mention.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "고빈도 채점 업데이트 코알레싱 (Rate-Coalesced Live Update)",
+            "why_missing": "automation/ratelimit.py는 Coalescer 클래스를 직접 구현한다 [fact-cited: touch() / _loop() / start() / stop() 확인]. census에서 '채점 업데이트 코알레싱'으로 이름만 등장하고 4개 렌즈에서 완전 미사용. livecard·livetable·progressbar·logtail 4개 파일이 모두 내부적으로 동일한 dirty-flag 패턴을 복제하고 있으나 [fact-cited: livecard.py 128행 self._dirty, livetable.py 86행 동일], ratelimit.py를 공유 기반으로 쓰는 조합 능력은 카탈로그에 없다. AI 스트리밍 응답이 초당 수십 토큰 들어올 때 실질적으로 필요. [inference: 현재 live/* 파일들이 각자 중복 구현하는 대신 Coalescer를 의존성으로 쓰면 단일 진실원 확보]",
+            "primitives": [
+              "automation/ratelimit.py",
+              "live/livecard.py",
+              "live/logtail.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "AI 스트리밍 로그 실시간 출력 (LogTail AI Output Stream)",
+            "why_missing": "live/logtail.py는 tail_file() 메서드까지 갖춘 완전한 롤링 로그 렌더러다 [fact-cited: LogTail class, push(), tail_file(), finalize() 확인]. census에 '학습 설명 분할 전송'으로 오직 이름만 등장하고 4개 렌즈 미사용. 실현 가능 능력: claude -p stream-json '_invoke' 어댑터의 stdout을 tail_file()로 실시간 Discord에 노출 — ai-pillar 렌즈의 'AI 스트리밍 응답 렌더'(live/livecard.py + typing_indicator.py)와 완전히 분리된 별개 패턴. livecard는 구조화 필드를, logtail은 줄 단위 텍스트 스트림을 처리하므로 서로 대체 불가. [fact-cited: logtail.py의 buf=deque(maxlen) 구조로 최근 N줄만 유지, 1800자 잘림 처리 확인]",
+            "primitives": [
+              "live/logtail.py",
+              "automation/driver.py",
+              "output/typing_indicator.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "URL 억제 기반 안전 카드 전송 (Suppress-Safe Card Delivery)",
+            "why_missing": "output/suppress.py는 wrap_urls() + suppress() 두 함수로 URL 자동 embed 방지를 처리한다 [fact-cited: 코드 확인]. 4개 렌즈 완전 미사용. 학습 카드에 개념 설명용 외부 URL이 포함될 때(참고 링크, 이미지 URL 등) 자동 embed가 카드 레이아웃을 깨는 문제를 차단하는 실용 능력. 특히 output/cards.py V2 cards는 'V2 messages cannot carry content/embed/poll in the same message' 제약이 있으므로 [fact-cited: cards.py docstring 8행] suppress와의 조합은 실질적 필요. [inference: suppress가 없으면 cards와 URL이 혼재할 때 메시지 전송 실패 가능]",
+            "primitives": [
+              "output/suppress.py",
+              "output/cards.py",
+              "output/chunk.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "봇 상태 기반 세션 신호 (Presence-as-Session-Signal)",
+            "why_missing": "meta/presence.py는 playing/watching/listening/custom 상태 + online/idle/dnd 조합을 지원한다 [fact-cited: index.json 확인]. 4개 렌즈 미사용. 학습 세션 활성 중 '학습 중' status, 세션 종료 후 idle, 채점 중 '채점 중' 표시로 봇 상태 자체가 학습 신호가 되는 능력. voice·게이미피케이션 제외 기준에 해당하지 않음. [inference: 단일 학습봇에서 presence는 현재 세션 단계를 시각적으로 드러내는 무료 신호]",
+            "primitives": [
+              "meta/presence.py",
+              "automation/scheduler.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "봇 권한 사전 검증 (Pre-flight Intent/Permission Check)",
+            "why_missing": "meta/checklist.py는 recommended_intents() + check_permissions()를 제공한다 [fact-cited: 코드 확인]. meta/botinvite.py는 초대 URL 빌더다. 4개 렌즈 모두 미사용. 실현 능력: 봇 시작 시 on_ready에서 채점 채널·스레드 채널 각각의 필요 권한 목록을 자동 검증하고 missing 권한 있으면 DM으로 알림. 소비 과목 프로젝트가 harness를 복사할 때 권한 누락 감지 자동화. [inference: checklist 없이 배포하면 'Missing Permissions' 런타임 에러가 학습 세션 중간에 침묵적 실패를 유발]",
+            "primitives": [
+              "meta/checklist.py",
+              "meta/botinvite.py",
+              "meta/dm.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "학습 채널 카테고리 자동 구성 (Subject-Category Auto-Scaffold)",
+            "why_missing": "community/categories.py는 get_or_create_category() + move_to()를 가지며 [fact-cited: 코드 확인], channels/channels.py는 get_or_create() + edit_channel()을 가진다 [fact-cited: 코드 확인]. channels.py는 4개 렌즈 완전 미사용, categories.py는 census만 등장. 실현 능력: 소비 과목 프로젝트 초기화 시 '과목명' 카테고리 생성 → 그 아래 #학습채널 / #오답-노트 / #세션-로그 자동 배치. 이 조합 없이 channels.py와 forum.py, threads.py가 카테고리 없이 부유하게 된다. [inference: 범용 프레임워크가 과목 프로젝트에 마운트될 때 채널 구조 자동화가 핵심 온보딩]",
+            "primitives": [
+              "community/categories.py",
+              "channels/channels.py",
+              "channels/threads.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "학습 감사 로그 (Session Audit Trail)",
+            "why_missing": "community/audit.py는 guild audit log를 읽는 recent_audit()을 제공한다 [fact-cited: 코드 확인]. community/permissions.py는 채널별 권한 오버라이트를 제공한다 [fact-cited: 코드 확인]. 4개 렌즈 완전 미사용. 실현 능력: 누가 언제 어떤 채점 인터랙션을 했는지 Discord audit log 기반 사후 추적, 학습 전용 채널에 비학습 메시지 차단(permissions overwrite). [assumption: 1인 학습봇에서는 우선순위 낮으나 다인 스터디 그룹 확장 시 필요]",
+            "primitives": [
+              "community/audit.py",
+              "community/permissions.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "학습 이벤트 캘린더 등록 (Scheduled Study Event)",
+            "why_missing": "community/scheduledevents.py는 create_external()로 Discord 서버 예약 이벤트를 만든다 [fact-cited: 코드 확인]. census에 이름만 등장, 4개 렌즈 미사용. 실현 능력: SRS 스케줄러가 계산한 다음 복습 날짜를 Discord 예약 이벤트로 등록 → 서버 멤버들이 캘린더에서 '오늘 복습 세션' 확인 가능. automation/scheduler.py + store.py와 조합하면 Leitner due-date 기반 자동 이벤트 생성. [inference: voice 없이도 이벤트 생성 자체는 범위 내 — 게이미피케이션이 아닌 스케줄 가시화]",
+            "primitives": [
+              "community/scheduledevents.py",
+              "automation/scheduler.py",
+              "automation/store.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "자동완성 + 반응 기반 빠른 자가채점 (Reaction Quick-Score)",
+            "why_missing": "output/reactions.py는 census + composition 'confidence-tagged recall'에만 1회 등장. 그러나 wait_choice() 패턴 [fact-cited: reactions.py 29-53행 확인]은 'correct/incorrect' 두 이모지를 제시하고 반응을 기다리는 최소 인터랙션 자가채점 구현 가능 — form(modal) 없이도 동작한다. interaction-taxonomy의 'Self-Assessment / Confidence Rating'이 selects/buttons를 쓰는데 reactions는 더 낮은 마찰(클릭 1회)이라 별도 능력으로 독립돼야 한다. ai-pillar 렌즈에서 AI 채점 후 'agree/disagree' 반응 수집 조합도 미기재. [inference: 모달 없는 초저마찰 채점 경로로 reactions가 독립 tier-core primitive임]",
+            "primitives": [
+              "output/reactions.py",
+              "output/cards.py",
+              "automation/store.py"
+            ],
+            "tier": "core"
+          },
+          {
+            "capability": "메시지 포워딩 기반 오답 아카이브 (Reply-Forward Error Archive)",
+            "why_missing": "output/reply.py는 reply_to() 외에 forward() 함수를 포함한다 [fact-cited: reply.py 24-34행 — message.forward(channel) 또는 fallback 확인]. forward()는 4개 렌즈 어디에도 등장하지 않는다. 실현 능력: 오답 카드 메시지를 #오답-노트 채널로 직접 포워딩하여 오답 아카이브 구축. contextmenu.py의 '우클릭 즉시 오답추가'와 달리 봇이 자동으로 포워딩하는 능력. [inference: reply-to는 여러 곳에 등장하지만 forward 함수는 완전 미사용 조합]",
+            "primitives": [
+              "output/reply.py",
+              "channels/forum.py",
+              "automation/store.py"
+            ],
+            "tier": "extension"
+          },
+          {
+            "capability": "핀 목록 조회 기반 마스터리 카드 관리 (Pin List Mastery Navigator)",
+            "why_missing": "output/pins.py는 pin() / unpin() / list_pins() 세 함수를 갖는다 [fact-cited: pins.py 코드 확인]. composition 렌즈의 'Pinned Mastery Reference Card'는 pin()만 쓰고, list_pins()는 4개 렌즈 어디에도 미사용. list_pins()를 쓰면 '현재 마스터리된 카드 목록 조회' → 핀 수 임계치 초과 시 오래된 것 자동 unpin → 항상 최신 마스터리 카드만 고정 유지하는 자동 핀 로테이션 능력이 가능. [inference: Discord 채널당 핀 50개 제한이 있으므로 list_pins+unpin 없이는 pin()만으로 한계 도달]",
+            "primitives": [
+              "output/pins.py",
+              "automation/store.py",
+              "automation/scheduler.py"
+            ],
+            "tier": "extension"
+          }
+        ],
+        "assessment": "harness 58파일 전수 교차확인 결과, union 카탈로그의 가장 약한 부분은 두 가지다.\n\n첫째, 인프라 레이어(gating·heartbeat·ratelimit·events·checklist)가 census 이름만 등재되고 4개 학습 렌즈에서 완전 탈락했다. 이 파일들은 학습 능력을 직접 구현하지 않지만 봇의 정확성·생존·보안을 담보하는 결정적 기반이다 — 특히 gating(인증 없는 버튼 콜백)과 heartbeat(야간 배치 드라이버 침묵 감지)는 core 등급이 맞다. [fact-cited: 코드 직접 확인]\n\n둘째, 5개 파일(logtail·suppress·channels/channels·community/categories·scheduledevents)이 실제로 고유한 학습 능력을 제공하면서도 조합 카탈로그에 등장하지 않는다. logtail의 tail_file()은 livecard와 완전히 다른 스트리밍 패턴이며, suppress는 V2 cards의 구조적 제약(동일 메시지 내 embed 혼재 불가)을 해소하는 유일한 수단이다.\n\nbuild_index.py는 학습 능력 파일이 아니라 메타 도구이므로 census 미등재는 갭이 아니다. voice·게이미피케이션 제외 기준 적용 시 community/stickers·soundboard·monetization·roles·invites·moderation·automod·emoji 8파일은 갭 아님.",
+        "redundancies": [
+          "live/livecard.py + live/logtail.py — 둘 다 '실시간 단일 메시지 편집' 패턴이나 livecard=구조화 필드, logtail=줄 단위 텍스트 스트림으로 용도 분리됨 (병합 불가, 단 ratelimit.Coalescer로 공통 기반 추출 가능)",
+          "automation/ratelimit.py ↔ live/* 내부 dirty-flag — 4개 live 파일이 각자 동일 코알레싱 로직을 복제 중이며 ratelimit.Coalescer로 통합하면 중복 제거 가능"
+        ]
+      },
+      {
+        "gaps": [
+          {
+            "capability": "Elaborative Interrogation — 비AI 정교화 질문 흐름",
+            "why_missing": "ai-pillar의 소크라테스 대화는 AI 호출 필수(driver+typing_indicator+webhook). 결정적 채점 기둥에서 '왜 그런가?' 자기설명 요구 → keyword 채점 경유 정교화 흐름을 지원하는 primitives 조합이 catalog에 미정의. form.py(자유서술 입력) + embeds.py(정교화 프롬프트 표시) + store.py(답변 저장)로 구성 가능하나 조합이 명명되지 않음. [inference]",
+            "tier": "core",
+            "primitives": [
+              "interaction/form.py",
+              "output/embeds.py",
+              "output/cards.py",
+              "automation/store.py"
+            ]
+          },
+          {
+            "capability": "Preview-Then-Test (사전노출→인출 전환) — Errorless Learning 진입 모드",
+            "why_missing": "엔진규격 §2.1 new 큐는 '처음 cold 시도'를 정의하나, 신규 카드를 첫 인출 전에 정답을 보여주는 preview 단계가 catalog에 없음. paginator.py는 페이지 넘기기이고 '정답 선공개 후 인출 전환' 흐름을 지원하는 named capability 없음. interaction/confirm.py(확인 버튼) + output/cards.py(정답 표시 카드) + interaction/buttons.py(전환 버튼) 조합으로 구성 가능. [inference]",
+            "tier": "extension",
+            "primitives": [
+              "output/cards.py",
+              "interaction/confirm.py",
+              "interaction/buttons.py",
+              "automation/store.py"
+            ]
+          },
+          {
+            "capability": "Delayed Feedback Gate — 시험 모드 피드백 지연 전용 capability",
+            "why_missing": "interaction-taxonomy에 Exam-Mode Session(extension)이 있으나, '정답 공개 시점 제어'를 독립 capability로 명명하지 않음. automation/digest.py(배치 롤업) + automation/store.py(피드백 보류 플래그 저장)가 primitive이나 조합 미정의. poll.py의 deadline 파라미터를 피드백 지연 게이트로 재활용 가능하나 catalog에 명시 없음. [fact-cited: digest.py = 주기적 배치 rollup, poll.py = deadline hours 파라미터 확인]",
+            "tier": "extension",
+            "primitives": [
+              "automation/digest.py",
+              "automation/store.py",
+              "interaction/poll.py",
+              "output/embeds.py"
+            ]
+          },
+          {
+            "capability": "Concept-Ref Link Display — 오답 후 출처/개념서 섹션 귀인 표시",
+            "why_missing": "엔진규격 §5.3 CardDef.links.concept_ref 필드가 정의되어 있으나, catalog에 'concept_ref → 참고 링크 표시' capability 없음. output/reply.py(인라인 연결) + output/cards.py(링크 표시 카드) + output/suppress.py(URL embed 차단)로 구성 가능하나 조합이 명명되지 않음. Source-Monitoring(출처 귀인) 효과로 정답 기억 강화. [fact-cited: 엔진규격 §5.3 concept_ref 확인, catalog에 미정의]",
+            "tier": "extension",
+            "primitives": [
+              "output/reply.py",
+              "output/cards.py",
+              "output/suppress.py",
+              "automation/store.py"
+            ]
+          },
+          {
+            "capability": "Pre-Testing Effect — 학습 전 사전 퀴즈 세션",
+            "why_missing": "콘텐츠 학습 전에 테스트하면 이후 학습 효과가 상승한다는 Forward Testing 효과. 현재 catalog는 항상 '학습 후 인출' 가정. '신규 카드 첫 인출 전 퀴즈 배치' 흐름을 명명한 capability 없음. slash/slash.py(세션 시작 커맨드) + output/cards.py + interaction/form.py + automation/store.py 조합으로 구현 가능. [inference]",
+            "tier": "extension",
+            "primitives": [
+              "slash/slash.py",
+              "output/cards.py",
+              "interaction/form.py",
+              "automation/store.py"
+            ]
+          },
+          {
+            "capability": "Interleaving Queue 실제 구현 — buildQueue 인터리빙 로직",
+            "why_missing": "learning-science lens가 'Interleaving Queue'를 store+slash+selects에 매핑했으나 실제 store.py는 KV JSON만이며 인터리빙 알고리즘 없음(fact-cited: store.py 전체 확인). 인터리빙 shuffle 로직은 Python 엔진 buildQueue(엔진규격 §2)에서 구현될 것이나, harness catalog에서 해당 Python 포팅 capability가 명명되지 않음. [fact-cited: store.py 코드 = dict get/set/save만]",
+            "tier": "core",
+            "primitives": [
+              "automation/store.py",
+              "slash/slash.py",
+              "interaction/selects.py"
+            ]
+          }
+        ],
+        "assessment": "전체 완결성 판정: B+ (학습 전달 기계로서는 충분, 학습과학 정밀도에서 갭 존재).\n\nunion 카탈로그는 인출연습·간격반복·즉각피드백·진행가시성·자기채점 등 핵심 5원리를 실제 harness 파일과 1:1 매핑으로 커버한다. AI 기둥(driver+typing_indicator+webhook) 조합도 명확하다.\n\n가장 약한 부분: (1) Interleaving Queue의 harness 매핑이 거짓 긍정(store.py에 인터리빙 알고리즘 없음) — 결정적 채점 기둥의 핵심 원리가 실제로는 Python 포팅 엔진 buildQueue에 있어야 하는데 catalog에서 harness primitive로 오귀속됨. (2) Elaborative Interrogation / Source-Monitoring / Delayed Feedback 등 2차 학습과학 원리에 해당하는 named capability가 6개 누락. (3) 중복 쌍이 6개(특히 LiveCard↔MetricDashboard가 코드 수준 중복, Due-Alert 3중 중복)로 카탈로그 노이즈 존재. (4) PersistentViews·RateLimit·LogTail의 core 판정이 과대평가됨 — 이들은 infra/운영 quality이지 학습 능력 코어가 아님.",
+        "redundancies": [
+          "LiveCard(live/livecard.py) ↔ MetricDashboard(automation/metricpush.py): 코드 구조 동일(dirty-flag + asyncio 1초 coalesce + fields/metrics dict 렌더), API 이름만 다름(set(**kw) vs push(name,val)). 병합 권고: LiveCard를 기반으로 push() alias 추가하고 MetricDashboard 항목 제거.",
+          "Due-Alert Watcher(interaction-taxonomy) ↔ Due 카드 멘션 알림(composition) ↔ DM 조용한 복습 알림(composition): 셋 모두 watcher.py rising-edge trigger가 핵심, 차이는 출력 채널(mention vs dm)뿐. 병합 권고: 'Due-Card Alert' 단일 capability로 통합, 채널 파라미터(mention_channel | dm)를 옵션으로 명기.",
+          "Free-Recall Drill(interaction-taxonomy) ↔ Production/Essay Submission(interaction-taxonomy): 둘 다 '서술형 텍스트 산출 → self 채점' 패턴. 입력 UI만 다름(reply.py vs form.py Modal). 병합 권고: '서술형 산출 드릴'로 통합, 입력 경로를 on_message(자유입력) / Modal(form) 두 경로로 기재.",
+          "Distributed Practice Alert(learning-science) ↔ Spaced Review Session(interaction-taxonomy): 둘 다 scheduler+watcher+mention+store 조합이며 차이는 '알림 발송'과 '세션 시작'의 분리 수준뿐. 병합 권고: 'SRS 복습 알림 + 세션 게이트'로 통합.",
+          "자가갱신 SRS(composition-core) ↔ Spaced Review Session(interaction-taxonomy-core): filedrop이 SRS primitive로 오귀속된 항목(composition)은 filedrop 제거 후 store+scheduler 조합으로 수정 시 Spaced Review Session과 사실상 동일. 병합 권고: composition의 '자가갱신 SRS' 항목 삭제, Spaced Review Session으로 흡수.",
+          "Exam-Mode Session(interaction-taxonomy-extension) ↔ 시간차 자기퀴즈 via Poll(composition-extension): 둘 다 피드백 지연 + 배치 공개가 핵심 학습과학 원리이며, poll.py deadline + digest.py 배치가 공통 primitives. 병합 권고: 'Delayed-Feedback Exam Mode'로 통합."
+        ]
+      }
+    ]
+  }
+}

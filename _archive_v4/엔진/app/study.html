@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>학습 프레임워크</title>
+
+  <!-- ── CDN: 폰트 ── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- ── CDN: KaTeX + marked (back.detail / cloze 렌더) ── -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
+  <!-- ── CDN: CodeMirror 5 (coding 플러그인) ── -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" onerror="window.__CDN_FAILED=true"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+
+  <!-- ── CDN: Pyodide (coding 플러그인) ── -->
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js" onerror="window.__CDN_FAILED=true"></script>
+
+  <!-- ── CDN: Univer (excel 플러그인) ── -->
+  <script defer src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" onerror="window.__CDN_FAILED=true"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/rxjs@7.8.1/dist/bundles/rxjs.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/core@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/presets@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/index.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/umd/locales/en-US.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@univerjs/preset-sheets-core@0.5.4/lib/index.css">
+
+  <!-- ── CDN: three.js 0.160.0 ESModule (cad-print / robot-arm 실습 — _shared/practice-runner) ── -->
+  <script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    // ESM three.js를 전역 window.THREE로 브리지 (practice-runner·실습 플러그인이 window.THREE 참조)
+    import * as THREE from 'three';
+    window.THREE = THREE;
+  </script>
+
+  <!-- ── CDN: @jscad/modeling UMD (cad-print 실습 — window.jscadModeling) ── -->
+  <script defer src="https://unpkg.com/@jscad/modeling@2/dist/jscad-modeling.min.js" onerror="window.__CDN_FAILED=true"></script>
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-route="quiz" data-viewport-mode="desktop">
+
+<div id="read-bar"></div>
+
+<div class="app-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <div class="brand-glyph" id="brand-glyph">學</div>
+        <div>
+          <div class="brand-name" id="brand-name">학습</div>
+        </div>
+      </div>
+      <div style="margin-top:6px">
+        <a href="index.html" style="font-size:var(--fs-xs);color:var(--text-muted,#888);text-decoration:none">← 과목 목록</a>
+      </div>
+      <div class="overall">
+        <div class="overall-top"><span>전체 정복률</span><span class="overall-pct" id="ov-pct">0%</span></div>
+        <div class="bar"><i id="ov-bar"></i></div>
+      </div>
+    </div>
+    <nav class="nav" id="nav" aria-label="단원 네비게이션"></nav>
+  </aside>
+  <div class="drawer-scrim" id="scrim"></div>
+
+  <main class="main-content" id="main-content" role="main">
+
+    <div class="toolbar">
+      <button class="menu-btn" id="menu-btn" aria-label="메뉴">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="app-header__logo">학습</span>
+      <div class="search-wrap">
+        <svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="search" type="text" placeholder="개념·함수 검색" autocomplete="off" />
+      </div>
+      <nav class="app-header__nav" role="navigation" aria-label="주 메뉴">
+        <button type="button" class="nav-btn" data-route-trigger="quiz" aria-label="퀴즈 화면">퀴즈</button>
+        <button type="button" class="nav-btn" data-route-trigger="dashboard" aria-label="대시보드">대시보드</button>
+        <button type="button" class="nav-btn" data-route-trigger="concept" aria-label="개념서 뷰">개념서</button>
+        <button type="button" class="nav-btn" data-route-trigger="settings" aria-label="설정">설정</button>
+      </nav>
+    </div>
+
+    <section data-screen="quiz" aria-label="카드 퀴즈 세션">
+      <div id="plugin-host"></div>
+    </section>
+
+    <section data-screen="dashboard" hidden aria-label="진단 대시보드">
+      <div class="dashboard-wrap">
+        <div class="dashboard-header">
+          <h1 class="dashboard-title">진단 대시보드</h1>
+          <p class="dash-sub">인출연습 기반 학습 진단 · 영역별 정복도</p>
+        </div>
+        <div class="widget-grid">
+          <article data-widget="retrieval" aria-label="인출성취율 위젯">
+            <h2 class="widget-header">인출성취율</h2>
+            <p data-proxy-label class="text-muted" style="font-size:var(--fs-xs)">인출성취율(proxy) — cold 첫시도 정답률</p>
+            <div class="widget-body">
+              <div id="retrieval-list" class="retrieval-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+          <article data-widget="weakness" aria-label="약점진단 위젯">
+            <h2 class="widget-header">약점 단원 TOP 5</h2>
+            <div class="widget-body">
+              <div id="weakness-list" class="weakness-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+          <article data-widget="pass-path" aria-label="합격경로 진단 위젯">
+            <h2 class="widget-header">목표 대비 진도</h2>
+            <div class="widget-body">
+              <div id="pass-path-list" class="pass-path-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+          </article>
+          <article data-widget="progress-bar" aria-label="완주 진도바 위젯">
+            <h2 class="widget-header">Leitner 박스 분포</h2>
+            <div class="widget-body">
+              <div id="completion-list" class="completion-list"><p class="widget-empty">데이터 수집 중...</p></div>
+            </div>
+            <div class="stack-bar__legend" aria-label="박스 색상 범례">
+              <span class="legend-item"><span class="legend-dot box1" aria-hidden="true"></span>Box 1</span>
+              <span class="legend-item"><span class="legend-dot box2" aria-hidden="true"></span>Box 2</span>
+              <span class="legend-item"><span class="legend-dot box3" aria-hidden="true"></span>Box 3 (정복)</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section data-screen="concept" hidden aria-label="개념서 뷰">
+      <div class="concept-wrap">
+        <button type="button" data-concept="back-to-quiz" class="concept-back-btn" aria-label="퀴즈로 돌아가기">← 퀴즈로 돌아가기</button>
+        <div class="chips" id="freq-chips" aria-label="빈출 레벨 필터" style="margin-bottom:12px">
+          <button class="chip active" data-lv="all">전체</button>
+          <button class="chip lv3" data-lv="3" aria-label="최빈출"><span class="dot" aria-hidden="true">★★★</span></button>
+          <button class="chip lv2" data-lv="2" aria-label="빈출"><span class="dot" aria-hidden="true">★★</span></button>
+          <button class="chip lv1" data-lv="1" aria-label="심화"><span class="dot" aria-hidden="true">★</span></button>
+        </div>
+        <div data-concept="body" id="concept-body" role="region" aria-label="개념서 본문">
+          <p class="text-muted">개념서 섹션을 선택하면 내용이 표시됩니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section data-screen="settings" hidden aria-label="설정">
+      <div class="settings-wrap">
+        <div class="settings-section">
+          <h2 class="settings-section__title">진도 내보내기 / 가져오기</h2>
+          <p class="text-muted">전체 플러그인 학습 진도를 JSON 파일로 내보내거나 가져옵니다.</p>
+          <button type="button" data-settings="export" class="btn-settings-action" aria-label="진도 데이터 내보내기">내보내기 (JSON)</button>
+          <button type="button" data-settings="import" class="btn-settings-action" style="margin-left:8px" aria-label="진도 데이터 가져오기">가져오기 (JSON)</button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none" aria-label="진도 파일 선택">
+          <div id="export-result" aria-live="polite" class="text-muted"></div>
+        </div>
+        <div class="settings-section">
+          <h2 class="settings-section__title">테마</h2>
+          <div data-settings="theme" aria-label="테마 전환 (준비 중)">종이톤(Gowun Batang) 단일 테마</div>
+        </div>
+        <div id="settings-error-area" hidden aria-live="assertive" class="storage-error-banner">
+          <strong>저장소 오류</strong><span id="settings-error-msg"></span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div><!-- /.app-shell -->
+
+<!-- 과목 레지스트리 (랜딩·동적로더 공용) -->
+<script src="subjects.js"></script>
+
+<!-- ============================================================
+     동적 과목 로더 (file:// fetch 회피 — DOM script 주입, onload 체이닝)
+     순서: 생성물(synonyms→manifest→decks) → app.js → 플러그인 → shell.js → SHELL.init
+============================================================ -->
+<script>
+(function () {
+  function fail(msg) {
+    document.getElementById('plugin-host').innerHTML =
+      '<div style="padding:32px;font-family:sans-serif">' +
+      '<h2>과목을 불러오지 못했습니다</h2><p>' + msg + '</p>' +
+      '<p><a href="index.html">← 과목 목록으로</a></p></div>';
+    console.error('[study.loader]', msg);
+  }
+
+  // 순차 스크립트 주입 (각 onload 후 다음)
+  function loadSeq(srcs, done) {
+    var i = 0;
+    (function next() {
+      if (i >= srcs.length) { done(); return; }
+      var s = document.createElement('script');
+      s.src = srcs[i];
+      s.onload = function () { i++; next(); };
+      s.onerror = function () { fail('스크립트 로드 실패: ' + srcs[i]); };
+      document.body.appendChild(s);
+    })();
+  }
+
+  var params = new URLSearchParams(location.search);
+  var subject = params.get('subject');
+  var reg = (window.SUBJECTS || {})[subject];
+  if (!subject || !reg) { fail('알 수 없는 과목: ' + subject); return; }
+
+  var base = '../../과목/' + reg.labelPath + '/생성물/';
+
+  // 엔진 코어 + 플러그인 (과목 독립, index.html과 동일 순서·집합)
+  var ENGINE = [
+    'app.js',
+    '../plugins/card-quiz/manifest.js',
+    '../plugins/card-quiz/plugin.js',
+    '../../규격/card-quiz/_목업카드.js',
+    '../plugins/coding/manifest.js',
+    '../plugins/coding/plugin.js',
+    '../plugins/coding/_example/activities.js',
+    '../../규격/coding/_목업액티비티.js',
+    '../plugins/excel/manifest.js',
+    '../plugins/excel/plugin.js',
+    '../plugins/excel/_example/activities.js',
+    '../../규격/excel/_목업액티비티.js',
+    '../plugins/english/manifest.js',
+    '../plugins/english/plugin.js',
+    '../plugins/english/_example/activities.js',
+    '../../규격/english/_목업액티비티.js',
+    '../plugins/aws/manifest.js',
+    '../plugins/aws/plugin.js',
+    '../plugins/aws/_example/activities.js',
+    '../../규격/aws/_목업액티비티.js',
+    // ── 신규 실습 플러그인 (cad-print 모델링 · robot-arm FK) + 공유 실습러너 ──
+    '../plugins/_shared/practice-runner.js',
+    '../plugins/cad-print/manifest.js',
+    '../plugins/cad-print/plugin.js',
+    '../plugins/cad-print/_example/activities.js',
+    '../plugins/robot-arm/manifest.js',
+    '../plugins/robot-arm/plugin.js',
+    '../plugins/robot-arm/_example/activities.js',
+    // ── 자연어처리 학습(읽기+시험시뮬) 플러그인 ──
+    '../plugins/nlp-study/manifest.js',
+    '../plugins/nlp-study/plugin.js',
+    'shell.js'
+  ];
+
+  // 1단계: synonyms + manifest + activities (과목 콘텐츠 전역 등록)
+  loadSeq([base + 'synonyms.js', base + 'manifest.js', base + 'activities.js'], function () {
+    var m = window.MANIFEST && window.MANIFEST[subject];
+    if (!m || !m.decks) { fail('manifest 로드 실패: ' + subject); return; }
+    // 2단계: manifest.decks 순서대로 deck.js
+    var deckSrcs = m.decks.map(function (d) { return base + d.src; });
+    // 3단계: deck → 엔진/플러그인 → shell
+    loadSeq(deckSrcs.concat(ENGINE), function () {
+      try { window.SHELL.init({ subject: subject }); }
+      catch (e) { fail('SHELL.init 실패: ' + (e && e.message)); }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
