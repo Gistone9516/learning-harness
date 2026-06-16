@@ -59,3 +59,4 @@ class Ctx:
     session: Any
     emit: Callable[..., Any]
     ai_persona: str | None = None
+    enabled_capabilities: set = field(default_factory=set)

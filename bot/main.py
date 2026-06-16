@@ -82,7 +82,7 @@ class StudyBot(discord.Client):
         guild = discord.Object(id=self.guild_id)
 
         def _get_runner():
-            async def _runner(interaction: discord.Interaction, *, deck=None, unit=None, dday_mode=False):
+            async def _runner(interaction: discord.Interaction, *, deck=None, unit=None, dday_mode=False, review=False):
                 channel = interaction.channel
                 user_id = interaction.user.id
                 br = self.boot_result
@@ -106,12 +106,35 @@ class StudyBot(discord.Client):
                     session=sess,
                     emit=None,  # bound inside run_session
                     ai_persona=br.ai_persona,
+                    enabled_capabilities=br.enabled_capabilities,
                 )
+
+                # adaptive_weight (layer 2, token 0): recompute weight overrides when enabled
+                weight_overrides = None
+                if "adaptive_weight" in br.enabled_capabilities:
+                    try:
+                        from caps.adaptive_weight import recompute_weights, save_weight_overrides
+                        weight_overrides = recompute_weights(br.store, br.deck)
+                        save_weight_overrides(br.mount, br.deck.namespace, weight_overrides)
+                    except Exception as e:
+                        log.warning("adaptive_weight recompute failed: %s", e)
 
                 opts = QueueOptions(
                     deck_namespace=br.deck.namespace,
                     dday_mode=dday_mode,
+                    weight_overrides=weight_overrides,
                 )
+
+                # /review: restrict the session to incorrect or due cards
+                deck_cards = br.deck.cards
+                if review:
+                    import time as _t
+                    from review_select import select_review_cards
+                    deck_cards = select_review_cards(br.store, br.deck.cards, int(_t.time() * 1000))
+                    if not deck_cards:
+                        await channel.send(f"<@{user_id}> 복습할 카드가 없습니다.")
+                        self._sessions.pop(user_id, None)
+                        return
 
                 async def on_finish(ctx, session: Session):
                     stats = session.stats
@@ -127,7 +150,7 @@ class StudyBot(discord.Client):
 
                 await run_session(
                     ctx=ctx,
-                    deck_cards=br.deck.cards,
+                    deck_cards=deck_cards,
                     store=br.store,
                     mount=br.mount,
                     opts=opts,
@@ -149,6 +172,10 @@ class StudyBot(discord.Client):
         register_handler("short_modal", _sm.handle)
         from handlers import cloze_modal as _cm
         register_handler("cloze_modal", _cm.handle)
+        from handlers import seq_modal as _seq
+        register_handler("seq_modal", _seq.handle)
+        from handlers import mcq_select as _mcqs
+        register_handler("mcq_select", _mcqs.handle)
 
         await self.tree.sync(guild=guild)
 

@@ -70,7 +70,10 @@ def setup_commands(
         if not allowed_interaction(interaction, interaction.user.id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
-        await interaction.response.send_message("복습 모드는 준비 중.", ephemeral=True)
+        await interaction.response.send_message("오답 복습 시작.", ephemeral=True)
+        runner = get_session_runner()
+        if runner:
+            await runner(interaction, review=True)
 
     @tree.command(name="due", description="due 카드 수 확인", guild=guild)
     async def due_cmd(interaction: discord.Interaction) -> None:
@@ -140,6 +143,38 @@ def setup_commands(
             f"활성 능력: {caps}", ephemeral=True
         )
 
+    @tree.command(name="dashboard", description="학습 대시보드", guild=guild)
+    async def dashboard_cmd(interaction: discord.Interaction) -> None:
+        if not allowed_interaction(interaction, interaction.user.id):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message("대시보드 생성 중.", ephemeral=True)
+        import time
+        from dashboard import get_dashboard_data
+        data = get_dashboard_data(
+            boot_result.deck, boot_result.store, int(time.time() * 1000), boot_result.pass_targets
+        )
+        from render.dashboard_live import render as render_dashboard
+        from render.box_table import render as render_box
+        from render.mastery_chart import render as render_chart
+        await render_dashboard(interaction.channel, data)
+        await render_box(interaction.channel, data)
+        await render_chart(interaction.channel, data)
+
+    @tree.command(name="digest", description="주간 다이제스트", guild=guild)
+    async def digest_cmd(interaction: discord.Interaction) -> None:
+        if not allowed_interaction(interaction, interaction.user.id):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message("다이제스트 생성 중.", ephemeral=True)
+        import time
+        from dashboard import get_dashboard_data
+        data = get_dashboard_data(
+            boot_result.deck, boot_result.store, int(time.time() * 1000), boot_result.pass_targets
+        )
+        from render.digest_weekly import render as render_digest
+        await render_digest(interaction.channel, data)
+
     @tree.command(name="help", description="도움말", guild=guild)
     async def help_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
@@ -147,6 +182,8 @@ def setup_commands(
             "/review - 오답 복습\n"
             "/due - due 카드 수\n"
             "/stats - 통계\n"
+            "/dashboard - 학습 대시보드\n"
+            "/digest - 주간 다이제스트\n"
             "/card <id> - 카드 조회\n"
             "/concept <ref> - 개념 조회\n"
             "중단 / stop - 세션 중단",

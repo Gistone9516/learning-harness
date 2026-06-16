@@ -70,6 +70,34 @@ class Session:
         return not self.queue and not self.requeue
 
 
+async def _precard_caps(ctx, card) -> None:
+    """Optional pre-card enhancement caps (opt-in via config). No-op headless (channel is None)."""
+    caps = getattr(ctx, "enabled_capabilities", set()) or set()
+    if "confidence_rate" in caps:
+        try:
+            from caps.confidence_rate import ask_confidence
+            await ask_confidence(ctx, card.card_id)
+        except Exception as e:
+            log.warning("confidence_rate hook failed: %s", e)
+    if "hint_progressive" in caps:
+        try:
+            from caps.hint_progressive import show_hint
+            await show_hint(ctx, card)
+        except Exception as e:
+            log.warning("hint_progressive hook failed: %s", e)
+
+
+async def _postcorrect_caps(ctx, card) -> None:
+    """Optional post-correct enhancement cap (elaboration). Opt-in via config. No-op headless."""
+    caps = getattr(ctx, "enabled_capabilities", set()) or set()
+    if "elaborate_ask" in caps:
+        try:
+            from caps.elaborate_ask import ask_elaboration
+            await ask_elaboration(ctx, card)
+        except Exception as e:
+            log.warning("elaborate_ask hook failed: %s", e)
+
+
 async def run_session(
     ctx: Any,
     deck_cards: list[CardDef],
@@ -161,6 +189,10 @@ async def run_session(
         # replace ctx.emit with a closure that captures this card's attempt_kind
         ctx.emit = _make_emit(attempt_kind)
 
+        # optional pre-card enhancement caps (confidence, hint); opt-in, skipped headless
+        if ctx.channel is not None:
+            await _precard_caps(ctx, card)
+
         now = now_fn()
 
         # 3. invoke handler
@@ -179,6 +211,10 @@ async def run_session(
         # 4. transition + save (when a verdict is present)
         if result.verdict is not None:
             await ctx.emit(card_id, result.verdict, now_fn())
+
+        # optional post-correct enhancement cap (elaboration); opt-in, skipped headless
+        if result.verdict == "correct" and ctx.channel is not None:
+            await _postcorrect_caps(ctx, card)
 
         # 5. requeue (bot-contract §4.5)
         if result.requeue:
