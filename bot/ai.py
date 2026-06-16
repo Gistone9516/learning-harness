@@ -24,6 +24,7 @@ class AIResult:
     text: str
     ok: bool
     error: str | None = None
+    session_id: str | None = None   # the effective claude session id used (lets the caller --resume on later turns)
 
 
 async def invoke(
@@ -153,4 +154,4 @@ async def invoke(
         if err:
             return AIResult(text="", ok=False, error=f"No output: {err}")
 
-    return AIResult(text=final_text, ok=True)
+    return AIResult(text=final_text, ok=True, session_id=effective_sid)

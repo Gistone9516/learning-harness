@@ -95,6 +95,8 @@ class StudyBot(discord.Client):
                     user_id=user_id,
                     store=br.store,
                     deck=br.deck,
+                    mount=br.mount,
+                    deck_namespace=br.deck.namespace,
                     synonyms=br.synonyms,
                     grade_mode_of=lambda cid: br.grade_mode_map.get(cid, "exact"),
                     leitner_cfg=br.leitner_cfg,
@@ -103,6 +105,7 @@ class StudyBot(discord.Client):
                     sid=None,
                     session=sess,
                     emit=None,  # bound inside run_session
+                    ai_persona=br.ai_persona,
                 )
 
                 opts = QueueOptions(

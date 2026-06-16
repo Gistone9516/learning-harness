@@ -55,6 +55,8 @@ class Session:
     seen_card_ids: set[str] = field(default_factory=set)
     stats: SessionStats = field(default_factory=SessionStats)
     active: bool = False
+    claude_sid: str | None = None               # claude CLI session id for this study session (volatile, ai_socratic multi-turn)
+    turns: list = field(default_factory=list)   # sliding conversation window [(role, text), ...]; volatile, dies with the session
 
     def next_card_id(self) -> str | None:
         """Drain requeue first, then pop from queue. Returns None when both are empty."""

@@ -40,11 +40,16 @@ class Ctx:
     sid: AI session id (multi-turn) or None.
     session: current Session instance (circular ref, Any not TYPE_CHECKING).
     emit: shared coroutine for classify + transition + save.
+    mount: content folder mount path (for sidecar I/O, SoT §2.1).
+    deck_namespace: active deck namespace (sidecar filename component).
+    ai_persona: optional global persona clause injected into AI preambles.
     """
     channel: Any
     user_id: int
     store: ProgressStore
     deck: DeckData
+    mount: str
+    deck_namespace: str
     synonyms: dict[str, str]
     grade_mode_of: Callable[[str], str]
     leitner_cfg: LeitnerConfig | None
@@ -53,3 +58,4 @@ class Ctx:
     sid: str | None
     session: Any
     emit: Callable[..., Any]
+    ai_persona: str | None = None

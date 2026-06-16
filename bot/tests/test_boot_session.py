@@ -211,6 +211,8 @@ def _make_ctx(boot_result, session: Session, mount: str):
         user_id=0,
         store=br.store,
         deck=br.deck,
+        mount=mount,
+        deck_namespace=br.deck.namespace,
         synonyms=br.synonyms,
         grade_mode_of=lambda cid: br.grade_mode_map.get(cid, "exact"),
         leitner_cfg=br.leitner_cfg,

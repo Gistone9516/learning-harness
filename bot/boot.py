@@ -87,6 +87,7 @@ class BootResult:
     enabled_capabilities: set[str]
     ai_model: str | None
     ai_effort: str
+    ai_persona: str | None = None
 
 
 # -- Validation helpers -------------------------------------------------------
@@ -418,6 +419,7 @@ def load(mount: str) -> BootResult:
     ai_config: dict = caps_config.get("ai", {})
     ai_model: str | None = ai_config.get("model")
     ai_effort: str = ai_config.get("effort", "low")
+    ai_persona: str | None = ai_config.get("persona")
 
     # Load progress
     store = _persist.load_progress(mount, namespace)
@@ -435,4 +437,5 @@ def load(mount: str) -> BootResult:
         enabled_capabilities=enabled_capabilities,
         ai_model=ai_model,
         ai_effort=ai_effort,
+        ai_persona=ai_persona,
     )
