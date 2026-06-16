@@ -197,6 +197,15 @@ class StudyBot(discord.Client):
             activity=discord.CustomActivity(name="학습 대기 중")
         )
 
+        # SRS due-card push (Cycle 7): start the periodic loop when the deck enables it
+        channel = self.get_channel(self.channel_id)
+        if channel is not None:
+            try:
+                from srs_push import start_srs_push
+                start_srs_push(channel, self.allowed_user_id, self.boot_result)
+            except Exception as e:
+                log.warning("SRS push start failed: %s", e)
+
     async def on_message(self, message: discord.Message) -> None:
         # Ignore messages from the bot itself.
         if message.author.bot:

@@ -92,21 +92,30 @@ nothing (zero file I/O, discord, or harness imports).
 
 ```bash
 cd engine && python -m pytest tests/ -q      # 159 pure-engine regression tests
-cd bot    && python -m pytest tests/ -q      # 13 headless boot/session plus examples integration tests
+cd bot    && python -m pytest tests/ -q      # 332 headless tests (boot/session, handlers, caps, AI seam, renderers)
 ```
 - The engine core is pure functions (`now` is injected for determinism). The bot is verified headless without
-  discord (boot and the session loop); Discord I/O is live-only.
+  discord or a live `claude` CLI (boot, session loop, handler grading cores, sidecar I/O, and the AI helper
+  layer with a mocked `invoke`). Discord I/O and live AI are exercised only against a running bot.
 
 ## 6. Current status
 
 - Done: (1) planning, (2) specs (7 documents, passed adversarial integrity review), (3) implementation
   (engine core, bot shell, mock content, skill).
-- 172 regression tests green (159 engine plus 13 bot). The full deterministic loop
-  (boot, queue, grade, Leitner, persist) is proven headless.
-- Pending: live Discord verification (needs the user prerequisites: bot app, token, server). Discord I/O
-  handlers are only verified live.
-- Pending: remaining capability increments (mcq_select, seq_modal, AI mode, SRS push, dashboard rendering, and
-  so on; about 30 in the catalog). The web (frontend-design) workspace is deferred.
+- Done: the full capability set across the four layers.
+  - All six card handlers: recall_self, short_modal, cloze_modal, mcq_buttons, and the formerly-missing
+    seq_modal and mcq_select (no more silent fallback).
+  - `/review` (incorrect or due cards) and the dashboard commands `/dashboard` and `/digest`.
+  - Six sidecar capabilities (confidence_rate, hint_progressive, elaborate_ask, read_resume, srs_due_alert,
+    adaptive_weight) wired as opt-in session hooks and queue weighting.
+  - Twelve layer-3 AI capabilities on the session-based `ai_caps` seam (one claude session per study session,
+    multi-turn only for `ai_socratic`); AI grading falls back to self-grade, so the binary invariant holds.
+  - Dashboard renderers (live card, box table, mastery chart with a text fallback, weekly digest, weakness
+    wiki) and the SRS due-card push loop.
+- 491 regression tests green (159 engine plus 332 bot), all headless. The deterministic loop and every new
+  capability are proven without discord or a live `claude` CLI (mocked `invoke`).
+- Pending: live Discord verification (needs the user prerequisites: bot app, token, server) and live AI
+  smoke (needs the `claude` CLI on PATH). The web (frontend-design) workspace remains deferred.
 
 ## 7. Where to start (for AI and new contributors)
 
