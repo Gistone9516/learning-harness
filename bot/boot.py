@@ -30,6 +30,7 @@ from bot_errors import (
     DeckNotFoundError,
 )
 import persist as _persist
+import capability_registry as _reg
 
 log = logging.getLogger(__name__)
 
@@ -46,29 +47,12 @@ _VALID_NORM_RULES = {
 _VALID_CARD_TYPES = {"func", "proc", "recall_seq", "cloze", "judge"}
 _VALID_GRADE_MODES = {"exact", "keyword", "cloze", "self"}
 
-# Core tier capability id set (learning-types layer 2 core, layer 4 core)
-_CORE_CAPABILITY_IDS = {
-    "card_render", "recall_self", "mcq_buttons", "mcq_select", "short_modal",
-    "cloze_modal", "seq_modal", "reaction_quick",
-    "feedback_inline", "paginate",
-    "confidence_rate", "hint_progressive", "elaborate_ask", "read_resume",
-    "srs_due_alert", "session_progress",
-    "dashboard_live", "box_table", "digest_weekly",
-    "gating", "event_trigger", "heartbeat", "coalesce_base",
-    # extensions (only known ids are allowed)
-    "quiz_poll", "concept_link", "preview_then_test", "session_thread",
-    "exam_delayed", "mastery_chart", "weakness_wiki", "content_hotreload",
-    "curate_contextmenu", "pin_rotate",
-    "perm_preflight", "presence_signal", "channel_scaffold", "dm_private",
-    # layer 3 AI
-    "ai_openend_grade", "ai_socratic", "ai_hint", "ai_generate_items",
-    "ai_personal_feedback", "ai_misconception", "ai_adaptive_weight",
-    "ai_session_summary", "ai_stream_render", "ai_variant_q",
-    "ai_persona", "ai_proactive_remind",
-}
+# Capability id whitelist + layer-4-always set are derived from the capability
+# registry (single source of truth). See bot/capability_registry.py.
+_CORE_CAPABILITY_IDS = set(_reg.all_ids())
 
-# Layer 4 always active (regardless of registry enabled state)
-_LAYER4_ALWAYS = {"gating", "event_trigger", "heartbeat", "coalesce_base"}
+# Layer 4 always active (regardless of the enabled set).
+_LAYER4_ALWAYS = set(_reg.layer4_always())
 
 
 @dataclass
@@ -353,17 +337,8 @@ def _compile_enabled_capabilities(caps_config: dict) -> set[str]:
     """Build capability registry. If enabled is not specified, activate all core capabilities."""
     enabled_list = caps_config.get("enabled", [])
     if not enabled_list:
-        # Default: full core tier + layer 4 core
-        core_caps = {
-            "card_render", "recall_self", "mcq_buttons", "mcq_select",
-            "short_modal", "cloze_modal", "seq_modal", "reaction_quick",
-            "feedback_inline", "paginate",
-            "confidence_rate", "hint_progressive", "elaborate_ask", "read_resume",
-            "srs_due_alert", "session_progress",
-            "dashboard_live", "box_table", "digest_weekly",
-            "gating", "event_trigger", "heartbeat", "coalesce_base",
-        }
-        return core_caps
+        # Default: full core tier (layer 2 + layer 4 core), derived from the registry.
+        return set(_reg.default_core_ids())
 
     return set(enabled_list) | _LAYER4_ALWAYS
 
@@ -420,6 +395,10 @@ def load(mount: str) -> BootResult:
     ai_model: str | None = ai_config.get("model")
     ai_effort: str = ai_config.get("effort", "low")
     ai_persona: str | None = ai_config.get("persona")
+
+    # Verify the enabled capabilities have their required files present (partial-clone guard).
+    from wiring import verify_capability_files
+    verify_capability_files(enabled_capabilities)
 
     # Load progress
     store = _persist.load_progress(mount, namespace)

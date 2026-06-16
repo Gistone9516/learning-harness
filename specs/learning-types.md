@@ -125,3 +125,12 @@
 - **Sidecar (SoT §2.1)**: capabilities that use auxiliary state outside CardProgress — `confidence_rate`(confidence), `read_resume`(read_pos), `elaborate_ask`(elaboration), `srs_due_alert`(alert_sent deduplication), adaptive_weight (weight recalculation) — follow the SoT §2.1 sidecar contract (managed by bot/harness, no engine schema pollution, path `<mount>/_state/sidecar-<capability_id>-<deck>.json`).
 
 > [OPEN-B] Resolution (bot-contract): `handler` maps as a `capability_id → bot handler function` dispatch table.
+
+## Machine registry (implementation)
+
+This document is the human authority. Its machine projection is `bot/capability_registry.py`
+(`REGISTRY: dict[capability_id → CapSpec]` with layer, tier, handler_module, slash_commands,
+needs_ai, files, shared_bases, dep_capabilities). `bot/boot.py` derives the validation whitelist
+and the default-core set from it; `bot/wiring.py` registers handlers and verifies required files for
+the enabled set; `tools/clone.py` uses `files`/`shared_bases` to copy only the enabled capabilities
+into a consuming project. Keep the two in sync: a new capability is added here AND as a `CapSpec` row.

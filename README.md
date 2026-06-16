@@ -38,6 +38,27 @@ Progress is saved under that folder's `_state/`.
 **From a consuming project:** run `python skills/install.py` once to create the global skill, then launch
 the bot from any subject folder with a single line.
 
+### Modular clone (copy only the capabilities you need)
+
+The kit is capability-modular: a consuming project can clone the **core kernel** plus only the
+capability bundles it enables, run from its own copy, and leave this repo pristine.
+
+```bash
+python tools/clone.py --target <PROJECT_DIR> --from-config [--env copy]
+```
+
+- `bot/capability_registry.py` is the single source of truth: each `capability_id` maps to its
+  files, shared bases, dispatch handler, and slash commands. `bot/boot.py`, `bot/wiring.py`, and
+  `tools/clone.py` all read it.
+- `tools/clone.py` resolves the enabled set (from the target's `config/<deck>.json`), unions the
+  core kernel with each enabled capability's files (deduped, transitive), and copies them preserving
+  the `bot/ + engine/ + bot/harness/` layout. The target's content (`manifest/decks/config/_state`) is untouched.
+- **Gated wiring**: `bot/wiring.py` registers dispatch handlers and `bot/commands.py` registers slash
+  commands **only for enabled capabilities** (recall_self is always present as the fallback). An
+  enabled capability whose files were not cloned fails boot with a clear `ContentInjectionError`.
+- The cloned project runs standalone: `cd <PROJECT_DIR> && python bot/main.py <PROJECT_DIR>`.
+- `/study unit:<unit>` filters the session to one unit (e.g. a day or a `*-learn` flashcard set).
+
 ## 3. Folder structure
 
 ```
@@ -58,7 +79,12 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   └ launch-skill.md          global skill and install
 ├ engine/                      pure Python core (zero discord, zero file I/O): scoring, leitner, selection, dashboard, migrate
 ├ bot/                         discord.py shell: boot, session, dispatch, handlers, persist, ai, commands
+│   ├ capability_registry.py   capability SoT (files/handler/commands per capability_id)
+│   ├ wiring.py                gated handler registration + required-file verification
+│   ├ study_select.py          pure unit-filter helper for /study
 │   └ harness/                 Discord harness catalog (copied, 59 files)
+├ tools/                       maintenance scripts
+│   └ clone.py                 clone core kernel + selected capabilities into a consuming project
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
 ├ web/                         (reserved) frontend-design workspace for continuous interactive practice and long-form reading, deferred

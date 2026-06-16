@@ -125,12 +125,25 @@ class StudyBot(discord.Client):
                     weight_overrides=weight_overrides,
                 )
 
-                # /review: restrict the session to incorrect or due cards
                 deck_cards = br.deck.cards
+                # deck filter: only a single deck is loaded, so warn + ignore a mismatch.
+                if deck and deck != br.deck.namespace:
+                    await channel.send(
+                        f"<@{user_id}> 현재 단일 덱 '{br.deck.namespace}'만 로드되어 deck='{deck}'는 무시됩니다."
+                    )
+                # unit filter: restrict the session to one unit (e.g. day-01 or day-01-learn).
+                if unit:
+                    from study_select import filter_cards_by_unit
+                    deck_cards = filter_cards_by_unit(deck_cards, unit)
+                    if not deck_cards:
+                        await channel.send(f"<@{user_id}> '{unit}' 단원에 해당하는 카드가 없습니다.")
+                        self._sessions.pop(user_id, None)
+                        return
+                # /review: restrict to incorrect or due cards (within the unit-filtered set).
                 if review:
                     import time as _t
                     from review_select import select_review_cards
-                    deck_cards = select_review_cards(br.store, br.deck.cards, int(_t.time() * 1000))
+                    deck_cards = select_review_cards(br.store, deck_cards, int(_t.time() * 1000))
                     if not deck_cards:
                         await channel.send(f"<@{user_id}> 복습할 카드가 없습니다.")
                         self._sessions.pop(user_id, None)
@@ -170,22 +183,9 @@ class StudyBot(discord.Client):
 
         _cmds.setup_commands(self.tree, discord.Object(id=self.guild_id), self.boot_result, _get_runner, self._make_command_ctx)
 
-        # Re-register persistent views (bot-contract §7).
-        from handlers import recall_self as _rs
-        # Register handlers.
-        register_handler("recall_self", _rs.handle)
-        from handlers import mcq_buttons as _mcq
-        register_handler("mcq_buttons", _mcq.handle)
-        from handlers import short_modal as _sm
-        register_handler("short_modal", _sm.handle)
-        from handlers import cloze_modal as _cm
-        register_handler("cloze_modal", _cm.handle)
-        from handlers import seq_modal as _seq
-        register_handler("seq_modal", _seq.handle)
-        from handlers import mcq_select as _mcqs
-        register_handler("mcq_select", _mcqs.handle)
-        from caps_ai.ai_openend_grade import handle as _ai_grade
-        register_handler("ai_openend_grade", _ai_grade)
+        # Register dispatch handlers for enabled capabilities only (+ recall_self fallback).
+        from wiring import register_enabled_handlers
+        register_enabled_handlers(self.boot_result.enabled_capabilities)
 
         await self.tree.sync(guild=guild)
 

@@ -20,6 +20,7 @@ from discord import app_commands
 from typing import TYPE_CHECKING
 
 from gating import allowed_msg, allowed_interaction
+import capability_registry as _reg
 
 if TYPE_CHECKING:
     pass
@@ -28,6 +29,21 @@ log = logging.getLogger(__name__)
 
 # Magic word set
 STOP_WORDS = {"중단", "stop"}
+
+
+def _gate(tree, name, description, guild, active):
+    """Return the tree.command decorator when `active`, else a no-op decorator.
+
+    Lets a slash command be registered only when its owning capability is enabled,
+    so a partial-clone project never exposes (or imports for) a command it lacks.
+    """
+    if active:
+        return tree.command(name=name, description=description, guild=guild)
+
+    def _noop(fn):
+        return fn
+
+    return _noop
 
 
 def setup_commands(
@@ -42,6 +58,12 @@ def setup_commands(
     boot_result: BootResult (returned by boot.load).
     get_session_runner: () -> run_session coroutine factory.
     """
+
+    # Capability-gated command registration: only register commands owned by an
+    # enabled capability. Core commands (study/review/due/stats/card/concept/
+    # settings/help) are always registered.
+    enabled = set(boot_result.enabled_capabilities)
+    avail_cmds = _reg.commands_for(enabled)
 
     @tree.command(name="study", description="학습 세션 시작", guild=guild)
     @app_commands.describe(
@@ -144,7 +166,7 @@ def setup_commands(
             f"활성 능력: {caps}", ephemeral=True
         )
 
-    @tree.command(name="dashboard", description="학습 대시보드", guild=guild)
+    @_gate(tree, "dashboard", "학습 대시보드", guild, "dashboard" in avail_cmds)
     async def dashboard_cmd(interaction: discord.Interaction) -> None:
         if not allowed_interaction(interaction, interaction.user.id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -155,14 +177,18 @@ def setup_commands(
         data = get_dashboard_data(
             boot_result.deck, boot_result.store, int(time.time() * 1000), boot_result.pass_targets
         )
-        from render.dashboard_live import render as render_dashboard
-        from render.box_table import render as render_box
-        from render.mastery_chart import render as render_chart
-        await render_dashboard(interaction.channel, data)
-        await render_box(interaction.channel, data)
-        await render_chart(interaction.channel, data)
+        # Render only the enabled renderers (a partial clone may lack some).
+        if "dashboard_live" in enabled:
+            from render.dashboard_live import render as render_dashboard
+            await render_dashboard(interaction.channel, data)
+        if "box_table" in enabled:
+            from render.box_table import render as render_box
+            await render_box(interaction.channel, data)
+        if "mastery_chart" in enabled:
+            from render.mastery_chart import render as render_chart
+            await render_chart(interaction.channel, data)
 
-    @tree.command(name="digest", description="주간 다이제스트", guild=guild)
+    @_gate(tree, "digest", "주간 다이제스트", guild, "digest" in avail_cmds)
     async def digest_cmd(interaction: discord.Interaction) -> None:
         if not allowed_interaction(interaction, interaction.user.id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -176,7 +202,7 @@ def setup_commands(
         from render.digest_weekly import render as render_digest
         await render_digest(interaction.channel, data)
 
-    @tree.command(name="socratic", description="소크라테스식 대화", guild=guild)
+    @_gate(tree, "socratic", "소크라테스식 대화", guild, "socratic" in avail_cmds)
     @app_commands.describe(card_id="대상 card_id")
     async def socratic_cmd(interaction: discord.Interaction, card_id: str) -> None:
         if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
@@ -193,7 +219,7 @@ def setup_commands(
         opening = front.get("prompt") or front.get("text") or front.get("scenario", "")
         await run_socratic(ctx, card, opening)
 
-    @tree.command(name="misconception", description="오개념 진단", guild=guild)
+    @_gate(tree, "misconception", "오개념 진단", guild, "misconception" in avail_cmds)
     async def misconception_cmd(interaction: discord.Interaction) -> None:
         if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -206,7 +232,7 @@ def setup_commands(
         text = await diagnose(ctx, cards)
         await interaction.channel.send(text or "진단할 오답 데이터가 부족합니다.")
 
-    @tree.command(name="strategy", description="학습 전략 제안", guild=guild)
+    @_gate(tree, "strategy", "학습 전략 제안", guild, "strategy" in avail_cmds)
     async def strategy_cmd(interaction: discord.Interaction) -> None:
         if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -225,7 +251,7 @@ def setup_commands(
         text = await suggest_strategy(ctx, weakness)
         await interaction.channel.send(text or "전략 제안을 생성할 수 없습니다.")
 
-    @tree.command(name="generate", description="카드 초안 생성", guild=guild)
+    @_gate(tree, "generate", "카드 초안 생성", guild, "generate" in avail_cmds)
     @app_commands.describe(seeds="쉼표로 구분한 시드 목록")
     async def generate_cmd(interaction: discord.Interaction, seeds: str) -> None:
         if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
@@ -242,7 +268,7 @@ def setup_commands(
         lines = "\n".join(f"- {str(d.get('front', ''))[:80]}" for d in drafts)
         await interaction.channel.send("생성된 초안:\n" + lines)
 
-    @tree.command(name="variant", description="변형 문제 생성", guild=guild)
+    @_gate(tree, "variant", "변형 문제 생성", guild, "variant" in avail_cmds)
     @app_commands.describe(card_id="대상 card_id (box3 권장)")
     async def variant_cmd(interaction: discord.Interaction, card_id: str) -> None:
         if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
@@ -262,23 +288,29 @@ def setup_commands(
 
     @tree.command(name="help", description="도움말", guild=guild)
     async def help_cmd(interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            "/study [deck] [unit] [dday] - 학습 시작\n"
-            "/review - 오답 복습\n"
-            "/due - due 카드 수\n"
-            "/stats - 통계\n"
-            "/dashboard - 학습 대시보드\n"
-            "/digest - 주간 다이제스트\n"
-            "/socratic <id> - 소크라테스 대화(AI)\n"
-            "/misconception - 오개념 진단(AI)\n"
-            "/strategy - 학습 전략 제안(AI)\n"
-            "/generate <seeds> - 카드 초안 생성(AI)\n"
-            "/variant <id> - 변형 문제 생성(AI)\n"
-            "/card <id> - 카드 조회\n"
-            "/concept <ref> - 개념 조회\n"
-            "중단 / stop - 세션 중단",
-            ephemeral=True,
-        )
+        lines = [
+            "/study [deck] [unit] [dday] - 학습 시작",
+            "/review - 오답 복습",
+            "/due - due 카드 수",
+            "/stats - 통계",
+            "/card <id> - 카드 조회",
+            "/concept <ref> - 개념 조회",
+            "/settings - 설정 조회",
+        ]
+        _opt = [
+            ("dashboard", "/dashboard - 학습 대시보드"),
+            ("digest", "/digest - 주간 다이제스트"),
+            ("socratic", "/socratic <id> - 소크라테스 대화(AI)"),
+            ("misconception", "/misconception - 오개념 진단(AI)"),
+            ("strategy", "/strategy - 학습 전략 제안(AI)"),
+            ("generate", "/generate <seeds> - 카드 초안 생성(AI)"),
+            ("variant", "/variant <id> - 변형 문제 생성(AI)"),
+        ]
+        for cmd, text in _opt:
+            if cmd in avail_cmds:
+                lines.append(text)
+        lines.append("중단 / stop - 세션 중단")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 async def check_stop_word(message: discord.Message, session_store: dict) -> bool:
