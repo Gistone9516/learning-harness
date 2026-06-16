@@ -147,6 +147,14 @@ class StudyBot(discord.Client):
                         f"박스 강등: {stats.box_demotions}"
                     )
                     await channel.send(summary)
+                    if "ai_session_summary" in br.enabled_capabilities:
+                        try:
+                            from caps_ai.ai_session_summary import session_summary
+                            journal = await session_summary(ctx, stats)
+                            if journal:
+                                await channel.send(journal)
+                        except Exception as e:
+                            log.warning("ai_session_summary failed: %s", e)
 
                 await run_session(
                     ctx=ctx,
@@ -160,7 +168,7 @@ class StudyBot(discord.Client):
                 self._sessions.pop(user_id, None)
             return _runner
 
-        _cmds.setup_commands(self.tree, discord.Object(id=self.guild_id), self.boot_result, _get_runner)
+        _cmds.setup_commands(self.tree, discord.Object(id=self.guild_id), self.boot_result, _get_runner, self._make_command_ctx)
 
         # Re-register persistent views (bot-contract §7).
         from handlers import recall_self as _rs
@@ -176,6 +184,8 @@ class StudyBot(discord.Client):
         register_handler("seq_modal", _seq.handle)
         from handlers import mcq_select as _mcqs
         register_handler("mcq_select", _mcqs.handle)
+        from caps_ai.ai_openend_grade import handle as _ai_grade
+        register_handler("ai_openend_grade", _ai_grade)
 
         await self.tree.sync(guild=guild)
 
@@ -200,6 +210,19 @@ class StudyBot(discord.Client):
         handled = await _cmds.check_stop_word(message, self._sessions)
         if handled:
             return
+
+    def _make_command_ctx(self, channel, user_id: int):
+        """Build a Ctx for slash commands that need engine/AI context outside a study session."""
+        br = self.boot_result
+        sess = self._sessions.get(user_id) or Session()
+        return Ctx(
+            channel=channel, user_id=user_id, store=br.store, deck=br.deck, mount=br.mount,
+            deck_namespace=br.deck.namespace, synonyms=br.synonyms,
+            grade_mode_of=lambda cid: br.grade_mode_map.get(cid, "exact"),
+            leitner_cfg=br.leitner_cfg, ai_model=br.ai_model, ai_effort=br.ai_effort,
+            sid=None, session=sess, emit=None, ai_persona=br.ai_persona,
+            enabled_capabilities=br.enabled_capabilities,
+        )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

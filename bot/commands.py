@@ -35,6 +35,7 @@ def setup_commands(
     guild: discord.Object,
     boot_result,
     get_session_runner,
+    make_ctx=None,
 ) -> None:
     """Register slash commands into the CommandTree.
 
@@ -175,6 +176,90 @@ def setup_commands(
         from render.digest_weekly import render as render_digest
         await render_digest(interaction.channel, data)
 
+    @tree.command(name="socratic", description="소크라테스식 대화", guild=guild)
+    @app_commands.describe(card_id="대상 card_id")
+    async def socratic_cmd(interaction: discord.Interaction, card_id: str) -> None:
+        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        card = next((c for c in boot_result.deck.cards if c.card_id == card_id), None)
+        if card is None:
+            await interaction.response.send_message(f"카드 없음: {card_id}", ephemeral=True)
+            return
+        await interaction.response.send_message("소크라테스 대화 시작.", ephemeral=True)
+        ctx = make_ctx(interaction.channel, interaction.user.id)
+        from caps_ai.ai_socratic import run_socratic
+        front = card.front or {}
+        opening = front.get("prompt") or front.get("text") or front.get("scenario", "")
+        await run_socratic(ctx, card, opening)
+
+    @tree.command(name="misconception", description="오개념 진단", guild=guild)
+    async def misconception_cmd(interaction: discord.Interaction) -> None:
+        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message("오개념 진단 중.", ephemeral=True)
+        ctx = make_ctx(interaction.channel, interaction.user.id)
+        from caps_ai.ai_misconception import top_error_cards, diagnose
+        ids = set(top_error_cards(boot_result.store, boot_result.deck, 5))
+        cards = [c for c in boot_result.deck.cards if c.card_id in ids]
+        text = await diagnose(ctx, cards)
+        await interaction.channel.send(text or "진단할 오답 데이터가 부족합니다.")
+
+    @tree.command(name="strategy", description="학습 전략 제안", guild=guild)
+    async def strategy_cmd(interaction: discord.Interaction) -> None:
+        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message("전략 생성 중.", ephemeral=True)
+        import time
+        from dashboard import get_dashboard_data
+        data = get_dashboard_data(
+            boot_result.deck, boot_result.store, int(time.time() * 1000), boot_result.pass_targets
+        )
+        weakness = "; ".join(
+            f"{w.area}/{w.subarea} 오답률 {w.wrong_rate:.0%}" for w in data.weakness[:5]
+        )
+        ctx = make_ctx(interaction.channel, interaction.user.id)
+        from caps_ai.ai_adaptive_weight_suggest import suggest_strategy
+        text = await suggest_strategy(ctx, weakness)
+        await interaction.channel.send(text or "전략 제안을 생성할 수 없습니다.")
+
+    @tree.command(name="generate", description="카드 초안 생성", guild=guild)
+    @app_commands.describe(seeds="쉼표로 구분한 시드 목록")
+    async def generate_cmd(interaction: discord.Interaction, seeds: str) -> None:
+        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        seed_list = [s.strip() for s in seeds.split(",") if s.strip()]
+        await interaction.response.send_message(f"{len(seed_list)}개 시드로 생성 중.", ephemeral=True)
+        ctx = make_ctx(interaction.channel, interaction.user.id)
+        from caps_ai.ai_generate_items import generate_cards
+        drafts = await generate_cards(ctx, seed_list)
+        if not drafts:
+            await interaction.channel.send("생성된 카드 초안이 없습니다.")
+            return
+        lines = "\n".join(f"- {str(d.get('front', ''))[:80]}" for d in drafts)
+        await interaction.channel.send("생성된 초안:\n" + lines)
+
+    @tree.command(name="variant", description="변형 문제 생성", guild=guild)
+    @app_commands.describe(card_id="대상 card_id (box3 권장)")
+    async def variant_cmd(interaction: discord.Interaction, card_id: str) -> None:
+        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        card = next((c for c in boot_result.deck.cards if c.card_id == card_id), None)
+        if card is None:
+            await interaction.response.send_message(f"카드 없음: {card_id}", ephemeral=True)
+            return
+        await interaction.response.send_message("변형 생성 중.", ephemeral=True)
+        ctx = make_ctx(interaction.channel, interaction.user.id)
+        from caps_ai.ai_variant_q import make_variant
+        v = await make_variant(ctx, card)
+        await interaction.channel.send(
+            ("변형 문제: " + str(v.get("front"))) if v else "변형을 생성할 수 없습니다."
+        )
+
     @tree.command(name="help", description="도움말", guild=guild)
     async def help_cmd(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
@@ -184,6 +269,11 @@ def setup_commands(
             "/stats - 통계\n"
             "/dashboard - 학습 대시보드\n"
             "/digest - 주간 다이제스트\n"
+            "/socratic <id> - 소크라테스 대화(AI)\n"
+            "/misconception - 오개념 진단(AI)\n"
+            "/strategy - 학습 전략 제안(AI)\n"
+            "/generate <seeds> - 카드 초안 생성(AI)\n"
+            "/variant <id> - 변형 문제 생성(AI)\n"
             "/card <id> - 카드 조회\n"
             "/concept <ref> - 개념 조회\n"
             "중단 / stop - 세션 중단",

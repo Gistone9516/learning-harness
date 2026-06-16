@@ -71,6 +71,11 @@ def route(card: CardDef, grade_mode_of: Callable[[str], str]) -> str:
 
 async def dispatch(ctx: Any, card: CardDef) -> HandlerResult:
     """Route a card and invoke the registered handler. Falls back to recall_self if capability is unregistered."""
+    # AI open-ended grading opt-in: a card sets tags.ai_grade truthy and the capability is enabled.
+    enabled = getattr(ctx, "enabled_capabilities", set()) or set()
+    if card.tags.get("ai_grade") and "ai_openend_grade" in enabled and "ai_openend_grade" in HANDLERS:
+        return await HANDLERS["ai_openend_grade"](ctx, card)
+
     grade_mode_of = ctx.grade_mode_of
     cap_id = route(card, grade_mode_of)
 
