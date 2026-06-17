@@ -64,22 +64,26 @@ async def _send_to_channel(channel: Any, text: str) -> None:
         log.warning("ai_socratic: channel.send failed: %s", e)
 
 
-async def _wait_for_reply(channel: Any, user_id: int, timeout: float) -> str | None:
+async def _wait_for_reply(client: Any, channel: Any, user_id: int, timeout: float) -> str | None:
     """Wait for the next message from user_id in channel.
 
     Returns the message content string, or None on timeout or missing mechanism.
-    Integration note: this uses channel.wait_for which is the discord.py guild-channel
-    pattern. The operator must ensure the channel object supports it. In tests,
-    channel is a fake that does not implement wait_for, so this path returns None.
+    wait_for is a method of the discord Client/Bot (not of a channel), so the caller
+    passes the client. In headless tests client/channel are None and this returns None.
     """
-    if channel is None:
+    if client is None or channel is None:
         return None
-    wait_for = getattr(channel, "wait_for", None)
+    wait_for = getattr(client, "wait_for", None)
     if wait_for is None:
         return None
     try:
+        channel_id = getattr(channel, "id", None)
+
         def _check(msg: Any) -> bool:
-            return getattr(msg, "author", None) and getattr(msg.author, "id", None) == user_id
+            author = getattr(msg, "author", None)
+            same_user = author is not None and getattr(author, "id", None) == user_id
+            same_chan = getattr(getattr(msg, "channel", None), "id", None) == channel_id
+            return same_user and same_chan
 
         msg = await asyncio.wait_for(wait_for("message", check=_check), timeout=timeout)
         return (msg.content or "").strip()
@@ -96,6 +100,7 @@ async def run_socratic(
     card: Any,
     opening_text: str,
     max_turns: int = 4,
+    client: Any = None,
 ) -> None:
     """Run a multi-turn Socratic dialogue for one card.
 
@@ -151,7 +156,7 @@ async def run_socratic(
         if turn_idx == max_turns - 1:
             break
 
-        learner_reply = await _wait_for_reply(ctx.channel, ctx.user_id, _REPLY_TIMEOUT)
+        learner_reply = await _wait_for_reply(client, ctx.channel, ctx.user_id, _REPLY_TIMEOUT)
         if learner_reply is None:
             # Timed out or no input mechanism: end gracefully.
             break

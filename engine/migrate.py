@@ -103,7 +103,12 @@ def migrate(raw: dict) -> ProgressStore:
     if raw_version is None:
         current_version = 0
     else:
-        current_version = int(raw_version)
+        try:
+            current_version = int(raw_version)
+        except (ValueError, TypeError):
+            raise SchemaVersionError(
+                f"schema_version is not a valid integer: {raw_version!r}"
+            )
 
     if current_version > SCHEMA_VERSION:
         raise SchemaVersionError(

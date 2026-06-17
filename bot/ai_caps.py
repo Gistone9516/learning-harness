@@ -144,6 +144,10 @@ class ConvManager:
             maxlen = self._window * 2
             if len(self._session.turns) > maxlen:
                 del self._session.turns[:-maxlen]
+        else:
+            # Roll back the user turn so the window never holds an orphan user entry.
+            if self._session.turns and self._session.turns[-1][0] == "user":
+                self._session.turns.pop()
         return result
 
 

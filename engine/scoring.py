@@ -128,12 +128,16 @@ def _score_exact(inp: ScoreInput) -> ScoreResult:
                 feedback={"highlight_missed": seq_steps},
             )
         all_match = all(u == a for u, a in zip(user_steps, seq_steps))
+        # Per-step matched/missed so partially-correct sequences give accurate feedback
+        # (a correct step is never reported as missed).
+        step_matched = [a for u, a in zip(user_steps, seq_steps) if u == a]
+        step_missed = [a for u, a in zip(user_steps, seq_steps) if u != a]
         return ScoreResult(
             verdict="correct" if all_match else "incorrect",
-            matched=seq_steps if all_match else [],
-            missed=[] if all_match else seq_steps,
+            matched=step_matched,
+            missed=step_missed,
             normalized_user=user_steps,
-            feedback={"highlight_missed": [] if all_match else seq_steps},
+            feedback={"highlight_missed": step_missed},
         )
 
     # Plain exact path: user_answer must be str.
@@ -164,6 +168,8 @@ def _score_keyword(inp: ScoreInput) -> ScoreResult:
     norm = _norm_fn(inp.answer_spec, inp.synonyms)
     norm_user = norm(inp.user_answer)
     groups = inp.answer_spec.required_keywords or []
+    if not groups:
+        raise ScoreInputError("keyword mode: required_keywords must not be empty")
     matched: list[str] = []
     missed: list[str] = []
     for group in groups:
@@ -174,7 +180,7 @@ def _score_keyword(inp: ScoreInput) -> ScoreResult:
         else:
             # Record the first candidate in the group as feedback representative.
             missed.append(norm_group[0] if norm_group else "")
-    is_correct = len(missed) == 0 and len(groups) > 0
+    is_correct = len(missed) == 0
     return ScoreResult(
         verdict="correct" if is_correct else "incorrect",
         matched=matched,
@@ -192,6 +198,8 @@ def _score_cloze(inp: ScoreInput) -> ScoreResult:
     if not isinstance(inp.user_answer, list):
         raise ScoreInputError("cloze mode: user_answer must be list[str]")
     blanks = inp.answer_spec.blanks or []
+    if not blanks:
+        raise ScoreInputError("cloze mode: blanks must not be empty")
     if len(inp.user_answer) != len(blanks):
         raise ScoreInputError(
             f"cloze blank count mismatch: got {len(inp.user_answer)}, expected {len(blanks)}"
@@ -206,7 +214,7 @@ def _score_cloze(inp: ScoreInput) -> ScoreResult:
             matched.append(str(i))
         else:
             missed.append(str(i))
-    is_correct = len(missed) == 0 and len(blanks) > 0
+    is_correct = len(missed) == 0
     return ScoreResult(
         verdict="correct" if is_correct else "incorrect",
         matched=matched,

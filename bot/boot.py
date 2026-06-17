@@ -289,12 +289,11 @@ def _load_config(mount: str, namespace: str, config_ref: str | None) -> dict:
     caps = raw.get("capabilities", {})
     if caps:
         enabled_list = caps.get("enabled", [])
-        if enabled_list:
-            _check(isinstance(enabled_list, list),
-                   "capabilities.enabled must be an array")
-            for cap_id in enabled_list:
-                _check(cap_id in _CORE_CAPABILITY_IDS,
-                       f"unknown capability_id: {cap_id!r}")
+        _check(isinstance(enabled_list, list),
+               "capabilities.enabled must be an array")
+        for cap_id in enabled_list:
+            _check(cap_id in _CORE_CAPABILITY_IDS,
+                   f"unknown capability_id: {cap_id!r}")
 
     return raw
 

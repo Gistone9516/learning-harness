@@ -218,7 +218,7 @@ def setup_commands(
         from caps_ai.ai_socratic import run_socratic
         front = card.front or {}
         opening = front.get("prompt") or front.get("text") or front.get("scenario", "")
-        await run_socratic(ctx, card, opening)
+        await run_socratic(ctx, card, opening, client=interaction.client)
 
     @_gate(tree, "misconception", "오개념 진단", guild, "misconception" in avail_cmds)
     async def misconception_cmd(interaction: discord.Interaction) -> None:

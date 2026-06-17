@@ -149,9 +149,10 @@ async def invoke(
                 final_text = result_val.get("content", "")
 
     if not final_text:
-        # No result line found; check stderr
+        # No result event in the output: treat as failure so callers fall back
+        # (an empty response is never a valid AI result).
         err = stderr_bytes.decode("utf-8", errors="replace").strip()
-        if err:
-            return AIResult(text="", ok=False, error=f"No output: {err}")
+        msg = f"No output: {err}" if err else "No result event in output"
+        return AIResult(text="", ok=False, error=msg)
 
     return AIResult(text=final_text, ok=True, session_id=effective_sid)
