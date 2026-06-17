@@ -264,6 +264,56 @@ class ControlPanelView(discord.ui.View):
         )
 
 
+class LearnEndView(discord.ui.View):
+    """Shown after a 암기 round: 초기화(이 레벨 '알아요' 전체 해제) / 종료."""
+
+    def __init__(self, boot_result, user_id, area, level, refresh_fn) -> None:
+        super().__init__(timeout=1800)
+        self._br = boot_result
+        self._uid = user_id
+        self._area = area
+        self._level = level
+        self._refresh = refresh_fn
+
+    async def _guard(self, interaction) -> bool:
+        if not allowed_interaction(interaction, self._uid):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="🔄 초기화", style=discord.ButtonStyle.success)
+    async def reset(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        ids = [c.card_id for c in _area_cards(self._br, self._area)
+               if (c.tags or {}).get("level") == self._level]
+        n = _ls.set_learned_many(self._br.mount, self._br.deck.namespace, ids, False)
+        await interaction.response.send_message(
+            f"🔄 초기화: {_ls.ko_label(self._area)} 레벨 {self._level}의 '알아요' {n}개를 해제했어요. "
+            "다시 🧠 암기하면 처음부터 나와요.", ephemeral=True)
+        if self._refresh:
+            await self._refresh(interaction.channel)
+        self.stop()
+
+    @discord.ui.button(label="✅ 종료", style=discord.ButtonStyle.secondary)
+    async def end(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._guard(interaction):
+            return
+        await interaction.response.send_message("✅ 학습을 마쳤어요. 수고했어요!", ephemeral=True)
+        if self._refresh:
+            await self._refresh(interaction.channel)
+        self.stop()
+
+
+async def post_learn_end(channel, boot_result, user_id, area, level, refresh_fn):
+    content = (
+        f"🧠 **{_ls.ko_label(area)} 레벨 {level} 암기 한 바퀴 끝!**\n"
+        "'몰라요' 한 항목은 다시 🧠 암기하면 또 나와요.\n"
+        "🔄 초기화: 이 레벨 '알아요' 전체 해제 · ✅ 종료: 마치기"
+    )
+    return await channel.send(content=content, view=LearnEndView(boot_result, user_id, area, level, refresh_fn))
+
+
 def build_panel_view(runner, boot_result, make_ctx, user_id, **kw) -> ControlPanelView:
     return ControlPanelView(runner, boot_result, make_ctx, user_id, **kw)
 

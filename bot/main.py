@@ -140,6 +140,8 @@ class StudyBot(discord.Client):
                 ns = br.deck.namespace
                 deck_cards = br.deck.cards
                 handler = dispatch  # default: route self/quiz cards by type
+                learn_area = None   # set when in 암기 mode -> end-of-session shows 초기화/종료
+                learn_level = None
 
                 async def _stop(msg: str):
                     await channel.send(f"<@{user_id}> {msg}")
@@ -163,17 +165,29 @@ class StudyBot(discord.Client):
                         if not deck_cards:
                             await _stop("아직 '알아요'로 배운 항목이 없어요. 먼저 🧠 암기로 익혀 주세요.")
                             return
-                    else:  # learn: self flashcards at exactly this level; "알아요" marks learned
-                        deck_cards = _sel.cards_in_area_level(deck_cards, area, lvl)
+                    else:  # learn: not-yet-learned self flashcards at this level
+                        learn_area, learn_level = area, lvl
+                        deck_cards = [c for c in _sel.cards_in_area_level(deck_cards, area, lvl)
+                                      if not _ls.is_learned(br.mount, ns, c.card_id)]
 
                         async def handler(ctx, card):  # noqa: F811 (learn wrapper)
                             res = await dispatch(ctx, card)
                             if res.verdict == "correct":
                                 _ls.set_learned(br.mount, ns, card.card_id, True)
+                            # learn mode: 몰라요(incorrect)는 다음으로 넘어가고 이번 세션에 다시 안 띄움
+                            res.requeue = False
                             return res
 
                         if not deck_cards:
-                            await _stop(f"{_ls.ko_label(area)} 레벨 {lvl}에 학습할 항목이 없어요.")
+                            await channel.send(
+                                f"<@{user_id}> {_ls.ko_label(area)} 레벨 {lvl} 항목을 모두 외웠어요. "
+                                "⬆️ 레벨을 올리거나 🔄 초기화하세요.")
+                            try:
+                                from control_panel import post_learn_end
+                                await post_learn_end(channel, br, user_id, area, lvl, self._refresh_panel)
+                            except Exception as e:
+                                log.warning("learn end view failed: %s", e)
+                            self._sessions.pop(user_id, None)
                             return
                 elif unit:
                     from study_select import filter_cards_by_unit
@@ -191,6 +205,14 @@ class StudyBot(discord.Client):
                         return
 
                 async def on_finish(ctx, session: Session):
+                    # 암기 한 바퀴 끝: 초기화/종료 버튼만 보여 준다.
+                    if learn_area:
+                        try:
+                            from control_panel import post_learn_end
+                            await post_learn_end(channel, br, user_id, learn_area, learn_level, self._refresh_panel)
+                        except Exception as e:
+                            log.warning("learn end view failed: %s", e)
+                        return
                     stats = session.stats
                     rate = (stats.correct / stats.total_attempts * 100) if stats.total_attempts else 0
                     body = (

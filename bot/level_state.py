@@ -68,6 +68,18 @@ def learned_ids(mount: str, deck_ns: str) -> set[str]:
     return {k for k, v in sidecar.load_all(mount, CAP_LEARNED, deck_ns).items() if v}
 
 
+def set_learned_many(mount: str, deck_ns: str, card_ids, value: bool) -> int:
+    """Batch-set the learned flag for many cards in one load/save. Returns the count written."""
+    ids = list(card_ids)
+    if not ids:
+        return 0
+    data = sidecar.load_all(mount, CAP_LEARNED, deck_ns)
+    for cid in ids:
+        data[cid] = bool(value)
+    sidecar.save_all(mount, CAP_LEARNED, deck_ns, data)
+    return len(ids)
+
+
 # ── bulk re-level (pure) ─────────────────────────────────────────────────────────
 
 def relevel_learned_updates(area_cards, old_level: int, new_level: int) -> dict[str, bool]:
