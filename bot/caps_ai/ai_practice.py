@@ -26,6 +26,7 @@ from models import CardDef, HandlerResult
 from gating import allowed_interaction
 from dispatch import HANDLERS
 from subject import task_of
+from text_format import format_tables
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def _collect_answer(ctx, problem_text: str) -> str | None:
             if not future.done():
                 future.set_result(None)
 
-    await channel.send(content=f"**{problem_prefix}** {problem_text}", view=_Trigger())
+    await channel.send(content=format_tables(f"**{problem_prefix}** {problem_text}"), view=_Trigger())
     return await future
 
 
@@ -181,7 +182,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     body = f"{head}\n{reason}".strip()
     if model_answer:
         body += f"\n\n모범답안: **{model_answer}**"
-    await ctx.channel.send(view=_feedback_view(body, _COLOR_DONE if ok else _COLOR_DANGER))
+    await ctx.channel.send(view=_feedback_view(format_tables(body), _COLOR_DONE if ok else _COLOR_DANGER))
 
     return HandlerResult(card_id=card.card_id, verdict=verdict, requeue=not ok, done=True)
 

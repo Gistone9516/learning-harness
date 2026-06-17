@@ -18,6 +18,7 @@ _paths.setup()
 import discord
 from models import CardDef, HandlerResult
 from gating import allowed_interaction
+from text_format import format_tables
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,9 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     future: asyncio.Future[str] = loop.create_future()
 
     front_text = _progress_prefix(ctx) + _front_text(card)
-    reveal_text = f"{front_text}\n\n{_back_text(card)}"
+    # Discord does not render markdown tables; normalize any table in the explanation to a
+    # monospace code-block table (the kit-wide standard). No-op on text without tables.
+    reveal_text = format_tables(f"{front_text}\n\n{_back_text(card)}")
 
     # Reveal as a Components V2 LayoutView (holds the long explanation + buttons).
     class RevealView(discord.ui.LayoutView):

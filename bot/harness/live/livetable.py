@@ -66,17 +66,24 @@ class LiveTable:
 
     def _render(self, color: "Optional[int]" = None) -> discord.ui.LayoutView:
         cols = self.columns or sorted({c for r in self.rows.values() for c in r})
-        widths = {c: len(str(c)) for c in cols}
-        for r in self.rows.values():
-            for c in cols:
-                widths[c] = max(widths[c], len(str(r.get(c, ""))))
+        data_rows = [[r.get(c, "") for c in cols] for r in self.rows.values()]
+        try:
+            # Single source of truth for width-aware (CJK = 2) monospace tables.
+            from text_format import render_table
+            table = render_table(cols, data_rows) if cols else "```\n(empty table)\n```"
+        except Exception:
+            # Offline demo fallback (text_format may be off sys.path): char-width align.
+            widths = {c: len(str(c)) for c in cols}
+            for r in self.rows.values():
+                for c in cols:
+                    widths[c] = max(widths[c], len(str(r.get(c, ""))))
 
-        def fmt(vals):
-            return "  ".join(str(v).ljust(widths[c]) for c, v in zip(cols, vals))
+            def fmt(vals):
+                return "  ".join(str(v).ljust(widths[c]) for c, v in zip(cols, vals))
 
-        header = fmt(cols)
-        body = "\n".join(fmt([r.get(c, "") for c in cols]) for r in self.rows.values()) or "(no rows)"
-        table = f"```\n{header}\n{'-' * len(header)}\n{body}\n```"
+            header = fmt(cols)
+            body = "\n".join(fmt([r.get(c, "") for c in cols]) for r in self.rows.values()) or "(no rows)"
+            table = f"```\n{header}\n{'-' * len(header)}\n{body}\n```"
         title = f"**{self.title}**\n" if self.title else ""
         return _card(title + table, color or self.color)
 

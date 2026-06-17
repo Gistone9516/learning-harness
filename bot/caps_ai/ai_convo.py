@@ -22,6 +22,7 @@ import ai_caps
 from threads import thread_in_channel, close_thread          # harness/channels on sys.path
 from caps_ai.ai_socratic import _wait_for_reply               # client-based wait_for
 from subject import task_of
+from text_format import format_tables
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ async def _send(target, text: str) -> None:
     if target is None:
         return
     try:
-        await target.send(text)
+        await target.send(format_tables(text))
     except Exception as e:
         log.warning("ai_convo: send failed: %s", e)
 
