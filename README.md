@@ -59,6 +59,14 @@ python tools/clone.py --target <PROJECT_DIR> --from-config [--env copy]
 - The cloned project runs standalone: `cd <PROJECT_DIR> && python bot/main.py <PROJECT_DIR>`.
 - `/study unit:<unit>` filters the session to one unit (e.g. a day or a `*-learn` flashcard set).
 
+### Study control panel (capability `control_panel`)
+
+Enable `control_panel` to drive study from a persistent button panel instead of typing slash
+commands. The panel auto-posts when the bot comes online and after each session ends, and `/ui`
+re-summons it. Buttons: 이어서 학습 / 암기 / 시험 / 복습 / 대시보드 / 통계 / 도움말 — 암기·시험은
+DAY(1-30)를 입력받아 해당 `day-NN(-learn)` 단원을 시작한다. Cards also show a `n/N` session progress
+header and ✅/❌ feedback. Persistence uses `timeout=None` + fixed `custom_id` + `client.add_view()`.
+
 ## 3. Folder structure
 
 ```
@@ -82,6 +90,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ capability_registry.py   capability SoT (files/handler/commands per capability_id)
 │   ├ wiring.py                gated handler registration + required-file verification
 │   ├ study_select.py          pure unit-filter helper for /study
+│   ├ control_panel.py         persistent button panel (capability control_panel, /ui)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ tools/                       maintenance scripts
 │   └ clone.py                 clone core kernel + selected capabilities into a consuming project

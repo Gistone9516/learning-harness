@@ -168,6 +168,13 @@ class StudyBot(discord.Client):
                                 await channel.send(journal)
                         except Exception as e:
                             log.warning("ai_session_summary failed: %s", e)
+                    # Re-post the control panel so the user can pick the next action.
+                    if "control_panel" in br.enabled_capabilities:
+                        try:
+                            from control_panel import post_panel
+                            await post_panel(channel, _runner, br, self._make_command_ctx, user_id)
+                        except Exception as e:
+                            log.warning("control panel post failed: %s", e)
 
                 await run_session(
                     ctx=ctx,
@@ -189,6 +196,14 @@ class StudyBot(discord.Client):
 
         await self.tree.sync(guild=guild)
 
+        # Control panel: keep a runner for panel-driven sessions; register the persistent
+        # view so its buttons keep working after a restart (bot-contract §7).
+        self._panel_runner = _get_runner()
+        if "control_panel" in self.boot_result.enabled_capabilities:
+            from control_panel import build_panel_view
+            self.add_view(build_panel_view(
+                self._panel_runner, self.boot_result, self._make_command_ctx, self.allowed_user_id))
+
     async def on_ready(self) -> None:
         log.info("Bot ready: %s (guild=%d, channel=%d)", self.user, self.guild_id, self.channel_id)
 
@@ -205,6 +220,15 @@ class StudyBot(discord.Client):
                 start_srs_push(channel, self.allowed_user_id, self.boot_result)
             except Exception as e:
                 log.warning("SRS push start failed: %s", e)
+
+            # Control panel: post on bot online.
+            if "control_panel" in self.boot_result.enabled_capabilities:
+                try:
+                    from control_panel import post_panel
+                    await post_panel(channel, self._panel_runner, self.boot_result,
+                                     self._make_command_ctx, self.allowed_user_id)
+                except Exception as e:
+                    log.warning("control panel post failed: %s", e)
 
     async def on_message(self, message: discord.Message) -> None:
         # Ignore messages from the bot itself.

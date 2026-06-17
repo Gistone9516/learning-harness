@@ -27,6 +27,11 @@ _COLOR_DONE = 0x57F287
 _COLOR_WARN = 0xF1C40F
 
 
+def _progress_prefix(ctx) -> str:
+    p = getattr(ctx, "progress", None)
+    return f"📘 카드 {p[0]}/{p[1]}\n\n" if p else ""
+
+
 def _front_text(card: CardDef) -> str:
     """Build card front text."""
     front = card.front or {}
@@ -79,7 +84,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
             super().__init__(timeout=600)
             self._shown = False
 
-        @discord.ui.button(label="정답보기", style=discord.ButtonStyle.secondary)
+        @discord.ui.button(label="👀 정답 보기", style=discord.ButtonStyle.secondary)
         async def show(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
             if not allowed_interaction(interaction, user_id):
                 await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -94,7 +99,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                 def __init__(self) -> None:
                     super().__init__(timeout=600)
 
-                @discord.ui.button(label="알았어요 (correct)", style=discord.ButtonStyle.success)
+                @discord.ui.button(label="✅ 알았어요", style=discord.ButtonStyle.success)
                 async def correct(self, ia: discord.Interaction, btn: discord.ui.Button) -> None:
                     if not allowed_interaction(ia, user_id):
                         await ia.response.send_message("권한 없음.", ephemeral=True)
@@ -105,12 +110,12 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                     try:
                         await ia.response.edit_message(
                             content=None,
-                            view=_done_view("정답 처리됨."),
+                            view=_done_view("✅ 정답으로 기록했어요."),
                         )
                     except Exception:
                         await ia.response.defer()
 
-                @discord.ui.button(label="몰랐어요 (incorrect)", style=discord.ButtonStyle.danger)
+                @discord.ui.button(label="❌ 몰랐어요", style=discord.ButtonStyle.danger)
                 async def incorrect(self, ia: discord.Interaction, btn: discord.ui.Button) -> None:
                     if not allowed_interaction(ia, user_id):
                         await ia.response.send_message("권한 없음.", ephemeral=True)
@@ -121,7 +126,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                     try:
                         await ia.response.edit_message(
                             content=None,
-                            view=_done_view("오답 처리됨."),
+                            view=_done_view("❌ 오답으로 기록했어요."),
                         )
                     except Exception:
                         await ia.response.defer()
@@ -146,7 +151,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                 future.set_result("skip")
 
     show_view = ShowAnswerView()
-    front_text = _front_text(card)
+    front_text = _progress_prefix(ctx) + _front_text(card)
     show_view.add_item(discord.ui.Container(
         discord.ui.TextDisplay(front_text),
         accent_colour=_COLOR_MAIN,

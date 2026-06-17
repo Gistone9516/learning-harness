@@ -130,6 +130,8 @@ async def run_session(
     queue_ids = build_queue(deck_cards, store, now_fn(), opts)
     session.queue = list(queue_ids)
     session.requeue = []
+    total_cards = len(queue_ids)   # denominator for the session progress indicator
+    presented = 0
 
     # emit factory: capture attempt_kind upfront to create a per-iteration emit closure (bot-contract §4)
     def _make_emit(captured_attempt_kind: str):
@@ -188,6 +190,9 @@ async def run_session(
         session.seen_card_ids.add(card_id)
         # replace ctx.emit with a closure that captures this card's attempt_kind
         ctx.emit = _make_emit(attempt_kind)
+        # session progress indicator (presented count vs initial queue size)
+        presented += 1
+        ctx.progress = (presented, total_cards)
 
         # optional pre-card enhancement caps (confidence, hint); opt-in, skipped headless
         if ctx.channel is not None:

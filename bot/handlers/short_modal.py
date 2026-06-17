@@ -27,6 +27,11 @@ _COLOR_DONE = 0x57F287
 _COLOR_DANGER = 0xED4245
 
 
+def _progress_prefix(ctx) -> str:
+    p = getattr(ctx, "progress", None)
+    return f"📘 카드 {p[0]}/{p[1]}\n\n" if p else ""
+
+
 class _AnswerModal(discord.ui.Modal):
     def __init__(self, title: str, future: asyncio.Future) -> None:
         super().__init__(title=title[:45])
@@ -59,7 +64,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     prompt = front.get("prompt", "")
     hint = front.get("hint", "")
 
-    front_text = f"**Q.** {prompt}"
+    front_text = f"{_progress_prefix(ctx)}**Q.** {prompt}"
     if hint:
         front_text += f"\n\n*힌트: {hint}*"
 
@@ -71,7 +76,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
             super().__init__(timeout=600)
             self._opened = False
 
-        @discord.ui.button(label="답변 입력", style=discord.ButtonStyle.primary)
+        @discord.ui.button(label="✏️ 답변 입력", style=discord.ButtonStyle.primary)
         async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
             if not allowed_interaction(interaction, user_id):
                 await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -118,9 +123,9 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
 
     # Feedback with matched/missed keyword highlights
     if verdict == "correct":
-        fb_lines = [f"정답! 맞은 키워드: {', '.join(result.matched) if result.matched else '-'}"]
+        fb_lines = [f"✅ 정답! 맞은 키워드: {', '.join(result.matched) if result.matched else '-'}"]
     else:
-        fb_lines = ["오답."]
+        fb_lines = ["❌ 오답."]
         if result.missed:
             fb_lines.append(f"빠진 키워드: **{', '.join(result.missed)}**")
         back = card.back or {}

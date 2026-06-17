@@ -181,6 +181,10 @@ REGISTRY: dict[str, CapSpec] = {
     "content_hotreload": CapSpec("content_hotreload", 2, "extension"),
     "curate_contextmenu": CapSpec("curate_contextmenu", 2, "extension"),
     "pin_rotate": CapSpec("pin_rotate", 2, "extension"),
+    "control_panel": CapSpec(
+        "control_panel", 2, "extension", slash_commands=("ui",),
+        files=("bot/control_panel.py",),
+    ),
 
     # ── Layer 3 — AI (needs_ai), core tier ─────────────────────────────────────
     "ai_openend_grade": CapSpec(

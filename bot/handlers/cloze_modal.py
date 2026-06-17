@@ -28,6 +28,11 @@ _COLOR_DONE = 0x57F287
 _COLOR_DANGER = 0xED4245
 
 
+def _progress_prefix(ctx) -> str:
+    p = getattr(ctx, "progress", None)
+    return f"📘 카드 {p[0]}/{p[1]}\n\n" if p else ""
+
+
 def _display_cloze_text(text: str) -> str:
     """Replace {{0}} with [빈칸1], {{1}} with [빈칸2], etc."""
     def replace_marker(m: re.Match) -> str:
@@ -86,7 +91,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
             super().__init__(timeout=600)
             self._opened = False
 
-        @discord.ui.button(label="빈칸 채우기", style=discord.ButtonStyle.primary)
+        @discord.ui.button(label="✏️ 빈칸 채우기", style=discord.ButtonStyle.primary)
         async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
             if not allowed_interaction(interaction, user_id):
                 await interaction.response.send_message("권한 없음.", ephemeral=True)
@@ -104,7 +109,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                 future.set_result(None)
 
     cloze_view = ClozeView()
-    await channel.send(content=f"**빈칸 채우기**\n\n{display_text}", view=cloze_view)
+    await channel.send(content=f"{_progress_prefix(ctx)}**빈칸 채우기**\n\n{display_text}", view=cloze_view)
 
     user_answers = await future
     if user_answers is None:
@@ -129,9 +134,9 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     verdict = result.verdict
     is_incorrect = verdict == "incorrect"
 
-    # feedback: correct/incorrect per blank
+    # feedback: verdict header + correct/incorrect per blank
     blanks = spec.blanks or []
-    fb_lines = []
+    fb_lines = ["✅ 정답!" if verdict == "correct" else "❌ 오답."]
     for i, (user_val, candidates) in enumerate(zip(user_answers, blanks)):
         idx_str = str(i)
         if idx_str in result.matched:

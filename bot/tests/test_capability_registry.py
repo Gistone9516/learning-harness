@@ -29,7 +29,7 @@ OLD_WHITELIST = {
     "gating", "event_trigger", "heartbeat", "coalesce_base",
     "quiz_poll", "concept_link", "preview_then_test", "session_thread",
     "exam_delayed", "mastery_chart", "weakness_wiki", "content_hotreload",
-    "curate_contextmenu", "pin_rotate",
+    "curate_contextmenu", "pin_rotate", "control_panel",
     "perm_preflight", "presence_signal", "channel_scaffold", "dm_private",
     "ai_openend_grade", "ai_socratic", "ai_hint", "ai_generate_items",
     "ai_personal_feedback", "ai_misconception", "ai_adaptive_weight",

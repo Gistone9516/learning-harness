@@ -286,6 +286,15 @@ def setup_commands(
             ("변형 문제: " + str(v.get("front"))) if v else "변형을 생성할 수 없습니다."
         )
 
+    @_gate(tree, "ui", "학습 제어판", guild, "ui" in avail_cmds)
+    async def ui_cmd(interaction: discord.Interaction) -> None:
+        if not allowed_interaction(interaction, interaction.user.id):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message("학습 제어판을 띄웁니다.", ephemeral=True)
+        from control_panel import post_panel
+        await post_panel(interaction.channel, get_session_runner(), boot_result, make_ctx, interaction.user.id)
+
     @tree.command(name="help", description="도움말", guild=guild)
     async def help_cmd(interaction: discord.Interaction) -> None:
         lines = [
@@ -298,6 +307,7 @@ def setup_commands(
             "/settings - 설정 조회",
         ]
         _opt = [
+            ("ui", "/ui - 학습 제어판"),
             ("dashboard", "/dashboard - 학습 대시보드"),
             ("digest", "/digest - 주간 다이제스트"),
             ("socratic", "/socratic <id> - 소크라테스 대화(AI)"),

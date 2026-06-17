@@ -27,6 +27,11 @@ _COLOR_WARN = 0xF1C40F
 _COLOR_DANGER = 0xED4245
 
 
+def _progress_prefix(ctx) -> str:
+    p = getattr(ctx, "progress", None)
+    return f"📘 카드 {p[0]}/{p[1]}\n\n" if p else ""
+
+
 async def handle(ctx, card: CardDef) -> HandlerResult:
     """mcq_buttons handler."""
     channel = ctx.channel
@@ -81,23 +86,9 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
             if not future.done():
                 future.set_result("__timeout__")
 
-    mcq_view = MCQView()
-    q_text = f"**Q.** {scenario}"
-    mcq_view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(q_text),
-        discord.ui.ActionRow(*[
-            discord.ui.Button(
-                label=opt[:80],
-                style=discord.ButtonStyle.primary,
-                custom_id=f"mcq_opt:{i}",
-            )
-            for i, opt in enumerate(options)
-        ]),
-        accent_colour=_COLOR_MAIN,
-    ))
-
-    # send simple button card
-    await channel.send(view=_build_mcq_view(scenario, options, user_id, future))
+    # send question text + option buttons
+    q_text = f"{_progress_prefix(ctx)}**Q.** {scenario}"
+    await channel.send(content=q_text, view=_build_mcq_view(scenario, options, user_id, future))
 
     user_answer = await future
     if user_answer == "__timeout__":
@@ -127,11 +118,11 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     back = card.back or {}
     detail = back.get("detail", "")
     if result.matched:
-        fb = f"정답! **{result.matched[0]}**"
+        fb = f"✅ 정답! **{result.matched[0]}**"
     else:
         acc = spec.accepted or []
         correct_ans = acc[0] if acc else "?"
-        fb = f"오답. 정답: **{correct_ans}**"
+        fb = f"❌ 오답. 정답: **{correct_ans}**"
     if detail:
         fb += f"\n{detail}"
 
