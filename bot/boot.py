@@ -72,6 +72,7 @@ class BootResult:
     ai_model: str | None
     ai_effort: str
     ai_persona: str | None = None
+    ai_model_explain: str | None = None
 
 
 # -- Validation helpers -------------------------------------------------------
@@ -391,9 +392,13 @@ def load(mount: str) -> BootResult:
     enabled_capabilities = _compile_enabled_capabilities(caps_config)
 
     ai_config: dict = caps_config.get("ai", {})
-    ai_model: str | None = ai_config.get("model")
+    # Model ids come from .env (single source; swappable) with config as fallback.
+    ai_model: str | None = os.environ.get("AI_MODEL") or ai_config.get("model")
     ai_effort: str = ai_config.get("effort", "low")
     ai_persona: str | None = ai_config.get("persona")
+    ai_model_explain: str | None = (
+        os.environ.get("AI_MODEL_EXPLAIN") or ai_config.get("model_explain") or ai_model
+    )
 
     # Verify the enabled capabilities have their required files present (partial-clone guard).
     from wiring import verify_capability_files
@@ -416,4 +421,5 @@ def load(mount: str) -> BootResult:
         ai_model=ai_model,
         ai_effort=ai_effort,
         ai_persona=ai_persona,
+        ai_model_explain=ai_model_explain,
     )

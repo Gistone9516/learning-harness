@@ -41,6 +41,7 @@ CAP_LIMITS: dict[str, tuple[str, int]] = {
     "ai_proactive_remind":  ("low", 120),
     "ai_practice":          ("low", 250),
     "ai_convo":             ("low", 350),
+    "ai_explain":           ("low", 220),
 }
 
 
@@ -80,18 +81,19 @@ async def one_shot(
     data: str = "",
     force_json: bool = False,
     on_stream: Callable[[str], Awaitable[None]] | None = None,
+    model: str | None = None,
 ) -> "_ai.AIResult":
     """Single AI call with no session. Used by eleven of the twelve capabilities.
 
-    Pulls model and persona from ctx, effort and max_tokens from CAP_LIMITS. Never raises; the underlying
-    invoke returns an AIResult with ok=False on failure so the caller can degrade gracefully.
+    Pulls model (param override else ctx) and persona from ctx, effort and max_tokens from CAP_LIMITS.
+    Never raises; the underlying invoke returns an AIResult with ok=False on failure.
     """
     effort, max_tokens = CAP_LIMITS.get(capability_id, (getattr(ctx, "ai_effort", "low"), 200))
     system = build_preamble(role, data, persona=getattr(ctx, "ai_persona", None), force_json=force_json)
     return await _invoke(
         prompt,
         system=system,
-        model=getattr(ctx, "ai_model", None),
+        model=model or getattr(ctx, "ai_model", None),
         effort=effort,
         max_tokens=max_tokens,
         session_id=None,
@@ -106,10 +108,12 @@ class ConvManager:
     the prompt is deterministic for tests, regardless of what the claude session retains server side.
     """
 
-    def __init__(self, session: Any, *, window: int = 4, capability_id: str = "ai_socratic") -> None:
+    def __init__(self, session: Any, *, window: int = 4, capability_id: str = "ai_socratic",
+                 model: str | None = None) -> None:
         self._session = session
         self._window = window
         self._capability_id = capability_id
+        self._model = model
 
     def _windowed_prompt(self, user_text: str) -> str:
         # Keep the last `window` exchanges (a user turn plus an assistant turn each).
@@ -133,7 +137,7 @@ class ConvManager:
         result = await _invoke(
             prompt,
             system=system,
-            model=getattr(ctx, "ai_model", None),
+            model=self._model or getattr(ctx, "ai_model", None),
             effort=effort,
             max_tokens=max_tokens,
             session_id=self._session.claude_sid,

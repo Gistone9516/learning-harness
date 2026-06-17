@@ -61,3 +61,4 @@ class Ctx:
     ai_persona: str | None = None
     enabled_capabilities: set = field(default_factory=set)
     progress: tuple | None = None   # (presented, total) for the session progress indicator
+    ai_model_explain: str | None = None   # model for ai_explain (haiku); from .env AI_MODEL_EXPLAIN

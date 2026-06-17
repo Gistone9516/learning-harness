@@ -11,8 +11,12 @@ SAFETY: The bot must be reinvited with thread-related permissions if they are mi
 DEMO  : python harness/channels/threads.py  (prints usage example)
 """
 
+import logging
+
 import discord
 from typing import Optional, Union
+
+log = logging.getLogger(__name__)
 
 
 async def thread_from_message(
@@ -43,6 +47,17 @@ async def close_thread(thread: discord.Thread, locked: bool = False) -> bool:
         return True
     except Exception:
         return False
+
+
+async def delete_thread(thread: discord.Thread) -> bool:
+    """Discard a one-off thread entirely. Falls back to archiving if delete is not permitted
+    (Manage Threads required to delete)."""
+    try:
+        await thread.delete()
+        return True
+    except Exception as e:
+        log.warning("delete_thread: delete failed (%s), falling back to archive", e)
+        return await close_thread(thread)
 
 
 if __name__ == "__main__":

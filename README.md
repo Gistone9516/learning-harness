@@ -25,7 +25,8 @@
 2. Create a **new server (guild) dedicated to learning** and invite the bot (required permissions plus the
    `applications.commands` scope).
 3. Write the root `.env` (copy `.env.example`) — `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`,
-   `DISCORD_CHANNEL_ID`, `DISCORD_ALLOWED_USER_ID` (plus optional `USER_LANG`, `MOUNT`).
+   `DISCORD_CHANNEL_ID`, `DISCORD_ALLOWED_USER_ID` (plus optional `USER_LANG`, `MOUNT`, and the
+   AI model ids `AI_MODEL` / `AI_MODEL_EXPLAIN`).
 4. `pip install -U "discord.py>=2.6" python-dotenv`.
 
 **Run:**
@@ -73,7 +74,17 @@ The english-GO subject uses a leveled **catalog** model (not fixed days):
 - **AI practice** (`bot/caps_ai/ai_practice.py`): for learned items, AI generates a
   composition problem and grades the learner's English with Korean feedback.
 - **AI conversation** (`bot/caps_ai/ai_convo.py`): a threaded multi-turn chat seeded by the
-  learned-item list (model = sonnet); AI asks → learner writes English → AI explains in plain Korean.
+  learned-item list (main model); AI asks → learner writes English → AI explains in plain Korean.
+- **AI concept explanation** (`bot/caps_ai/ai_explain.py`): the answer reveal carries a
+  🤖 AI 해설 button (gated on the `ai_explain` capability). It opens a **one-off thread** that
+  explains the card concept in plain Korean and answers a few follow-ups, then **discards (deletes)
+  the thread**. It runs the cheaper explain model (`ctx.ai_model_explain`, e.g. haiku) on a
+  throwaway conversation session, so the learner's study session is never polluted.
+- **Answer reveal as Components V2** (`bot/handlers/recall_self.py`): the (now enriched) explanation
+  plus the ✅ 알았어요 / ❌ 몰랐어요 [ / 🤖 AI 해설 ] buttons are rendered in a `discord.ui.LayoutView`
+  (`Container` + `ActionRow`) sent as a separate message. V2 items require a LayoutView, and a
+  LayoutView message cannot also carry `content=`, so the card front (plain `content`) and the reveal
+  are distinct messages.
 - **Control panel** (`control_panel`, persistent): per-area level + learned progress, area →
   mode menu (🧠 암기 / ✍️ AI 연습 / ⬆️⬇️ 레벨), plus 🔁 복습 / 🗣 대화 / 📊 대시보드 / 🧹 정리 / ❓ 도움말.
   Auto-posts on ready and after each session; `/ui` re-summons; `/clear [n]` purges the channel.
@@ -105,7 +116,8 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ level_state.py           per-area level + learned flags (sidecar) + bulk re-level
 │   ├ control_panel.py         persistent learning-hub panel (capability control_panel, /ui)
 │   ├ caps_ai/ai_practice.py   AI-generated composition problem + grading (per catalog item)
-│   ├ caps_ai/ai_convo.py      threaded multi-turn English conversation (sonnet)
+│   ├ caps_ai/ai_convo.py      threaded multi-turn English conversation (main model)
+│   ├ caps_ai/ai_explain.py    one-off per-card concept explanation thread (explain model, discarded after use)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ tools/                       maintenance scripts
 │   └ clone.py                 clone core kernel + selected capabilities into a consuming project
@@ -123,7 +135,10 @@ learning-harness/              the general-purpose framework repo (no real subje
   to pure Python functions.
 - **B. AI study mode** (optional tokens) — replicates the `claude -p --input-format stream-json` `_invoke`
   adapter pattern (zero bridge import or execution). Token control (short preamble, low effort, cheap model,
-  conditional skip).
+  conditional skip). **Model ids are a single source of truth in `.env`** (`AI_MODEL` for grading/practice/
+  conversation, `AI_MODEL_EXPLAIN` for the concept-explanation thread) — never hard-coded in code or config;
+  `bot/boot.py` reads them (env first, config fallback) into `BootResult` → `Ctx` → the per-call `model`
+  override on `ai_caps.one_shot` / `ConvManager`.
 
 **Four-layer capability catalog** (toggled by the consuming config) — (1) engine core, (2) Discord learning
 (harness primitives), (3) AI, (4) infrastructure (gating, heartbeat, and so on). Details in
@@ -142,7 +157,7 @@ nothing (zero file I/O, discord, or harness imports).
 
 ```bash
 cd engine && python -m pytest tests/ -q      # 159 pure-engine regression tests
-cd bot    && python -m pytest tests/ -q      # 332 headless tests (boot/session, handlers, caps, AI seam, renderers)
+cd bot    && python -m pytest tests/ -q      # 362 headless tests (boot/session, handlers, caps, AI seam, renderers)
 ```
 - The engine core is pure functions (`now` is injected for determinism). The bot is verified headless without
   discord or a live `claude` CLI (boot, session loop, handler grading cores, sidecar I/O, and the AI helper
@@ -162,7 +177,12 @@ cd bot    && python -m pytest tests/ -q      # 332 headless tests (boot/session,
     multi-turn only for `ai_socratic`); AI grading falls back to self-grade, so the binary invariant holds.
   - Dashboard renderers (live card, box table, mastery chart with a text fallback, weekly digest, weakness
     wiki) and the SRS due-card push loop.
-- 491 regression tests green (159 engine plus 332 bot), all headless. The deterministic loop and every new
+  - Catalog learning model: leveled self-flashcards (vocab/grammar/idiom, per-area level 1–10), AI practice
+    and AI conversation, the persistent control panel, and per-card AI concept-explanation threads
+    (`ai_explain`, one-off, discarded after use). Card explanations (`back.detail`) are enriched for beginners.
+  - Answer reveal rebuilt on Components V2 (`discord.ui.LayoutView`); AI model ids moved to `.env`
+    (`AI_MODEL` / `AI_MODEL_EXPLAIN`) as the single source of truth.
+- 521 regression tests green (159 engine plus 362 bot), all headless. The deterministic loop and every new
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server) and live AI
   smoke (needs the `claude` CLI on PATH). The web (frontend-design) workspace remains deferred.

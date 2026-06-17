@@ -223,6 +223,14 @@ REGISTRY: dict[str, CapSpec] = {
             "bot/harness/channels/threads.py",
         ),
     ),
+    "ai_explain": CapSpec(
+        "ai_explain", 3, "core", needs_ai=True,
+        files=("bot/caps_ai/ai_explain.py",),
+        shared_bases=_AI_BASE + (
+            "bot/caps_ai/ai_socratic.py",
+            "bot/harness/channels/threads.py",
+        ),
+    ),
 
     # ── Layer 3 — AI, extension tier ───────────────────────────────────────────
     "ai_misconception": CapSpec(

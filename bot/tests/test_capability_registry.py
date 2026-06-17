@@ -35,7 +35,7 @@ OLD_WHITELIST = {
     "ai_personal_feedback", "ai_misconception", "ai_adaptive_weight",
     "ai_session_summary", "ai_stream_render", "ai_variant_q",
     "ai_persona", "ai_proactive_remind",
-    "ai_practice", "ai_convo",
+    "ai_practice", "ai_convo", "ai_explain",
 }
 
 OLD_DEFAULT_CORE = {
