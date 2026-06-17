@@ -141,8 +141,8 @@ async def show_hint(ctx, card: CardDef) -> None:
             except Exception:
                 try:
                     await interaction.channel.send(content=msg)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("hint fallback send failed: %s", e)
 
         async def on_timeout(self) -> None:
             pass

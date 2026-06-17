@@ -52,6 +52,7 @@ def setup_commands(
     boot_result,
     get_session_runner,
     make_ctx=None,
+    allowed_user_id: int = 0,
 ) -> None:
     """Register slash commands into the CommandTree.
 
@@ -77,7 +78,7 @@ def setup_commands(
         unit: str | None = None,
         dday: bool = False,
     ) -> None:
-        if not allowed_interaction(interaction, boot_result.deck.namespace and interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message(
@@ -90,7 +91,7 @@ def setup_commands(
 
     @tree.command(name="review", description="오답 복습", guild=guild)
     async def review_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("오답 복습 시작.", ephemeral=True)
@@ -100,7 +101,7 @@ def setup_commands(
 
     @tree.command(name="due", description="due 카드 수 확인", guild=guild)
     async def due_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         store = boot_result.store
@@ -116,7 +117,7 @@ def setup_commands(
 
     @tree.command(name="stats", description="학습 통계 조회", guild=guild)
     async def stats_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         store = boot_result.store
@@ -130,7 +131,7 @@ def setup_commands(
     @tree.command(name="card", description="카드 정보 조회", guild=guild)
     @app_commands.describe(card_id="조회할 card_id")
     async def card_cmd(interaction: discord.Interaction, card_id: str) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         deck = boot_result.deck
@@ -148,7 +149,7 @@ def setup_commands(
     @tree.command(name="concept", description="개념 참조 조회", guild=guild)
     @app_commands.describe(ref="concept_ref id")
     async def concept_cmd(interaction: discord.Interaction, ref: str) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message(
@@ -158,7 +159,7 @@ def setup_commands(
 
     @tree.command(name="settings", description="봇 설정 조회", guild=guild)
     async def settings_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         caps = ", ".join(sorted(boot_result.enabled_capabilities))
@@ -168,7 +169,7 @@ def setup_commands(
 
     @_gate(tree, "dashboard", "학습 대시보드", guild, "dashboard" in avail_cmds)
     async def dashboard_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("대시보드 생성 중.", ephemeral=True)
@@ -190,7 +191,7 @@ def setup_commands(
 
     @_gate(tree, "digest", "주간 다이제스트", guild, "digest" in avail_cmds)
     async def digest_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("다이제스트 생성 중.", ephemeral=True)
@@ -205,7 +206,7 @@ def setup_commands(
     @_gate(tree, "socratic", "소크라테스식 대화", guild, "socratic" in avail_cmds)
     @app_commands.describe(card_id="대상 card_id")
     async def socratic_cmd(interaction: discord.Interaction, card_id: str) -> None:
-        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+        if not allowed_interaction(interaction, allowed_user_id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         card = next((c for c in boot_result.deck.cards if c.card_id == card_id), None)
@@ -221,7 +222,7 @@ def setup_commands(
 
     @_gate(tree, "misconception", "오개념 진단", guild, "misconception" in avail_cmds)
     async def misconception_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+        if not allowed_interaction(interaction, allowed_user_id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("오개념 진단 중.", ephemeral=True)
@@ -234,7 +235,7 @@ def setup_commands(
 
     @_gate(tree, "strategy", "학습 전략 제안", guild, "strategy" in avail_cmds)
     async def strategy_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+        if not allowed_interaction(interaction, allowed_user_id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("전략 생성 중.", ephemeral=True)
@@ -254,7 +255,7 @@ def setup_commands(
     @_gate(tree, "generate", "카드 초안 생성", guild, "generate" in avail_cmds)
     @app_commands.describe(seeds="쉼표로 구분한 시드 목록")
     async def generate_cmd(interaction: discord.Interaction, seeds: str) -> None:
-        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+        if not allowed_interaction(interaction, allowed_user_id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         seed_list = [s.strip() for s in seeds.split(",") if s.strip()]
@@ -271,7 +272,7 @@ def setup_commands(
     @_gate(tree, "variant", "변형 문제 생성", guild, "variant" in avail_cmds)
     @app_commands.describe(card_id="대상 card_id (box3 권장)")
     async def variant_cmd(interaction: discord.Interaction, card_id: str) -> None:
-        if not allowed_interaction(interaction, interaction.user.id) or make_ctx is None:
+        if not allowed_interaction(interaction, allowed_user_id) or make_ctx is None:
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         card = next((c for c in boot_result.deck.cards if c.card_id == card_id), None)
@@ -288,7 +289,7 @@ def setup_commands(
 
     @_gate(tree, "ui", "학습 제어판", guild, "ui" in avail_cmds)
     async def ui_cmd(interaction: discord.Interaction) -> None:
-        if not allowed_interaction(interaction, interaction.user.id):
+        if not allowed_interaction(interaction, allowed_user_id):
             await interaction.response.send_message("권한 없음.", ephemeral=True)
             return
         await interaction.response.send_message("학습 제어판을 띄웁니다.", ephemeral=True)

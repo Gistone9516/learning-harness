@@ -159,5 +159,4 @@ async def post_panel(channel, runner, boot_result, make_ctx, user_id: int):
         "📘 **학습 제어판**\n"
         "버튼으로 학습을 시작하세요. 암기/시험은 DAY(1-30)를 입력합니다."
     )
-    await channel.send(content=content, view=view)
-    return view
+    return await channel.send(content=content, view=view)

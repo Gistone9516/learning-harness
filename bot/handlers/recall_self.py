@@ -110,7 +110,10 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                     try:
                         await ia.response.edit_message(content="✅ 정답으로 기록했어요.", view=None)
                     except Exception:
-                        await ia.response.defer()
+                        try:
+                            await ia.response.defer()
+                        except Exception:
+                            pass
 
                 @discord.ui.button(label="❌ 몰랐어요", style=discord.ButtonStyle.danger)
                 async def incorrect(self, ia: discord.Interaction, btn: discord.ui.Button) -> None:
@@ -123,7 +126,10 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                     try:
                         await ia.response.edit_message(content="❌ 오답으로 기록했어요.", view=None)
                     except Exception:
-                        await ia.response.defer()
+                        try:
+                            await ia.response.defer()
+                        except Exception:
+                            pass
 
                 async def on_timeout(self) -> None:
                     if not future.done():
@@ -152,12 +158,3 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
         requeue=is_incorrect,
         done=True,
     )
-
-
-def _done_view(msg: str) -> discord.ui.LayoutView:
-    v = discord.ui.LayoutView(timeout=None)
-    v.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(msg),
-        accent_colour=_COLOR_DONE,
-    ))
-    return v

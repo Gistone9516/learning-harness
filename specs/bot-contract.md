@@ -81,7 +81,7 @@ Session state (in-memory, volatile): `seen_card_ids: set[str]`, `queue`, `requeu
 5. **In-session requeue**: if `HandlerResult.requeue` (wrong answer), append to `requeue`. Drain `requeue` before `queue`. Warm results are box-independent.
 6. **End**: `queue` and `requeue` drained -> summary (see below) + diagnostic update.
 
-**End-of-session summary (non-AI default):** Embed or card showing `total attempts, accuracy, box moves, next due info` (updates digest store) + closing @mention. Replaced by AI journal when `ai_session_summary` is enabled (learning-types layer 3).
+**End-of-session summary (non-AI default):** a Components V2 card (SoT §7.13) showing `total attempts, accuracy, box moves, next due info` (updates digest store), with the closing @mention sent as a separate plain message (a V2 card cannot carry a mention). Replaced by AI journal when `ai_session_summary` is enabled (learning-types layer 3).
 
 **D-day activation:** `/study --dday` or `/dday` toggle sets `opts.dday_mode=True` (or config `capabilities.dday`). Engine does not decide this — bot injects it (engine-contract §2.3).
 
@@ -107,6 +107,7 @@ Session state (in-memory, volatile): `seen_card_ids: set[str]`, `queue`, `requeu
 - **Persistent view re-registration (required)**: custom_id = `srs:<verdict>:<card_id>`. Call `add_view(PersistentLearnView())` once in `on_ready` so button clicks after restart route to `emit`. **Clicks after bot restart are treated as cold because seen is volatile** (restart resets session — intended behavior, consistent with SoT §2).
 - Sidecar (SoT §2.1): confidence, read_pos, elaboration, alert_sent, adaptive_weight are managed by the bot via harness store (engine-independent).
 - live/* coalescing sits on top of shared `coalesce_base` (rate limit). Hard constraints: allowlist, no secret exposure, at most 1 edit/second, 1 bot per token, permission scope.
+- **Output rendering = Components V2 only (SoT §7.13)**: learner-facing content uses V2 layout cards (`harness/output/cards.py`: `card`/`titled_card`/`container`). `discord.Embed` and `output/embeds.py` are deprecated and unused by the kit (catalog-only). Plain text only for short ephemeral acks and for `@mention` pings (V2 cards cannot carry content/mention, so the ping is a separate plain message).
 
 ---
 

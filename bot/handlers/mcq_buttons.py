@@ -51,41 +51,6 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     loop = asyncio.get_running_loop()
     future: asyncio.Future[str] = loop.create_future()
 
-    class MCQView(discord.ui.View):
-        def __init__(self) -> None:
-            super().__init__(timeout=600)
-            self._answered = False
-            for i, opt in enumerate(options):
-                btn = discord.ui.Button(
-                    label=opt[:80],
-                    style=discord.ButtonStyle.primary,
-                    custom_id=f"mcq:{i}",
-                )
-                btn.callback = self._make_cb(opt)
-                self.add_item(btn)
-
-        def _make_cb(self, option: str):
-            async def cb(interaction: discord.Interaction) -> None:
-                if not allowed_interaction(interaction, user_id):
-                    await interaction.response.send_message("권한 없음.", ephemeral=True)
-                    return
-                if self._answered:
-                    await interaction.response.defer()
-                    return
-                self._answered = True
-                if not future.done():
-                    future.set_result(option)
-                self.stop()
-                try:
-                    await interaction.response.defer()
-                except Exception:
-                    pass
-            return cb
-
-        async def on_timeout(self) -> None:
-            if not future.done():
-                future.set_result("__timeout__")
-
     # send question text + option buttons
     q_text = f"{_progress_prefix(ctx)}**Q.** {scenario}"
     await channel.send(content=q_text, view=_build_mcq_view(scenario, options, user_id, future))

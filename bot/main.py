@@ -87,6 +87,17 @@ class StudyBot(discord.Client):
                 user_id = interaction.user.id
                 br = self.boot_result
 
+                # Guard against concurrent sessions for the same user (would orphan
+                # the first Session and break stop-word handling).
+                if user_id in self._sessions:
+                    try:
+                        await channel.send(
+                            f"<@{user_id}> 이미 학습 세션이 진행 중입니다. 끝내거나 '중단'을 입력한 뒤 다시 시작하세요."
+                        )
+                    except Exception:
+                        pass
+                    return
+
                 sess = Session()
                 self._sessions[user_id] = sess
 
@@ -152,14 +163,19 @@ class StudyBot(discord.Client):
                 async def on_finish(ctx, session: Session):
                     stats = session.stats
                     rate = (stats.correct / stats.total_attempts * 100) if stats.total_attempts else 0
-                    summary = (
-                        f"<@{user_id}> 세션 종료!\n"
-                        f"총 시도: {stats.total_attempts} | "
-                        f"정답률: {rate:.0f}% | "
-                        f"박스 승급: {stats.box_advances} | "
+                    body = (
+                        f"총 시도: {stats.total_attempts}\n"
+                        f"정답률: {rate:.0f}%\n"
+                        f"박스 승급: {stats.box_advances}\n"
                         f"박스 강등: {stats.box_demotions}"
                     )
-                    await channel.send(summary)
+                    # Components V2 card for the content (SoT §7.13); mention is a separate plain ping.
+                    from cards import titled_card
+                    await channel.send(view=titled_card("세션 종료", body, 0x57F287))
+                    await channel.send(
+                        f"<@{user_id}> 학습 세션이 끝났어요.",
+                        allowed_mentions=discord.AllowedMentions(users=True),
+                    )
                     if "ai_session_summary" in br.enabled_capabilities:
                         try:
                             from caps_ai.ai_session_summary import session_summary
@@ -170,11 +186,7 @@ class StudyBot(discord.Client):
                             log.warning("ai_session_summary failed: %s", e)
                     # Re-post the control panel so the user can pick the next action.
                     if "control_panel" in br.enabled_capabilities:
-                        try:
-                            from control_panel import post_panel
-                            await post_panel(channel, _runner, br, self._make_command_ctx, user_id)
-                        except Exception as e:
-                            log.warning("control panel post failed: %s", e)
+                        await self._refresh_panel(channel)
 
                 await run_session(
                     ctx=ctx,
@@ -188,7 +200,7 @@ class StudyBot(discord.Client):
                 self._sessions.pop(user_id, None)
             return _runner
 
-        _cmds.setup_commands(self.tree, discord.Object(id=self.guild_id), self.boot_result, _get_runner, self._make_command_ctx)
+        _cmds.setup_commands(self.tree, discord.Object(id=self.guild_id), self.boot_result, _get_runner, self._make_command_ctx, self.allowed_user_id)
 
         # Register dispatch handlers for enabled capabilities only (+ recall_self fallback).
         from wiring import register_enabled_handlers
@@ -223,12 +235,7 @@ class StudyBot(discord.Client):
 
             # Control panel: post on bot online.
             if "control_panel" in self.boot_result.enabled_capabilities:
-                try:
-                    from control_panel import post_panel
-                    await post_panel(channel, self._panel_runner, self.boot_result,
-                                     self._make_command_ctx, self.allowed_user_id)
-                except Exception as e:
-                    log.warning("control panel post failed: %s", e)
+                await self._refresh_panel(channel)
 
     async def on_message(self, message: discord.Message) -> None:
         # Ignore messages from the bot itself.
@@ -256,6 +263,22 @@ class StudyBot(discord.Client):
             sid=None, session=sess, emit=None, ai_persona=br.ai_persona,
             enabled_capabilities=br.enabled_capabilities,
         )
+
+    async def _refresh_panel(self, channel) -> None:
+        """Delete the previously posted control panel (if any) and post a fresh one."""
+        old = getattr(self, "_panel_message", None)
+        if old is not None:
+            try:
+                await old.delete()
+            except Exception:
+                pass
+        try:
+            from control_panel import post_panel
+            self._panel_message = await post_panel(
+                channel, self._panel_runner, self.boot_result,
+                self._make_command_ctx, self.allowed_user_id)
+        except Exception as e:
+            log.warning("control panel post failed: %s", e)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

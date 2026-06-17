@@ -108,18 +108,7 @@ async def ask_confidence(ctx, card_id: str) -> str | None:
                 future.set_result(None)
 
     view = ConfidenceView()
-    view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay("이 카드가 얼마나 어렵게 느껴지나요?"),
-        discord.ui.ActionRow(
-            *[
-                discord.ui.Button(label=label, style=discord.ButtonStyle.primary)
-                for label in LEVELS.values()
-            ]
-        ),
-        accent_colour=0x5865F2,
-    ))
-
-    await channel.send(view=view)
+    await channel.send(content="이 카드가 얼마나 어렵게 느껴지나요?", view=view)
 
     chosen = await future
 

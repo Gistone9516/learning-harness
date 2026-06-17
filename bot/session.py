@@ -190,9 +190,11 @@ async def run_session(
         session.seen_card_ids.add(card_id)
         # replace ctx.emit with a closure that captures this card's attempt_kind
         ctx.emit = _make_emit(attempt_kind)
-        # session progress indicator (presented count vs initial queue size)
+        # session progress indicator (presented count vs total; requeued cards can
+        # push presented past the initial queue size, so never show a denominator
+        # smaller than the numerator)
         presented += 1
-        ctx.progress = (presented, total_cards)
+        ctx.progress = (presented, max(total_cards, presented))
 
         # optional pre-card enhancement caps (confidence, hint); opt-in, skipped headless
         if ctx.channel is not None:
