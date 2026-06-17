@@ -55,6 +55,9 @@ _CORE_CAPABILITY_IDS = set(_reg.all_ids())
 _LAYER4_ALWAYS = set(_reg.layer4_always())
 
 
+from subject import SubjectProfile, build_subject_profile
+
+
 @dataclass
 class BootResult:
     """Return value of boot.load()."""
@@ -73,6 +76,7 @@ class BootResult:
     ai_effort: str
     ai_persona: str | None = None
     ai_model_explain: str | None = None
+    subject: SubjectProfile | None = None           # injected area taxonomy + AI task overrides
 
 
 # -- Validation helpers -------------------------------------------------------
@@ -400,6 +404,9 @@ def load(mount: str) -> BootResult:
         os.environ.get("AI_MODEL_EXPLAIN") or ai_config.get("model_explain") or ai_model
     )
 
+    # Subject profile: area taxonomy + per-capability AI task overrides (injection §5).
+    subject = build_subject_profile(config)
+
     # Verify the enabled capabilities have their required files present (partial-clone guard).
     from wiring import verify_capability_files
     verify_capability_files(enabled_capabilities)
@@ -422,4 +429,5 @@ def load(mount: str) -> BootResult:
         ai_effort=ai_effort,
         ai_persona=ai_persona,
         ai_model_explain=ai_model_explain,
+        subject=subject,
     )

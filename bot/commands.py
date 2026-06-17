@@ -45,8 +45,9 @@ class _LevelCmdConfirm(discord.ui.View):
             if (c.tags or {}).get("area") == self._area and isinstance((c.tags or {}).get("level"), int)
         ]
         res = _ls.apply_level_change(self._br.mount, self._br.deck.namespace, area_cards, self._area, self._new)
+        label = self._br.subject.ko_label(self._area) if getattr(self._br, "subject", None) else self._area
         await interaction.response.send_message(
-            f"{_ls.ko_label(self._area)} 레벨 {res['old']} → {res['new']} (배움 {res['changed']}개 자동 갱신). /ui 로 패널을 새로 띄워요.",
+            f"{label} 레벨 {res['old']} → {res['new']} (배움 {res['changed']}개 자동 갱신). /ui 로 패널을 새로 띄워요.",
             ephemeral=True,
         )
         self.stop()
@@ -321,33 +322,34 @@ def setup_commands(
             ("변형 문제: " + str(v.get("front"))) if v else "변형을 생성할 수 없습니다."
         )
 
-    @tree.command(name="level", description="영역별 레벨 설정 (1-10)", guild=guild)
-    @app_commands.describe(area="영역", level="레벨 1-10")
-    @app_commands.choices(area=[
-        app_commands.Choice(name="단어", value="vocab"),
-        app_commands.Choice(name="문법", value="grammar"),
-        app_commands.Choice(name="숙어", value="idiom"),
-    ])
-    async def level_cmd(interaction: discord.Interaction, area: app_commands.Choice[str], level: int) -> None:
-        if not allowed_interaction(interaction, allowed_user_id):
-            await interaction.response.send_message("권한 없음.", ephemeral=True)
-            return
-        a = area.value
-        new = _ls.clamp_level(level)
-        cur = _ls.get_level(boot_result.mount, boot_result.deck.namespace, a)
-        samples = [c for c in boot_result.deck.cards
-                   if (c.tags or {}).get("area") == a and (c.tags or {}).get("level") == new][:2]
-        if samples:
-            ex = "\n".join(
-                f"• {(c.front or {}).get('prompt') or (c.front or {}).get('text') or c.card_id}"
-                f" — {(c.back or {}).get('detail', '')}" for c in samples)
-        else:
-            ex = "(이 레벨 예시 항목이 아직 없어요.)"
-        await interaction.response.send_message(
-            f"**{_ls.ko_label(a)} 레벨 {cur} → {new}**\n이 레벨은 이정도 난이도예요:\n{ex}\n\n정말 바꾸시겠어요?",
-            view=_LevelCmdConfirm(boot_result, allowed_user_id, a, new),
-            ephemeral=True,
-        )
+    # /level: choices come from the injected area taxonomy (subject-agnostic). Registered
+    # only when the subject actually has catalog areas.
+    _subj = getattr(boot_result, "subject", None)
+    _area_choices = [app_commands.Choice(name=a.label, value=a.key) for a in (_subj.areas if _subj else ())]
+    if _area_choices:
+        @tree.command(name="level", description="영역별 레벨 설정 (1-10)", guild=guild)
+        @app_commands.describe(area="영역", level="레벨 1-10")
+        @app_commands.choices(area=_area_choices)
+        async def level_cmd(interaction: discord.Interaction, area: app_commands.Choice[str], level: int) -> None:
+            if not allowed_interaction(interaction, allowed_user_id):
+                await interaction.response.send_message("권한 없음.", ephemeral=True)
+                return
+            a = area.value
+            new = _ls.clamp_level(level)
+            cur = _ls.get_level(boot_result.mount, boot_result.deck.namespace, a)
+            samples = [c for c in boot_result.deck.cards
+                       if (c.tags or {}).get("area") == a and (c.tags or {}).get("level") == new][:2]
+            if samples:
+                ex = "\n".join(
+                    f"• {(c.front or {}).get('prompt') or (c.front or {}).get('text') or c.card_id}"
+                    f" — {(c.back or {}).get('detail', '')}" for c in samples)
+            else:
+                ex = "(이 레벨 예시 항목이 아직 없어요.)"
+            await interaction.response.send_message(
+                f"**{_subj.ko_label(a)} 레벨 {cur} → {new}**\n이 레벨은 이정도 난이도예요:\n{ex}\n\n정말 바꾸시겠어요?",
+                view=_LevelCmdConfirm(boot_result, allowed_user_id, a, new),
+                ephemeral=True,
+            )
 
     @tree.command(name="clear", description="채널 메시지 정리", guild=guild)
     @app_commands.describe(n="삭제할 최근 메시지 수 (기본 100)")
@@ -388,7 +390,7 @@ def setup_commands(
             "/card <id> - 카드 조회",
             "/concept <ref> - 개념 조회",
             "/settings - 설정 조회",
-            "/level <단어|문법|숙어> <1-10> - 영역별 레벨 설정",
+            "/level <영역> <1-10> - 영역별 레벨 설정",
             "/clear [n] - 채널 메시지 정리",
         ]
         _opt = [

@@ -11,6 +11,14 @@ import _paths
 _paths.setup()
 
 import control_panel
+from subject import build_subject_profile
+
+# Test subject taxonomy (areas are injected, not hardcoded in the kit).
+_SUBJ = build_subject_profile({"areas": [
+    {"key": "vocab", "label": "단어", "icon": "📚", "aliases": ["어휘"]},
+    {"key": "grammar", "label": "문법", "icon": "📖"},
+    {"key": "idiom", "label": "숙어", "icon": "💬"},
+]})
 
 
 def _card(cid, area, level=1):
@@ -21,7 +29,7 @@ def _card(cid, area, level=1):
 def _panel(caps, cards):
     br = SimpleNamespace(
         mount=".", deck=SimpleNamespace(namespace="t", cards=cards),
-        enabled_capabilities=set(caps),
+        enabled_capabilities=set(caps), subject=_SUBJ,
     )
     return control_panel.ControlPanelView(None, br, None, 1)
 
@@ -48,6 +56,6 @@ def test_convo_and_dashboard_gated():
 
 def test_status_text_lists_areas():
     br = SimpleNamespace(mount=".", deck=SimpleNamespace(namespace="t", cards=[_card("a", "vocab")]),
-                         enabled_capabilities=set())
+                         enabled_capabilities=set(), subject=_SUBJ)
     txt = control_panel.status_text(br)
     assert "학습 제어판" in txt and "단어" in txt

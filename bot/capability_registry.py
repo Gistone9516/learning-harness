@@ -60,6 +60,7 @@ CORE_KERNEL_FILES: tuple[str, ...] = (
     "bot/review_select.py",
     "bot/study_select.py",
     "bot/level_state.py",
+    "bot/subject.py",
     "bot/capability_registry.py",
     "bot/wiring.py",
     # engine core (pure)

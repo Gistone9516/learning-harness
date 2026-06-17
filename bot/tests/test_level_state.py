@@ -28,10 +28,19 @@ def test_relevel_same_no_change():
     assert ls.relevel_learned_updates([("v1", 1)], 2, 2) == {}
 
 
-def test_area_from_ko_and_clamp():
-    assert ls.area_from_ko("단어") == "vocab"
-    assert ls.area_from_ko("문법") == "grammar"
-    assert ls.area_from_ko("숙어") == "idiom"
+def test_area_from_label_and_clamp():
+    # Area taxonomy now lives in the injected SubjectProfile, not in level_state.
+    from subject import build_subject_profile
+    s = build_subject_profile({"areas": [
+        {"key": "vocab", "label": "단어", "aliases": ["어휘"]},
+        {"key": "grammar", "label": "문법"},
+        {"key": "idiom", "label": "숙어"},
+    ]})
+    assert s.area_from_label("단어") == "vocab"
+    assert s.area_from_label("어휘") == "vocab"
+    assert s.area_from_label("문법") == "grammar"
+    assert s.area_from_label("숙어") == "idiom"
+    assert s.area_from_label("없는라벨") is None
     assert ls.clamp_level(0) == 1 and ls.clamp_level(11) == 10 and ls.clamp_level(5) == 5
 
 

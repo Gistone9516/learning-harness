@@ -29,36 +29,36 @@
    AI model ids `AI_MODEL` / `AI_MODEL_EXPLAIN`).
 4. `pip install -U "discord.py>=2.6" python-dotenv`.
 
-**Run:**
+**Run (one app + per-subject data):** there is ONE code copy (this repo). A subject is a data-only
+folder (`manifest.json`, `decks/`, `config/`, `_state/`) plus its own `.env`. Run **from the subject
+folder** so its `.env` (channel/token) is the one loaded:
 ```bash
-python "bot/main.py" [content-folder]      # omit the folder to use the current folder. Example: python "bot/main.py" examples
+cd "C:\path\to\subject-folder"
+python "<KIT>\bot\main.py" "C:\path\to\subject-folder"
 ```
-Loads the content folder's `manifest.json`, `decks/`, and `config/` and puts that subject on Discord.
-Progress is saved under that folder's `_state/`.
+`load_dotenv()` reads the cwd's `.env`, so each subject gets its own channel/token. Progress is saved
+under that folder's `_state/`. Mount priority: argument > `.env MOUNT` > cwd.
 
 **From a consuming project:** run `python skills/install.py` once to create the global skill, then launch
-the bot from any subject folder with a single line.
+any subject folder with the line above. **Do not clone code per subject** — the kit code stays generic
+(see "Subject injection" below); only data + `.env` differ.
 
-### Modular clone (copy only the capabilities you need)
+### Subject injection (kit stays subject-agnostic)
 
-The kit is capability-modular: a consuming project can clone the **core kernel** plus only the
-capability bundles it enables, run from its own copy, and leave this repo pristine.
+The kit code (`bot/`, `engine/`) carries **zero subject literals**; a subject's shape is injected via its
+`config/<deck>.json` and compiled into a `SubjectProfile` (`bot/subject.py`):
 
-```bash
-python tools/clone.py --target <PROJECT_DIR> --from-config [--env copy]
-```
+- **`areas`** — catalog category taxonomy `[{key, label, icon?, aliases?}]`. Drives `/level`, the control
+  panel, and per-area level state. Omit for subjects with no catalog areas.
+- **`capabilities.ai.persona`** — short identity clause, auto-injected into every AI preamble (carries the
+  subject identity, so kit task roles stay generic).
+- **`capabilities.ai.tasks.{practice,convo,explain}`** — per-capability overrides of the generic,
+  subject-neutral defaults (roles + a few UI strings). Any omitted key falls back to the default.
 
-- `bot/capability_registry.py` is the single source of truth: each `capability_id` maps to its
-  files, shared bases, dispatch handler, and slash commands. `bot/boot.py`, `bot/wiring.py`, and
-  `tools/clone.py` all read it.
-- `tools/clone.py` resolves the enabled set (from the target's `config/<deck>.json`), unions the
-  core kernel with each enabled capability's files (deduped, transitive), and copies them preserving
-  the `bot/ + engine/ + bot/harness/` layout. The target's content (`manifest/decks/config/_state`) is untouched.
-- **Gated wiring**: `bot/wiring.py` registers dispatch handlers and `bot/commands.py` registers slash
-  commands **only for enabled capabilities** (recall_self is always present as the fallback). An
-  enabled capability whose files were not cloned fails boot with a clear `ContentInjectionError`.
-- The cloned project runs standalone: `cd <PROJECT_DIR> && python bot/main.py <PROJECT_DIR>`.
-- `/study unit:<unit>` filters the session to one unit (e.g. a day or a `*-learn` flashcard set).
+A guardrail test (`bot/tests/test_subject_agnostic.py`) fails if any subject literal leaks into kit code.
+`bot/capability_registry.py` remains the single source of truth for which `capability_id` maps to which
+files/handler/commands (read by `bot/boot.py` and `bot/wiring.py`); gated wiring registers handlers and
+slash commands only for enabled capabilities. `/study unit:<unit>` filters a session to one unit.
 
 ### Catalog learning model + study control panel
 
@@ -114,13 +114,12 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ wiring.py                gated handler registration + required-file verification
 │   ├ study_select.py          unit + area/level card filters (level continuity)
 │   ├ level_state.py           per-area level + learned flags (sidecar) + bulk re-level
+│   ├ subject.py               SubjectProfile: injected area taxonomy + AI task templates (subject-agnostic kit)
 │   ├ control_panel.py         persistent learning-hub panel (capability control_panel, /ui)
 │   ├ caps_ai/ai_practice.py   AI-generated composition problem + grading (per catalog item)
-│   ├ caps_ai/ai_convo.py      threaded multi-turn English conversation (main model)
+│   ├ caps_ai/ai_convo.py      threaded multi-turn conversation (main model)
 │   ├ caps_ai/ai_explain.py    one-off per-card concept explanation thread (explain model, discarded after use)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
-├ tools/                       maintenance scripts
-│   └ clone.py                 clone core kernel + selected capabilities into a consuming project
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
 ├ web/                         (reserved) frontend-design workspace for continuous interactive practice and long-form reading, deferred
@@ -157,7 +156,7 @@ nothing (zero file I/O, discord, or harness imports).
 
 ```bash
 cd engine && python -m pytest tests/ -q      # 159 pure-engine regression tests
-cd bot    && python -m pytest tests/ -q      # 362 headless tests (boot/session, handlers, caps, AI seam, renderers)
+cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session, handlers, caps, AI seam, renderers)
 ```
 - The engine core is pure functions (`now` is injected for determinism). The bot is verified headless without
   discord or a live `claude` CLI (boot, session loop, handler grading cores, sidecar I/O, and the AI helper
@@ -182,7 +181,11 @@ cd bot    && python -m pytest tests/ -q      # 362 headless tests (boot/session,
     (`ai_explain`, one-off, discarded after use). Card explanations (`back.detail`) are enriched for beginners.
   - Answer reveal rebuilt on Components V2 (`discord.ui.LayoutView`); AI model ids moved to `.env`
     (`AI_MODEL` / `AI_MODEL_EXPLAIN`) as the single source of truth.
-- 521 regression tests green (159 engine plus 362 bot), all headless. The deterministic loop and every new
+  - Subject-agnostic refactor: area taxonomy, AI persona, and AI task wording are injected via config
+    (`bot/subject.py` SubjectProfile); the per-subject `clone` tool was removed in favor of one app
+    running against per-subject data folders (each with its own `.env`). Guardrail test enforces zero
+    subject literal in kit code.
+- 527 regression tests green (159 engine plus 368 bot), all headless. The deterministic loop and every new
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server) and live AI
   smoke (needs the `claude` CLI on PATH). The web (frontend-design) workspace remains deferred.

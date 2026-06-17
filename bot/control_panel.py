@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Study control panel (capability_id=control_panel) — catalog learning hub.
 
-Persistent button panel: per-area (단어/문법/숙어) status with level + learned progress.
+Persistent button panel: per-area (areas injected via config) status with level + learned progress.
 Click an area -> ephemeral menu (🧠 암기 / ✍️ AI 연습 / ⬆️⬇️ 레벨). Common row:
 🔁 복습 / 🗣 대화 / 📊 대시보드 / 🧹 정리 / ❓ 도움말. Level change shows a difficulty
 example and a confirm dialog, then bulk-updates the learned flags (level_state).
@@ -27,8 +27,22 @@ log = logging.getLogger(__name__)
 
 PANEL_COLOR = 0x5865F2
 _WARN = 0xF1C40F
-_AREAS = ("vocab", "grammar", "idiom")
-_AREA_EMOJI = {"vocab": "📚", "grammar": "📖", "idiom": "💬"}
+
+
+def _areas(boot_result):
+    """Area keys from the injected SubjectProfile (subject-agnostic)."""
+    subj = getattr(boot_result, "subject", None)
+    return subj.area_keys() if subj is not None else []
+
+
+def _emoji(boot_result, area: str) -> str:
+    subj = getattr(boot_result, "subject", None)
+    return subj.icon_of(area) if subj is not None else ""
+
+
+def _ko(boot_result, area: str) -> str:
+    subj = getattr(boot_result, "subject", None)
+    return subj.ko_label(area) if subj is not None else area
 
 
 def _bar(done: int, total: int, width: int = 5) -> str:
@@ -45,14 +59,14 @@ def _area_cards(boot_result, area: str):
 def status_text(boot_result) -> str:
     br = boot_result
     lines = ["📘 **학습 제어판**"]
-    for area in _AREAS:
+    for area in _areas(br):
         cards = _area_cards(br, area)
         total = len(cards)
         if total == 0:
             continue
         learned = sum(1 for c in cards if _ls.is_learned(br.mount, br.deck.namespace, c.card_id))
         lvl = _ls.get_level(br.mount, br.deck.namespace, area)
-        lines.append(f"{_AREA_EMOJI[area]} {_ls.ko_label(area)}  Lv{lvl}  {_bar(learned, total)} {learned}/{total} 배움")
+        lines.append(f"{_emoji(br, area)} {_ko(br, area)}  Lv{lvl}  {_bar(learned, total)} {learned}/{total} 배움")
     lines.append("영역을 고르면 🧠 암기 / ✍️ AI 연습 / 레벨 조절을 선택해요.")
     return "\n".join(lines)
 
@@ -93,7 +107,7 @@ class _LevelConfirmView(discord.ui.View):
         ]
         res = _ls.apply_level_change(br.mount, br.deck.namespace, area_cards, self._area, self._new)
         await interaction.response.send_message(
-            f"{_ls.ko_label(self._area)} 레벨을 {res['old']} → {res['new']}로 바꿨어요. (배움 {res['changed']}개 자동 갱신)",
+            f"{_ko(br, self._area)} 레벨을 {res['old']} → {res['new']}로 바꿨어요. (배움 {res['changed']}개 자동 갱신)",
             ephemeral=True,
         )
         await self._hub.refresh(interaction.channel)
@@ -153,7 +167,7 @@ class _AreaMenuView(discord.ui.View):
             return
         example = _level_example(br, self._area, new)
         body = (
-            f"**{_ls.ko_label(self._area)} 레벨 {cur} → {new}**\n"
+            f"**{_ko(br, self._area)} 레벨 {cur} → {new}**\n"
             f"이 레벨은 이정도 난이도예요:\n{example}\n\n정말 바꾸시겠어요?"
         )
         await interaction.response.send_message(
@@ -175,9 +189,9 @@ class ControlPanelView(discord.ui.View):
         self._refresh_fn = refresh_fn
         enabled = set(getattr(boot_result, "enabled_capabilities", set()) or set())
 
-        for area in _AREAS:
+        for area in _areas(boot_result):
             if _area_cards(boot_result, area):
-                self._add(f"{_AREA_EMOJI[area]} {_ls.ko_label(area)}",
+                self._add(f"{_emoji(boot_result, area)} {_ko(boot_result, area)}".strip(),
                           discord.ButtonStyle.primary, f"panel:area:{area}", self._area_cb(area))
         self._add("🔁 복습", discord.ButtonStyle.secondary, "panel:review", self._review)
         if "ai_convo" in enabled:
@@ -208,7 +222,7 @@ class ControlPanelView(discord.ui.View):
                 return
             lvl = _ls.get_level(self.boot_result.mount, self.boot_result.deck.namespace, area)
             await interaction.response.send_message(
-                f"{_AREA_EMOJI[area]} **{_ls.ko_label(area)}** (현재 Lv{lvl}) — 무엇을 할까요?",
+                f"{_emoji(self.boot_result, area)} **{_ko(self.boot_result, area)}** (현재 Lv{lvl}) — 무엇을 할까요?",
                 view=_AreaMenuView(self, area), ephemeral=True)
         return cb
 
@@ -255,10 +269,13 @@ class ControlPanelView(discord.ui.View):
     async def _help(self, interaction: discord.Interaction) -> None:
         if not await self._guard(interaction):
             return
+        br = self.boot_result
+        areas_hint = " / ".join(f"{_emoji(br, a)}{_ko(br, a)}".strip() for a in _areas(br)) or "영역"
+        level_hint = "|".join(_ko(br, a) for a in _areas(br)) or "영역"
         await interaction.response.send_message(
-            "📚/📖/💬 영역 선택 → 🧠 암기(보고 '알아요') / ✍️ AI 연습(영작 출제·채점) / 레벨 ±\n"
-            "🗣 대화: 배운 표현으로 AI와 영어 대화(스레드)\n"
-            "🔁 복습 · 📊 대시보드 · 🧹 정리(/clear) · /level <단어|문법|숙어> <1-10>\n"
+            f"{areas_hint} 선택 → 🧠 암기(보고 '알아요') / ✍️ AI 연습(출제·채점) / 레벨 ±\n"
+            "🗣 대화: 배운 항목으로 AI와 대화(스레드)\n"
+            f"🔁 복습 · 📊 대시보드 · 🧹 정리(/clear) · /level <{level_hint}> <1-10>\n"
             "학습 중 '중단' 입력으로 세션 종료.",
             ephemeral=True,
         )
@@ -289,7 +306,7 @@ class LearnEndView(discord.ui.View):
                if (c.tags or {}).get("level") == self._level]
         n = _ls.set_learned_many(self._br.mount, self._br.deck.namespace, ids, False)
         await interaction.response.send_message(
-            f"🔄 초기화: {_ls.ko_label(self._area)} 레벨 {self._level}의 '알아요' {n}개를 해제했어요. "
+            f"🔄 초기화: {_ko(self._br, self._area)} 레벨 {self._level}의 '알아요' {n}개를 해제했어요. "
             "다시 🧠 암기하면 처음부터 나와요.", ephemeral=True)
         if self._refresh:
             await self._refresh(interaction.channel)
@@ -307,7 +324,7 @@ class LearnEndView(discord.ui.View):
 
 async def post_learn_end(channel, boot_result, user_id, area, level, refresh_fn):
     content = (
-        f"🧠 **{_ls.ko_label(area)} 레벨 {level} 암기 한 바퀴 끝!**\n"
+        f"🧠 **{_ko(boot_result, area)} 레벨 {level} 암기 한 바퀴 끝!**\n"
         "'몰라요' 한 항목은 다시 🧠 암기하면 또 나와요.\n"
         "🔄 초기화: 이 레벨 '알아요' 전체 해제 · ✅ 종료: 마치기"
     )

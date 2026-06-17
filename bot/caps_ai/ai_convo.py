@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""ai_convo capability (layer 3) — continuous English conversation practice in a thread.
+"""ai_convo capability (layer 3) — continuous conversation practice in a thread.
 
 Seeded by the learner's "learned" item list. The AI asks a Korean question nudging the
-learner to use one item, the learner replies with an English sentence, the AI explains/
-corrects in plain Korean and moves to the next item. Multi-turn via ConvManager; the
-learner replies in the thread; "중단" ends it. Runs on the project's AI model (sonnet).
+learner to use one item, the learner replies, the AI corrects/encourages in plain Korean and
+moves to the next item. Multi-turn via ConvManager; the learner replies in the thread; "중단"
+ends it. Subject framing (role, thread title, seed hint) comes from the injected
+SubjectProfile (task_of); identity comes from the persona. Runs on the main AI model.
 """
 from __future__ import annotations
 
@@ -20,19 +21,13 @@ _paths.setup()
 import ai_caps
 from threads import thread_in_channel, close_thread          # harness/channels on sys.path
 from caps_ai.ai_socratic import _wait_for_reply               # client-based wait_for
+from subject import task_of
 
 log = logging.getLogger(__name__)
 
 _CAP_ID = "ai_convo"
 _REPLY_TIMEOUT = 300.0
 _STOP = {"중단", "취소", "정지", "그만", "stop", "cancel", "quit"}
-
-_ROLE = (
-    "너는 친절한 영어 튜터다. 한국어로, 비전공자도 알기 쉽게 짧게 말한다. "
-    "한 번에 한 항목(단어/문법/숙어) 위주로, 학습자가 그 표현으로 영어 문장을 직접 쓰도록 "
-    "유도하는 질문을 한국어로 하나만 던진다. 학습자가 영어 문장으로 답하면 한국어로 교정·칭찬하고 "
-    "더 자연스러운 영어 표현을 제시한 뒤, 다음 항목으로 자연스럽게 이어간다."
-)
 
 
 async def _send(target, text: str) -> None:
@@ -53,14 +48,15 @@ async def run_convo(ctx, client, learned_items: list[str], max_turns: int = 8) -
     if channel is None:
         return
 
+    role = task_of(ctx, "convo", "role")
     try:
-        thread = await thread_in_channel(channel, "🗣 영어 대화 연습")
+        thread = await thread_in_channel(channel, task_of(ctx, "convo", "thread_title"))
     except Exception as e:
         log.warning("ai_convo: thread create failed (%s); using the channel", e)
         thread = channel
 
     items = [s for s in (learned_items or []) if s][:40]
-    items_str = ", ".join(items) if items else "기초 인사와 일상 표현"
+    items_str = ", ".join(items) if items else task_of(ctx, "convo", "seed_hint")
     cm = ai_caps.ConvManager(ctx.session, window=4, capability_id=_CAP_ID)
 
     # Stop signal: allow "중단" (in the main channel) to interrupt a pending reply wait.
@@ -73,10 +69,10 @@ async def run_convo(ctx, client, learned_items: list[str], max_turns: int = 8) -
             stop_event = None
 
     seed = (
-        f"학습자가 '배웠다'고 체크한 표현들: {items_str}.\n"
+        f"학습자가 '배웠다'고 체크한 항목들: {items_str}.\n"
         "이 중 하나를 자연스럽게 쓰도록 유도하는 짧은 질문 하나로 한국어로 대화를 시작해."
     )
-    res = await cm.turn(seed, ctx=ctx, role=_ROLE)
+    res = await cm.turn(seed, ctx=ctx, role=role)
     if not res.ok:
         await _send(thread, "AI 연결 문제로 대화를 시작하지 못했어요. 잠시 후 다시 시도해 주세요.")
         return
@@ -110,7 +106,7 @@ async def run_convo(ctx, client, learned_items: list[str], max_turns: int = 8) -
             await _send(thread, "대화를 마칠게요. 수고했어요! 👏")
             ended = True
             break
-        res = await cm.turn(reply, ctx=ctx, role=_ROLE)
+        res = await cm.turn(reply, ctx=ctx, role=role)
         if not res.ok:
             await _send(thread, "(일시적 문제로 잠시 멈출게요.)")
             ended = True

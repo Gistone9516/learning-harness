@@ -17,21 +17,12 @@ import sidecar
 CAP_LEVEL = "level"
 CAP_LEARNED = "learned"
 
-AREAS = ("vocab", "grammar", "idiom")
 MIN_LEVEL = 1
 MAX_LEVEL = 10
 
-# Korean label <-> internal area id (for /level and the panel).
-_KO_TO_AREA = {"단어": "vocab", "어휘": "vocab", "문법": "grammar", "숙어": "idiom"}
-_AREA_TO_KO = {"vocab": "단어", "grammar": "문법", "idiom": "숙어"}
-
-
-def area_from_ko(label: str) -> str | None:
-    return _KO_TO_AREA.get((label or "").strip())
-
-
-def ko_label(area: str) -> str:
-    return _AREA_TO_KO.get(area, area)
+# Area taxonomy (which areas exist + their display labels) is subject-specific and is
+# injected via config -> SubjectProfile (bot/subject.py). It deliberately does NOT live
+# here, so the kit stays subject-agnostic. This module treats `area` as an opaque key.
 
 
 def clamp_level(n) -> int:

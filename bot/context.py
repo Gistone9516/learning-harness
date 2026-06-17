@@ -62,3 +62,4 @@ class Ctx:
     enabled_capabilities: set = field(default_factory=set)
     progress: tuple | None = None   # (presented, total) for the session progress indicator
     ai_model_explain: str | None = None   # model for ai_explain (haiku); from .env AI_MODEL_EXPLAIN
+    subject: Any = None   # SubjectProfile: injected area taxonomy + AI task overrides

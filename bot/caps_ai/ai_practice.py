@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """ai_practice capability (layer 3) — AI dynamically generates a practice problem for a
-catalog item (word / grammar / idiom), collects the learner's English answer, and grades it.
+catalog item, collects the learner's answer, and grades it.
 
-Production-focused: the learner is asked to WRITE English using the item; the AI grades for
-correctness + natural usage and gives a short Korean explanation. Falls back to the
-recall_self flashcard when the capability is disabled or the AI call fails (bot stays up).
+The learner produces an answer that uses the item; the AI grades for correctness and gives
+a short Korean explanation. All subject framing (the task wording, model answer expectation,
+UI labels) comes from the injected SubjectProfile (task_of), so this stays subject-agnostic.
+Falls back to the recall_self flashcard when the capability is disabled or the AI call fails.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import ai_caps
 from models import CardDef, HandlerResult
 from gating import allowed_interaction
 from dispatch import HANDLERS
+from subject import task_of
 
 log = logging.getLogger(__name__)
 
@@ -32,30 +34,10 @@ _COLOR_MAIN = 0x5865F2
 _COLOR_DONE = 0x57F287
 _COLOR_DANGER = 0xED4245
 
-# Per-area generation role (Korean instructions; output JSON {problem, answer}).
-_ROLE_BY_AREA = {
-    "vocab": (
-        "너는 한국인 초급 학습자를 위한 영어 출제자다. 주어진 '영어 단어'를 직접 써서 "
-        "짧은 영어 문장을 만들게 하는 영작 문제를 한국어 지시문으로 하나 낸다. "
-        'JSON으로만: {"problem":"<한국어 지시문>","answer":"<모범 영어 문장>"}'
-    ),
-    "grammar": (
-        "너는 한국인 초급 학습자를 위한 영어 출제자다. 주어진 '문법 포인트'를 적용해 "
-        "영어 문장을 직접 쓰게 하는 영작 문제를 한국어 지시문으로 하나 낸다. "
-        'JSON으로만: {"problem":"<한국어 지시문>","answer":"<모범 영어 문장>"}'
-    ),
-    "idiom": (
-        "너는 한국인 초급 학습자를 위한 영어 출제자다. 주어진 '숙어/구동사'를 상황에 맞게 "
-        "써서 영어 문장을 만들게 하는 영작 문제를 한국어 지시문으로 하나 낸다. "
-        'JSON으로만: {"problem":"<한국어 지시문>","answer":"<모범 영어 문장>"}'
-    ),
-}
-_ROLE_DEFAULT = _ROLE_BY_AREA["vocab"]
-
-_GRADER_ROLE = (
-    "너는 따뜻하지만 정확한 영어 채점자다. 학습자의 영어 문장이 그 항목을 올바르게 사용했고 "
-    "자연스러운 영어인지 판정한다. reason은 한국어로, 비전공자도 알기 쉽게 1~2문장."
-)
+# Generation/grading roles and UI strings are subject-agnostic: they come from
+# task_of(ctx, "practice", ...) — the injected SubjectProfile override else a generic
+# default (bot/subject.py). Subject identity is carried by the persona auto-injected
+# into every preamble; the area is passed via the data slice, not baked into the role.
 
 
 def _extract_json(text: str) -> dict | None:
@@ -91,11 +73,15 @@ async def _collect_answer(ctx, problem_text: str) -> str | None:
     loop = asyncio.get_running_loop()
     future: asyncio.Future[str | None] = loop.create_future()
 
+    modal_title = task_of(ctx, "practice", "modal_title")
+    input_label = task_of(ctx, "practice", "modal_input_label")
+    problem_prefix = task_of(ctx, "practice", "problem_prefix")
+
     class _Modal(discord.ui.Modal):
         def __init__(self) -> None:
-            super().__init__(title="영작 답안")
+            super().__init__(title=modal_title)
             self.answer = discord.ui.TextInput(
-                label="영어 문장", style=discord.TextStyle.paragraph, max_length=500,
+                label=input_label, style=discord.TextStyle.paragraph, max_length=500,
             )
             self.add_item(self.answer)
 
@@ -134,7 +120,7 @@ async def _collect_answer(ctx, problem_text: str) -> str | None:
             if not future.done():
                 future.set_result(None)
 
-    await channel.send(content=f"**✍️ 영작 문제.** {problem_text}", view=_Trigger())
+    await channel.send(content=f"**{problem_prefix}** {problem_text}", view=_Trigger())
     return await future
 
 
@@ -144,7 +130,9 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     if not ai_caps.should_invoke(enabled=enabled):
         return await _fallback(ctx, card)
 
-    area = (card.tags or {}).get("area", "vocab")
+    area = (card.tags or {}).get("area", "")
+    subj = getattr(ctx, "subject", None)
+    area_label = subj.ko_label(area) if (subj is not None and area) else area
     item = _item_text(card)
     meaning = (card.back or {}).get("detail", "")
 
@@ -152,10 +140,10 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     # NOTE: no force_json here — the role already mandates {"problem","answer"} JSON.
     # force_json would append the grader's {"verdict","reason"} schema and break generation.
     gen = await ai_caps.one_shot(
-        "이 항목으로 풀 영작 문제 1개를 만들어 주세요. JSON만.",
+        "이 학습 항목으로 풀 연습 문제 1개를 만들어 주세요. JSON만.",
         capability_id=_CAP_ID, ctx=ctx,
-        role=_ROLE_BY_AREA.get(area, _ROLE_DEFAULT),
-        data=f"학습 항목: {item}\n뜻/설명: {meaning}",
+        role=task_of(ctx, "practice", "role"),
+        data=f"영역: {area_label}\n학습 항목: {item}\n뜻/설명: {meaning}",
     )
     obj = _extract_json(gen.text) if gen.ok else None
     problem = (obj or {}).get("problem")
@@ -164,7 +152,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
         log.info("ai_practice: generation failed (card=%s), fallback to flashcard", card.card_id)
         return await _fallback(ctx, card)
 
-    # 2. collect the learner's English answer
+    # 2. collect the learner's answer
     user_answer = await _collect_answer(ctx, problem)
     if user_answer is None:
         return HandlerResult(card_id=card.card_id, verdict="skip", done=True)
@@ -172,7 +160,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     # 3. grade (force JSON verdict + Korean reason)
     gr = await ai_caps.one_shot(
         "Grade the learner answer now.",
-        capability_id=_CAP_ID, ctx=ctx, role=_GRADER_ROLE,
+        capability_id=_CAP_ID, ctx=ctx, role=task_of(ctx, "practice", "grader_role"),
         data=f"항목: {item}\n문제: {problem}\n모범답안: {model_answer}\n학습자 답: {user_answer}",
         force_json=True,
     )

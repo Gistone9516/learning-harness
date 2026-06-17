@@ -120,6 +120,39 @@ Subject-specific. Engine stays clean: all content vocabulary and spacing is inje
 
 ---
 
+### 5.1 SubjectProfile (areas + AI task injection)
+
+The kit is subject-agnostic; a subject's shape is injected here and compiled into a `SubjectProfile`
+(`bot/subject.py`). Kit code (`bot/`, `engine/`) must contain **no subject literal** — guarded by
+`bot/tests/test_subject_agnostic.py`. All subject wording lives in config.
+
+```jsonc
+{
+  "areas": [                                  // catalog area taxonomy (omit if the subject has no areas)
+    { "key": "vocab", "label": "단어", "icon": "📚", "aliases": ["어휘"] }
+  ],
+  "capabilities": {
+    "ai": {
+      "persona": "...",                       // short identity clause, auto-injected into EVERY AI preamble
+      "tasks": {                              // per-capability overrides of generic, subject-neutral defaults
+        "practice": { "role": "...", "grader_role": "...", "modal_title": "...", "modal_input_label": "...", "problem_prefix": "..." },
+        "convo":    { "role": "...", "thread_title": "...", "seed_hint": "..." },
+        "explain":  { "role": "..." }
+      }
+    }
+  }
+}
+```
+- `areas` drives `/level` choices, the control panel, and per-area level state. `key` is the stable id
+  (matches `CardDef.tags.area`); `label`/`icon`/`aliases` are display/input only.
+- The subject **identity** is carried by `persona` (always injected), so default task `role`s describe only
+  the task, never a subject. The practice generator receives the area via the data slice, so one
+  `practice.role` covers every area.
+- Any omitted `tasks` key falls back to the generic default in `bot/subject.py`. Provide overrides only
+  where the subject needs specific wording (e.g. a different task type or UI label).
+
+---
+
 ## 6. Validation (load-time, `ContentInjectionError`)
 
 Bot boot (SoT §3 step 3) validates injected content; violations raise `ContentInjectionError` and **block boot** (prevents misgrading):

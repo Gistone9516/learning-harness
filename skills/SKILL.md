@@ -1,57 +1,83 @@
 ---
 name: learning-harness
-description: Mounts a subject folder onto a Discord learning bot. The bot app is installed in one place; only the content folder is swapped to launch. Use for requests like "put this subject on Discord", "start the learning bot", "run v5", "launch the learning framework".
+description: Mounts a subject folder onto a Discord learning bot. One fixed generic app (code) runs against per-subject data folders; each subject keeps its own .env (channel/token). Use for requests like "put this subject on Discord", "start the learning bot", "run v5", "launch the learning framework", "add a new subject".
 ---
 
 # learning-harness (global skill)
 
-The learning bot app is installed in the folder below (code, engine, harness, and token live here):
+The learning bot app (generic, subject-agnostic code) is installed here:
 
 ```
 APP = <APP>
 ```
 
-The app (code and token) and data (content folder) are separated. The app is fixed; only the content folder is swapped. The token and `.env` are read from APP, so there is no need to reconfigure them for each subject folder.
+**Architecture: one fixed app + per-subject data folders.** The app holds ALL code (bot, engine,
+harness) in ONE place and never carries subject content. Each subject is a **data-only folder**
+(`manifest.json`, `decks/`, `config/`, `_state/`) plus its own **`.env`**. You run the app's code
+against a subject folder; the subject folder holds no code.
 
-## Prerequisites (bot will not start if any are missing)
+## ★ Governance — keep the kit subject-agnostic (hard rules)
 
-All three of the following must be in place before the bot can start. If any are missing, do not launch and inform the user instead.
+These prevent the kit from drifting into one subject's shape (which would collide when you switch
+subjects and come back). Follow them on every task:
 
-1. **Create a new bot app and issue a token in the Discord Developer Portal.** Use a separate app, token, and server from discord-bridge (reusing the same token is not allowed).
-2. **Create a new Discord server (guild) dedicated to learning.** When inviting the bot to that server, grant `bot` + `applications.commands` scopes and message read/write, thread, and file attachment permissions.
-3. **Fill in the four required keys in the `.env` file inside the APP folder.** Copy `.env.example` and fill in the values.
+- **No code clone per subject.** Do not copy `bot/`/`engine/` into a subject folder. There is ONE
+  code copy: the APP. Subjects differ only in data + `.env`.
+- **Zero subject literals in kit code** (`bot/`, `engine/`). No concrete subject name, no subject
+  area labels, no exam names, no task wording like "write a sentence". A guardrail test
+  (`bot/tests/test_subject_agnostic.py`) enforces this and fails on leakage.
+- **All subject flavor is injected via config**, never edited into the kit:
+  - **Areas** (the catalog categories + their labels/icons) → `config/<deck>.json` `"areas"`.
+  - **AI identity** → `capabilities.ai.persona` (auto-injected into every AI preamble).
+  - **AI task wording + UI strings** → `capabilities.ai.tasks.{practice,convo,explain}` (override the
+    generic, subject-neutral defaults in `bot/subject.py`).
+  - **Content** → `decks/<deck>.json`.
+- **While working on ANY subject, do not modify the kit to suit that subject.** Kit edits are for
+  generic framework features only. If you find yourself typing a subject word into `bot/`/`engine/`,
+  it belongs in that subject's config instead.
 
-If permissions or scopes are insufficient, some features such as threads and slash commands will be disabled with a warning, but basic operation is maintained.
+The same principle applies to the sibling `Discord Agents` project (generic `bridge.py` + `skills/`;
+instance specifics in `.env`/`roster.json`) — see global CLAUDE.md.
 
-## Mounting a subject folder to Discord
+## Prerequisites (per subject)
 
-Run the following from the subject folder you want to use. That folder's manifest, deck, and config will be injected into the bot.
+1. **A Discord bot app + token** in the Developer Portal (separate from discord-bridge). Subjects may
+   share one token or use different tokens; either way the token lives in the subject's `.env`.
+2. **A Discord server (guild) + channel** for that subject. Invite the bot with `bot` +
+   `applications.commands` scopes and message read/write, thread, and file-attachment permissions.
+   **Message Content Intent** must be ON (otherwise stop-word / conversation / explain replies are not read).
+3. **The subject folder's `.env`** (copy `.env.example`): `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`,
+   `DISCORD_CHANNEL_ID`, `DISCORD_ALLOWED_USER_ID`, plus `AI_MODEL` / `AI_MODEL_EXPLAIN`. Each subject's
+   `.env` is how it gets **its own channel** (and optionally its own bot/token).
+
+If permissions or scopes are insufficient, threads and slash commands are disabled with a warning, but
+basic operation continues.
+
+## Running a subject
+
+Run **from the subject folder** so its `.env` (channel/token) is the one loaded:
 
 ```
-python "<APP>/bot/main.py"
+cd "C:\path\to\subject-folder"
+python "<APP>\bot\main.py" "C:\path\to\subject-folder"
 ```
 
-To target a different folder, specify the path explicitly.
-
-```
-python "<APP>/bot/main.py" "C:\path\to\subject-folder"
-```
-
-- If the folder is omitted, the current cwd is used as the mount target.
-- Progress is saved under the `_state/` subdirectory of that content folder. Progress is isolated per subject.
-- To stop, press Ctrl+C in the terminal. Because only one token is used, only one instance can run at a time.
-
-## Command-line arguments
-
-```
-python "<APP>/bot/main.py" [content-folder]
-```
-
-- **content-folder**: Omit to use the current cwd. If provided, that absolute or relative path is used as the mount target.
+- `main.py` runs the APP's code; the path argument is the mount (its `manifest`/`decks`/`config`).
+- `load_dotenv()` reads `.env` from the current directory, so launching from the subject folder selects
+  that subject's channel/token. Each subject folder must have its own `.env`.
+- Progress is saved under that folder's `_state/` (isolated per subject).
+- Stop with Ctrl+C. One running instance per token at a time.
 - Mount priority: argument > `.env MOUNT` > cwd.
+
+## Adding a NEW subject (no kit edits)
+
+1. Make a folder with `manifest.json`, `decks/<deck>.json`, `config/<deck>.json`, and `.env`.
+2. In `config/<deck>.json` set `capabilities.enabled`, `capabilities.ai.persona`, and (if using the
+   catalog level/practice model) `"areas"` and `capabilities.ai.tasks` with that subject's wording.
+3. Run it with the command above. **Do not touch `bot/`/`engine/`.**
 
 ## Notes
 
-- Keep secrets such as the token only in the APP's `.env` and never expose them.
-- AI features (layer 3 capabilities) require the `claude` CLI to be on PATH. If it is absent, only those capabilities are disabled.
+- Keep tokens only in each subject's `.env`; never expose them.
+- AI features (layer 3) require the `claude` CLI on PATH; absent → only those are disabled.
 - Run `python "<APP>/skills/install.py"` once to register this skill under `~/.claude/skills/`.

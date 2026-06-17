@@ -20,6 +20,7 @@ _paths.setup()
 import ai_caps
 from threads import thread_in_channel, delete_thread          # harness/channels on sys.path
 from caps_ai.ai_socratic import _wait_for_reply
+from subject import task_of
 
 log = logging.getLogger(__name__)
 
@@ -27,11 +28,6 @@ _CAP_ID = "ai_explain"
 _REPLY_TIMEOUT = 300.0
 _MAX_TURNS = 6
 _STOP = {"중단", "취소", "정지", "그만", "끝", "stop", "cancel", "quit"}
-
-_ROLE = (
-    "너는 친절한 영어 개념 튜터다. 한국어로, 비전공자도 이해하기 쉽게 짧고 명확하게 설명한다. "
-    "쉬운 예문과 자주 하는 실수를 곁들이되 장황하지 않게. 학습자가 더 물으면 이어서 답한다."
-)
 
 
 async def _send(target, text: str) -> None:
@@ -59,7 +55,8 @@ async def run_explain(ctx, client, card) -> None:
 
     # 카드 정체성을 system preamble(role)에 박아 매 턴 다시 들어가게 한다.
     # 윈도(=4)를 넘는 다회차에서 seed 메시지가 잘려도 무엇을 설명 중인지 잃지 않도록.
-    role = _ROLE + f"\n\n지금 설명 중인 학습 항목: {head}"
+    # 과목 정체성(영역·과목)은 persona가 운반하므로 role 기본값은 subject-neutral.
+    role = task_of(ctx, "explain", "role") + f"\n\n지금 설명 중인 학습 항목: {head}"
     if detail:
         role += f"\n참고 설명: {detail}"
 

@@ -120,6 +120,7 @@ class StudyBot(discord.Client):
                     ai_persona=br.ai_persona,
                     enabled_capabilities=br.enabled_capabilities,
                     ai_model_explain=br.ai_model_explain,
+                    subject=br.subject,
                 )
 
                 # adaptive_weight (layer 2, token 0): recompute weight overrides when enabled
@@ -181,7 +182,7 @@ class StudyBot(discord.Client):
 
                         if not deck_cards:
                             await channel.send(
-                                f"<@{user_id}> {_ls.ko_label(area)} 레벨 {lvl} 항목을 모두 외웠어요. "
+                                f"<@{user_id}> {br.subject.ko_label(area)} 레벨 {lvl} 항목을 모두 외웠어요. "
                                 "⬆️ 레벨을 올리거나 🔄 초기화하세요.")
                             try:
                                 from control_panel import post_learn_end
@@ -317,6 +318,7 @@ class StudyBot(discord.Client):
             sid=None, session=sess, emit=None, ai_persona=br.ai_persona,
             enabled_capabilities=br.enabled_capabilities,
             ai_model_explain=br.ai_model_explain,
+            subject=br.subject,
         )
 
     async def _refresh_panel(self, channel) -> None:
