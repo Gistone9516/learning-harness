@@ -229,9 +229,11 @@ async def invoke(prompt, *, system=None, model=None, effort: Effort = "low",
 5. **Binary scoring** — correct/incorrect binary only (no partial credit, pass probability, or auto-scoring output).
 6. **Box advancement = cold first-attempt correct only.** Warm attempts and skips are ignored.
 7. **card_id stability** — author-assigned stable id; unchanged on content edits; not a content hash.
-8. **Deterministic = zero external calls** — layer 1, 2, 4 have zero external calls. Only layer 3 (AI) uses `_invoke`. (Deterministic rule parts = layer 1/2; AI-suggestion parts only = layer 3.)
+8. **Deterministic = zero external calls** — layer 1, 2, 4 have zero external calls. Only layer 3 (AI) uses `_invoke`. (Deterministic rule parts = layer 1/2; AI-suggestion parts only = layer 3.) Automated or periodic features (scheduler, SRS due push) are token-0 by default; any AI inside them is opt-in and condition-gated via `should_invoke` (for example, skipped when due == 0), never an unprompted self-driven loop.
 9. **Schema version + migration shim** from v1. CardProgress schema must not be polluted (auxiliary state = sidecar §2.1).
 10. **Synonym substitution point** = immediately after normalization lower, immediately before comparison.
+11. **Canonical kit, clone-and-customize** — this repo is the canonical template and is never mutated by a consumer. A consumer adopts the kit one of two ways and customizes only its own side: (a) **mount model** — run `bot/main.py` from the fixed kit and mount the consumer content folder (launch-skill §1); (b) **clone model** — `tools/clone.py` copies the core kernel plus only the enabled capabilities into the consumer's own copy, which then runs standalone. Kit changes happen only in this repo; consumers pull them by re-cloning. The consumer's content (manifest, decks, config, `_state`) is never touched by the kit.
+12. **Secrets and access** — the bot token and other secrets live only in the APP `.env` (gitignored); they are never printed, echoed, logged, or attached, and config is cited by path and field name, not value. Every command and interaction is gated to the allowed user(s); sensitive files (`.env`, keys, state) are never shown or attached. Personal use, one bot instance per token. When permissions or scope are incomplete the bot degrades gracefully: core chat and grading keep working, advanced features disable with a warning.
 
 ---
 

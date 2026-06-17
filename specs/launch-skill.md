@@ -6,12 +6,15 @@
 
 ---
 
-## 1. APP / DATA separation model (planning §3·§8)
+## 1. APP / DATA separation and distribution model (planning §3·§8, SoT §7.11·§7.12)
 
 - **APP (fixed kit)** = this repo (bot, engine, harness, skill, `.env`, token). Installed in one place.
 - **DATA (content)** = consumer subject project folder (manifest, deck, config = persona, injection-interface).
-- "App is fixed; only the content folder is swapped." The bot **mounts the content folder** and serves that subject on Discord.
-- One shared learning-bot token (1 bot per token); only the content folder changes between runs. Separate app/token/server from discord-bridge (SoT §0).
+- **This repo is the canonical template and is never mutated by a consumer.** Kit changes happen only here; consumers pull them by re-cloning.
+- Two ways for a consumer to adopt the kit, customizing only its own side:
+  - **(a) Mount model** — "app is fixed; only the content folder is swapped." Run `bot/main.py` from this fixed kit and mount the consumer content folder; the bot serves that subject on Discord.
+  - **(b) Clone model** — `tools/clone.py` copies the core kernel plus only the enabled capabilities into the consumer's own copy (preserving the `bot/ + engine/ + bot/harness/` layout), which then runs standalone. The consumer's content is never touched.
+- One shared learning-bot token (1 bot per token); only the content folder changes between runs. Separate app/token/server from discord-bridge (SoT §0). Secrets and gating per SoT §7.12.
 
 ---
 

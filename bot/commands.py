@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Magic word set
-STOP_WORDS = {"중단", "stop"}
+# Magic word set (parity with discord-bridge stop words)
+STOP_WORDS = {"중단", "취소", "정지", "stop", "cancel"}
 
 
 def _gate(tree, name, description, guild, active):
