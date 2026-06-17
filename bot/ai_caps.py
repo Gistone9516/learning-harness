@@ -32,6 +32,25 @@ _invoke = _ai.invoke
 # longer carry a per-capability (effort, max_tokens) table — effort comes from ctx, tokens uncapped.
 
 
+# Map a full capability_id to its config task key (capabilities.ai.tasks.<key>), so a
+# per-capability effort override can live in config next to that cap's other task settings.
+_CAP_TASK_KEY: dict[str, str] = {
+    "ai_practice": "practice",
+    "ai_convo": "convo",
+    "ai_explain": "explain",
+}
+
+
+def _effort_for(ctx, capability_id: str) -> str:
+    """Per-capability effort: config tasks.<cap>.effort override, else global ctx.ai_effort, else low."""
+    subj = getattr(ctx, "subject", None)
+    if subj is not None:
+        override = subj.task(_CAP_TASK_KEY.get(capability_id, capability_id), "effort")
+        if override:
+            return override
+    return getattr(ctx, "ai_effort", None) or "low"
+
+
 def should_invoke(*, enabled: bool, condition: bool = True) -> bool:
     """Token-zero gate. Only call AI when the capability is enabled and its trigger condition holds.
 
@@ -75,7 +94,7 @@ async def one_shot(
     Pulls model (param override else ctx), persona, and effort from ctx. Output length is uncapped.
     Never raises; the underlying invoke returns an AIResult with ok=False on failure.
     """
-    effort = getattr(ctx, "ai_effort", None) or "low"
+    effort = _effort_for(ctx, capability_id)
     system = build_preamble(role, data, persona=getattr(ctx, "ai_persona", None), force_json=force_json)
     return await _invoke(
         prompt,
@@ -117,7 +136,7 @@ class ConvManager:
         role: str,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> "_ai.AIResult":
-        effort = getattr(ctx, "ai_effort", None) or "low"
+        effort = _effort_for(ctx, self._capability_id)
         system = build_preamble(role, persona=getattr(ctx, "ai_persona", None))
         prompt = self._windowed_prompt(user_text)
         self._session.turns.append(("user", user_text))
