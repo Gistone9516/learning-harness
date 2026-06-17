@@ -3,8 +3,9 @@
 
 Opened from the answer-reveal '🤖 AI 해설' button. Explains the card's concept in plain
 Korean and answers follow-ups for a few turns, then discards (deletes) the thread.
-Uses the cheaper explain model (ctx.ai_model_explain, e.g. haiku). Runs on a throwaway
-conversation session so it never pollutes the learner's study session.
+Uses ctx.ai_model_explain (configurable via .env AI_MODEL_EXPLAIN; set to the main model
+when concept quality matters). Runs on a throwaway conversation session so it never
+pollutes the learner's study session.
 """
 from __future__ import annotations
 
@@ -27,7 +28,13 @@ log = logging.getLogger(__name__)
 _CAP_ID = "ai_explain"
 _REPLY_TIMEOUT = 300.0
 _MAX_TURNS = 6
-_STOP = {"중단", "취소", "정지", "그만", "끝", "stop", "cancel", "quit"}
+_STOP = {"중단", "취소", "정지", "그만", "끝", "그만할래", "그만하기", "stop", "cancel", "quit", "exit", "end"}
+
+
+def _is_stop_word(text: str) -> bool:
+    """True if the learner's reply is a stop word (tolerant of trailing punctuation/space)."""
+    t = (text or "").strip().lower().strip(".!?~。… ")
+    return t in _STOP
 
 
 async def _send(target, text: str) -> None:
@@ -82,13 +89,14 @@ async def run_explain(ctx, client, card) -> None:
             await delete_thread(thread)
         return
     await _send(thread, res.text)
+    await _send(thread, "💬 이어서 궁금한 걸 물어보세요. 끝내려면 '그만' 또는 '중단'을 입력하면 돼요.")
 
     for _ in range(_MAX_TURNS):
         reply = await _wait_for_reply(client, thread, ctx.user_id, _REPLY_TIMEOUT)
         if reply is None:
-            break
-        if reply.strip().lower() in _STOP:
-            break
+            break              # timeout or no reply mechanism
+        if _is_stop_word(reply):
+            break              # learner asked to stop
         res = await cm.turn(reply, ctx=ctx, role=role)
         if not res.ok or not (res.text or "").strip():
             await _send(thread, "(일시적 문제로 멈출게요.)")
