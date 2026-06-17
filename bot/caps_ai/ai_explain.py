@@ -27,8 +27,8 @@ from text_format import format_tables
 log = logging.getLogger(__name__)
 
 _CAP_ID = "ai_explain"
-_REPLY_TIMEOUT = 300.0
-_MAX_TURNS = 6
+_REPLY_TIMEOUT = None
+_MAX_TURNS = 100000
 _STOP = {"중단", "취소", "정지", "그만", "끝", "그만할래", "그만하기", "stop", "cancel", "quit", "exit", "end"}
 
 

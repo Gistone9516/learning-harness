@@ -41,7 +41,7 @@ _SOCRATIC_ROLE = (
 )
 
 # Timeout for waiting on the learner's next Discord message (seconds).
-_REPLY_TIMEOUT = 120.0
+_REPLY_TIMEOUT = None
 
 
 def _card_topic(card: Any) -> str:

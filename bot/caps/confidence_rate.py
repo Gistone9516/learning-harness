@@ -75,7 +75,7 @@ async def ask_confidence(ctx, card_id: str) -> str | None:
 
     class ConfidenceView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=120)
+            super().__init__(timeout=None)
             self._picked = False
             for level_key, label in LEVELS.items():
                 btn = discord.ui.Button(

@@ -95,7 +95,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     # Reveal as a Components V2 LayoutView (holds the long explanation + buttons).
     class RevealView(discord.ui.LayoutView):
         def __init__(self) -> None:
-            super().__init__(timeout=1800)
+            super().__init__(timeout=None)
             self._explain_task = None
             b_ok = discord.ui.Button(label="✅ 알았어요", style=discord.ButtonStyle.success)
             b_ok.callback = self._correct
@@ -175,7 +175,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     # Show Answer button (plain View + content; reveal is a separate V2 message).
     class ShowAnswerView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=600)
+            super().__init__(timeout=None)
             self._shown = False
 
         @discord.ui.button(label="👀 정답 보기", style=discord.ButtonStyle.secondary)

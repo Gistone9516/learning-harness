@@ -28,7 +28,7 @@ class _LevelCmdConfirm(discord.ui.View):
     """Confirm dialog for /level: shows a difficulty example, applies on 예."""
 
     def __init__(self, boot_result, allowed_user_id: int, area: str, new_level: int) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self._br = boot_result
         self._uid = allowed_user_id
         self._area = area

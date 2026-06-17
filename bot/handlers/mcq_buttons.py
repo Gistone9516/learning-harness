@@ -118,7 +118,7 @@ def _build_mcq_view(
 
     class _MCQView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=600)
+            super().__init__(timeout=None)
             self._answered = False
             for i, opt in enumerate(options):
                 btn = discord.ui.Button(

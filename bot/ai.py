@@ -95,7 +95,7 @@ async def invoke(
         return AIResult(text="", ok=False, error=f"Process creation failed: {e}")
 
     try:
-        timeout_sec = 300
+        timeout_sec = 1800
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(input=stdin_data),
             timeout=timeout_sec,

@@ -156,7 +156,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
 
     class SeqView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=600)
+            super().__init__(timeout=None)
             self._opened = False
 
         @discord.ui.button(label="순서 입력", style=discord.ButtonStyle.primary)

@@ -97,7 +97,7 @@ async def _collect_answer(ctx, problem_text: str) -> str | None:
 
     class _Trigger(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=600)
+            super().__init__(timeout=None)
             self._opened = False
 
         @discord.ui.button(label="✍️ 답 작성", style=discord.ButtonStyle.primary)

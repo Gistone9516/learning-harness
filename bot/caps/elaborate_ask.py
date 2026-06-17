@@ -82,7 +82,7 @@ async def ask_elaboration(ctx: "Ctx", card: "CardDef") -> None:
                 },
             )
         ],
-        timeout=180,
+        timeout=None,
     )
 
     if data is None:

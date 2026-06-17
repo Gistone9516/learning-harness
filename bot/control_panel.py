@@ -89,7 +89,7 @@ def _level_example(boot_result, area: str, level: int) -> str:
 
 class _LevelConfirmView(discord.ui.View):
     def __init__(self, hub, area: str, new_level: int) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self._hub = hub
         self._area = area
         self._new = new_level
@@ -123,7 +123,7 @@ class _LevelConfirmView(discord.ui.View):
 
 class _AreaMenuView(discord.ui.View):
     def __init__(self, hub, area: str) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self._hub = hub
         self._area = area
 
@@ -285,7 +285,7 @@ class LearnEndView(discord.ui.View):
     """Shown after a 암기 round: 초기화(이 레벨 '알아요' 전체 해제) / 종료."""
 
     def __init__(self, boot_result, user_id, area, level, refresh_fn) -> None:
-        super().__init__(timeout=1800)
+        super().__init__(timeout=None)
         self._br = boot_result
         self._uid = user_id
         self._area = area

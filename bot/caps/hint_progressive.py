@@ -114,7 +114,7 @@ async def show_hint(ctx, card: CardDef) -> None:
 
     class HintView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=300)
+            super().__init__(timeout=None)
             self._clicked = False
 
         @discord.ui.button(label="힌트 보기", style=discord.ButtonStyle.secondary)

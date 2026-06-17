@@ -140,7 +140,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
         question_text,
         options,
         single=True,
-        timeout=600,
+        timeout=None,
     )
 
     effective_mode = grade_mode_of(card.card_id)

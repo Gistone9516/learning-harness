@@ -27,7 +27,7 @@ from text_format import format_tables
 log = logging.getLogger(__name__)
 
 _CAP_ID = "ai_convo"
-_REPLY_TIMEOUT = 300.0
+_REPLY_TIMEOUT = None
 _STOP = {"중단", "취소", "정지", "그만", "stop", "cancel", "quit"}
 
 
@@ -40,7 +40,7 @@ async def _send(target, text: str) -> None:
         log.warning("ai_convo: send failed: %s", e)
 
 
-async def run_convo(ctx, client, learned_items: list[str], max_turns: int = 8) -> None:
+async def run_convo(ctx, client, learned_items: list[str], max_turns: int = 100000) -> None:
     """Run a threaded multi-turn conversation seeded by the learned items."""
     enabled = _CAP_ID in getattr(ctx, "enabled_capabilities", set())
     if not ai_caps.should_invoke(enabled=enabled):

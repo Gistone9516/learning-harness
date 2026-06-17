@@ -86,7 +86,7 @@ async def _collect_answer(ctx, card: CardDef) -> str | None:
 
     class _ModalTriggerView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=600)
+            super().__init__(timeout=None)
             self._opened = False
 
         @discord.ui.button(label="답변 작성", style=discord.ButtonStyle.primary)
