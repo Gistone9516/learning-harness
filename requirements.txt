@@ -1,0 +1,8 @@
+# learning-harness kit runtime dependencies.
+# Install:  pip install -r requirements.txt   (or run: python tools/setup.py)
+discord.py>=2.6
+python-dotenv>=1.0
+
+# Optional: enables the mastery-chart PNG in /dashboard. Without it the chart degrades to a
+# text table automatically, so it is not required. Install separately if you want the image:
+#   pip install "matplotlib>=3.7"

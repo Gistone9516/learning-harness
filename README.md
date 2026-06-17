@@ -27,7 +27,7 @@
 3. Write the root `.env` (copy `.env.example`) — `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`,
    `DISCORD_CHANNEL_ID`, `DISCORD_ALLOWED_USER_ID` (plus optional `USER_LANG`, `MOUNT`, and the
    AI model ids `AI_MODEL` / `AI_MODEL_EXPLAIN`).
-4. `pip install -U "discord.py>=2.6" python-dotenv`.
+4. Install the kit on this machine: `python tools/setup.py` (see "Install on a new machine" below).
 
 **Run (one app + per-subject data):** there is ONE code copy (this repo). A subject is a data-only
 folder (`manifest.json`, `decks/`, `config/`, `_state/`) plus its own `.env`. Run **from the subject
@@ -42,6 +42,19 @@ under that folder's `_state/`. Mount priority: argument > `.env MOUNT` > cwd.
 **From a consuming project:** run `python skills/install.py` once to create the global skill, then launch
 any subject folder with the line above. **Do not clone code per subject** — the kit code stays generic
 (see "Subject injection" below); only data + `.env` differ.
+
+### Install on a new machine (bootstrap)
+
+The kit is path-portable (self-locating; zero hardcoded machine paths). Set it up on any computer with:
+```bash
+git clone <repo-url>
+cd learning-harness
+python tools/setup.py
+```
+`tools/setup.py` (cross-platform, pure Python) verifies Python 3.11+, installs `requirements.txt`,
+registers the global launch skill at this clone's path (via `skills/install.py`), and creates a `.env`
+from the template. Then fill the 4 keys in `.env` and launch as above. The `claude` CLI is optional (AI
+capabilities); without it the deterministic features still work. Re-running the bootstrap is safe.
 
 ### Subject injection (kit stays subject-agnostic)
 

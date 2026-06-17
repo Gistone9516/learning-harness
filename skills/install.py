@@ -1,13 +1,13 @@
 """
-v5 study-bot global skill installer.
+learning-harness global skill installer.
 
-A single run creates ~/.claude/skills/v5-study-bot/SKILL.md.
+A single run creates ~/.claude/skills/learning-harness/SKILL.md.
 The script auto-detects the APP absolute path from its own location
 and substitutes the <APP> placeholder in SKILL.md.
 This is the only place that produces an absolute-path artifact not tracked by git.
 
 Usage:
-    python "<APP>/skills/install.py"
+    python "<APP>/skills/install.py"   (or run the kit bootstrap: python tools/setup.py)
 """
 
 import sys
