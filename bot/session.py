@@ -9,6 +9,7 @@ Handler-agnostic: calls the injected handler(ctx, card) -> HandlerResult.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ class Session:
     active: bool = False
     claude_sid: str | None = None               # claude CLI session id for this study session (volatile, ai_socratic multi-turn)
     turns: list = field(default_factory=list)   # sliding conversation window [(role, text), ...]; volatile, dies with the session
+    stop_event: Any = None                      # asyncio.Event set by the stop-word handler to interrupt the loop mid-card
 
     def next_card_id(self) -> str | None:
         """Drain requeue first, then pop from queue. Returns None when both are empty."""
@@ -98,6 +100,29 @@ async def _postcorrect_caps(ctx, card) -> None:
             log.warning("elaborate_ask hook failed: %s", e)
 
 
+async def _run_handler_or_stop(handler, ctx, card, session):
+    """Run the card handler, returning None immediately if the session's stop_event fires.
+
+    Lets the stop word (중단) interrupt the loop even while the current card is awaiting
+    a button/modal response (which a plain text message could not otherwise cancel).
+    """
+    stop_event = getattr(session, "stop_event", None)
+    if stop_event is None:
+        return await handler(ctx, card)
+    handler_task = asyncio.ensure_future(handler(ctx, card))
+    stop_task = asyncio.ensure_future(stop_event.wait())
+    await asyncio.wait({handler_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    if stop_event.is_set():
+        handler_task.cancel()
+        try:
+            await handler_task
+        except BaseException:
+            pass
+        return None
+    stop_task.cancel()
+    return handler_task.result()
+
+
 async def run_session(
     ctx: Any,
     deck_cards: list[CardDef],
@@ -125,6 +150,12 @@ async def run_session(
 
     session = ctx.session
     session.active = True
+    # Stop signal: the stop-word handler sets this Event to interrupt the loop,
+    # even while the current card is awaiting a button/modal response.
+    try:
+        session.stop_event = asyncio.Event()
+    except Exception:
+        session.stop_event = None
 
     # 1. build_queue
     queue_ids = build_queue(deck_cards, store, now_fn(), opts)
@@ -177,6 +208,8 @@ async def run_session(
     card_map: dict[str, CardDef] = {c.card_id: c for c in deck_cards}
 
     while not session.is_exhausted():
+        if not session.active:
+            break
         card_id = session.next_card_id()
         if card_id is None:
             break
@@ -202,13 +235,16 @@ async def run_session(
 
         now = now_fn()
 
-        # 3. invoke handler
+        # 3. invoke handler (interruptible by the stop word)
         try:
-            result: HandlerResult = await handler(ctx, card)
+            result: HandlerResult | None = await _run_handler_or_stop(handler, ctx, card, session)
         except Exception as e:
             log.error("handler error (card_id=%s): %s", card_id, e)
             # treat errored card as skip
             result = HandlerResult(card_id=card_id, verdict="skip", done=True)
+        if result is None or not session.active:
+            # stopped mid-card: end the session without recording this card
+            break
 
         # statistics: total attempts
         session.stats.total_attempts += 1

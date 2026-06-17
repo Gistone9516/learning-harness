@@ -334,6 +334,9 @@ async def check_stop_word(message: discord.Message, session_store: dict) -> bool
     sess = session_store.get(user_id)
     if sess is not None:
         sess.active = False
+        ev = getattr(sess, "stop_event", None)
+        if ev is not None:
+            ev.set()
         await message.channel.send(
             f"<@{user_id}> 세션을 중단했습니다."
         )
