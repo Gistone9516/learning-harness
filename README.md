@@ -59,13 +59,25 @@ python tools/clone.py --target <PROJECT_DIR> --from-config [--env copy]
 - The cloned project runs standalone: `cd <PROJECT_DIR> && python bot/main.py <PROJECT_DIR>`.
 - `/study unit:<unit>` filters the session to one unit (e.g. a day or a `*-learn` flashcard set).
 
-### Study control panel (capability `control_panel`)
+### Catalog learning model + study control panel
 
-Enable `control_panel` to drive study from a persistent button panel instead of typing slash
-commands. The panel auto-posts when the bot comes online and after each session ends, and `/ui`
-re-summons it. Buttons: 이어서 학습 / 암기 / 시험 / 복습 / 대시보드 / 통계 / 도움말 — 암기·시험은
-DAY(1-30)를 입력받아 해당 `day-NN(-learn)` 단원을 시작한다. Cards also show a `n/N` session progress
-header and ✅/❌ feedback. Persistence uses `timeout=None` + fixed `custom_id` + `client.add_view()`.
+The english-GO subject uses a leveled **catalog** model (not fixed days):
+
+- Catalog items (vocabulary / grammar / idioms) are **self flashcards** tagged with
+  `tags.area` (vocab/grammar/idiom) and `tags.level` (1–10). Marking one "알아요" sets a
+  per-card `learned` flag (`bot/level_state.py`, sidecar).
+- **Per-area independent level**, controlled by `/level <단어|문법|숙어> <1-10>` (or panel ⬆️⬇️),
+  with a difficulty-example confirm dialog. Raising a level bulk-marks lower items learned;
+  lowering unmarks higher items. Study/practice is bounded to the current level
+  (`bot/study_select.py` `cards_in_area_level/upto`) so difficulty never jumps ahead.
+- **AI practice** (`bot/caps_ai/ai_practice.py`): for learned items, AI generates a
+  composition problem and grades the learner's English with Korean feedback.
+- **AI conversation** (`bot/caps_ai/ai_convo.py`): a threaded multi-turn chat seeded by the
+  learned-item list (model = sonnet); AI asks → learner writes English → AI explains in plain Korean.
+- **Control panel** (`control_panel`, persistent): per-area level + learned progress, area →
+  mode menu (🧠 암기 / ✍️ AI 연습 / ⬆️⬇️ 레벨), plus 🔁 복습 / 🗣 대화 / 📊 대시보드 / 🧹 정리 / ❓ 도움말.
+  Auto-posts on ready and after each session; `/ui` re-summons; `/clear [n]` purges the channel.
+  Cards show `n/N` progress + ✅/❌ feedback. Persistence: `timeout=None` + fixed `custom_id` + `add_view()`.
 
 ## 3. Folder structure
 
@@ -89,8 +101,11 @@ learning-harness/              the general-purpose framework repo (no real subje
 ├ bot/                         discord.py shell: boot, session, dispatch, handlers, persist, ai, commands
 │   ├ capability_registry.py   capability SoT (files/handler/commands per capability_id)
 │   ├ wiring.py                gated handler registration + required-file verification
-│   ├ study_select.py          pure unit-filter helper for /study
-│   ├ control_panel.py         persistent button panel (capability control_panel, /ui)
+│   ├ study_select.py          unit + area/level card filters (level continuity)
+│   ├ level_state.py           per-area level + learned flags (sidecar) + bulk re-level
+│   ├ control_panel.py         persistent learning-hub panel (capability control_panel, /ui)
+│   ├ caps_ai/ai_practice.py   AI-generated composition problem + grading (per catalog item)
+│   ├ caps_ai/ai_convo.py      threaded multi-turn English conversation (sonnet)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ tools/                       maintenance scripts
 │   └ clone.py                 clone core kernel + selected capabilities into a consuming project

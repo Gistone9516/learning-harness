@@ -209,6 +209,19 @@ REGISTRY: dict[str, CapSpec] = {
         files=("bot/caps_ai/ai_personal_feedback.py",), shared_bases=_AI_BASE,
     ),
     "ai_stream_render": CapSpec("ai_stream_render", 3, "core", needs_ai=True),
+    "ai_practice": CapSpec(
+        "ai_practice", 3, "core", needs_ai=True,
+        files=("bot/caps_ai/ai_practice.py",), shared_bases=_AI_BASE,
+        dep_capabilities=("recall_self",),
+    ),
+    "ai_convo": CapSpec(
+        "ai_convo", 3, "core", needs_ai=True,
+        files=("bot/caps_ai/ai_convo.py",),
+        shared_bases=_AI_BASE + (
+            "bot/caps_ai/ai_socratic.py",
+            "bot/harness/channels/threads.py",
+        ),
+    ),
 
     # ── Layer 3 — AI, extension tier ───────────────────────────────────────────
     "ai_misconception": CapSpec(

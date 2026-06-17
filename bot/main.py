@@ -82,7 +82,8 @@ class StudyBot(discord.Client):
         guild = discord.Object(id=self.guild_id)
 
         def _get_runner():
-            async def _runner(interaction: discord.Interaction, *, deck=None, unit=None, dday_mode=False, review=False):
+            async def _runner(interaction: discord.Interaction, *, deck=None, unit=None,
+                              area=None, level=None, mode="learn", dday_mode=False, review=False):
                 channel = interaction.channel
                 user_id = interaction.user.id
                 br = self.boot_result
@@ -136,28 +137,57 @@ class StudyBot(discord.Client):
                     weight_overrides=weight_overrides,
                 )
 
+                ns = br.deck.namespace
                 deck_cards = br.deck.cards
-                # deck filter: only a single deck is loaded, so warn + ignore a mismatch.
-                if deck and deck != br.deck.namespace:
+                handler = dispatch  # default: route self/quiz cards by type
+
+                async def _stop(msg: str):
+                    await channel.send(f"<@{user_id}> {msg}")
+                    self._sessions.pop(user_id, None)
+
+                if deck and deck != ns:
                     await channel.send(
-                        f"<@{user_id}> 현재 단일 덱 '{br.deck.namespace}'만 로드되어 deck='{deck}'는 무시됩니다."
+                        f"<@{user_id}> 현재 단일 덱 '{ns}'만 로드되어 deck='{deck}'는 무시됩니다."
                     )
-                # unit filter: restrict the session to one unit (e.g. day-01 or day-01-learn).
-                if unit:
+
+                if area:
+                    # Catalog model: bound to the area's current level (difficulty continuity).
+                    import study_select as _sel
+                    import level_state as _ls
+                    lvl = int(level) if level is not None else _ls.get_level(br.mount, ns, area)
+                    if mode == "practice":
+                        from caps_ai.ai_practice import handle as _ai_practice
+                        base = _sel.cards_in_area_upto(deck_cards, area, lvl)
+                        deck_cards = [c for c in base if _ls.is_learned(br.mount, ns, c.card_id)]
+                        handler = _ai_practice
+                        if not deck_cards:
+                            await _stop("아직 '알아요'로 배운 항목이 없어요. 먼저 🧠 암기로 익혀 주세요.")
+                            return
+                    else:  # learn: self flashcards at exactly this level; "알아요" marks learned
+                        deck_cards = _sel.cards_in_area_level(deck_cards, area, lvl)
+
+                        async def handler(ctx, card):  # noqa: F811 (learn wrapper)
+                            res = await dispatch(ctx, card)
+                            if res.verdict == "correct":
+                                _ls.set_learned(br.mount, ns, card.card_id, True)
+                            return res
+
+                        if not deck_cards:
+                            await _stop(f"{_ls.ko_label(area)} 레벨 {lvl}에 학습할 항목이 없어요.")
+                            return
+                elif unit:
                     from study_select import filter_cards_by_unit
                     deck_cards = filter_cards_by_unit(deck_cards, unit)
                     if not deck_cards:
-                        await channel.send(f"<@{user_id}> '{unit}' 단원에 해당하는 카드가 없습니다.")
-                        self._sessions.pop(user_id, None)
+                        await _stop(f"'{unit}' 단원에 해당하는 카드가 없습니다.")
                         return
-                # /review: restrict to incorrect or due cards (within the unit-filtered set).
+
                 if review:
                     import time as _t
                     from review_select import select_review_cards
                     deck_cards = select_review_cards(br.store, deck_cards, int(_t.time() * 1000))
                     if not deck_cards:
-                        await channel.send(f"<@{user_id}> 복습할 카드가 없습니다.")
-                        self._sessions.pop(user_id, None)
+                        await _stop("복습할 카드가 없습니다.")
                         return
 
                 async def on_finish(ctx, session: Session):
@@ -194,7 +224,7 @@ class StudyBot(discord.Client):
                     store=br.store,
                     mount=br.mount,
                     opts=opts,
-                    handler=dispatch,
+                    handler=handler,
                     on_finish=on_finish,
                 )
                 self._sessions.pop(user_id, None)
@@ -214,7 +244,8 @@ class StudyBot(discord.Client):
         if "control_panel" in self.boot_result.enabled_capabilities:
             from control_panel import build_panel_view
             self.add_view(build_panel_view(
-                self._panel_runner, self.boot_result, self._make_command_ctx, self.allowed_user_id))
+                self._panel_runner, self.boot_result, self._make_command_ctx, self.allowed_user_id,
+                convo_fn=self._run_convo, clear_fn=self._clear_chat, refresh_fn=self._refresh_panel))
 
     async def on_ready(self) -> None:
         log.info("Bot ready: %s (guild=%d, channel=%d)", self.user, self.guild_id, self.channel_id)
@@ -276,9 +307,66 @@ class StudyBot(discord.Client):
             from control_panel import post_panel
             self._panel_message = await post_panel(
                 channel, self._panel_runner, self.boot_result,
-                self._make_command_ctx, self.allowed_user_id)
+                self._make_command_ctx, self.allowed_user_id,
+                convo_fn=self._run_convo, clear_fn=self._clear_chat, refresh_fn=self._refresh_panel)
         except Exception as e:
             log.warning("control panel post failed: %s", e)
+
+    async def _run_convo(self, interaction) -> None:
+        """Start a threaded AI conversation seeded by the learner's learned items."""
+        user_id = interaction.user.id
+        if user_id in self._sessions:
+            try:
+                await interaction.response.send_message(
+                    "이미 학습/대화 세션이 진행 중이에요. '중단' 후 다시 시도하세요.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        try:
+            await interaction.response.send_message("🗣 대화 스레드를 시작할게요.", ephemeral=True)
+        except Exception:
+            pass
+        # Register a session sentinel so the concurrent-session guard + stop word apply.
+        sess = Session()
+        self._sessions[user_id] = sess
+        br = self.boot_result
+        ns = br.deck.namespace
+        import level_state as _ls
+        from caps_ai.ai_convo import run_convo
+        learned = _ls.learned_ids(br.mount, ns)
+        items = []
+        for c in br.deck.cards:
+            if c.card_id in learned:
+                fr = c.front or {}
+                items.append(fr.get("prompt") or fr.get("text") or c.card_id)
+        ctx = self._make_command_ctx(interaction.channel, user_id)
+        try:
+            await run_convo(ctx, self, items)
+        except Exception as e:
+            log.warning("ai_convo failed: %s", e)
+        finally:
+            self._sessions.pop(user_id, None)
+
+    async def _clear_chat(self, interaction, n: int = 100) -> None:
+        """Purge recent channel messages (best-effort), then re-post one panel."""
+        channel = interaction.channel
+        try:
+            await interaction.response.send_message(f"🧹 최근 메시지 {n}개를 정리할게요.", ephemeral=True)
+        except Exception:
+            pass
+        self._panel_message = None  # the old panel will be purged
+        deleted = 0
+        try:
+            purged = await channel.purge(limit=int(n))
+            deleted = len(purged)
+        except discord.Forbidden:
+            await channel.send("정리하려면 봇에 '메시지 관리' 권한이 필요해요.")
+            await self._refresh_panel(channel)
+            return
+        except Exception as e:
+            log.warning("clear purge failed: %s", e)
+        await channel.send(f"🧹 {deleted}개 정리했어요. (14일 지난 메시지는 일괄삭제가 안 돼요.)")
+        await self._refresh_panel(channel)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -21,6 +21,40 @@ from typing import TYPE_CHECKING
 
 from gating import allowed_msg, allowed_interaction
 import capability_registry as _reg
+import level_state as _ls
+
+
+class _LevelCmdConfirm(discord.ui.View):
+    """Confirm dialog for /level: shows a difficulty example, applies on 예."""
+
+    def __init__(self, boot_result, allowed_user_id: int, area: str, new_level: int) -> None:
+        super().__init__(timeout=180)
+        self._br = boot_result
+        self._uid = allowed_user_id
+        self._area = area
+        self._new = new_level
+
+    @discord.ui.button(label="예, 바꿀게요", style=discord.ButtonStyle.success)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not allowed_interaction(interaction, self._uid):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        area_cards = [
+            (c.card_id, (c.tags or {}).get("level"))
+            for c in self._br.deck.cards
+            if (c.tags or {}).get("area") == self._area and isinstance((c.tags or {}).get("level"), int)
+        ]
+        res = _ls.apply_level_change(self._br.mount, self._br.deck.namespace, area_cards, self._area, self._new)
+        await interaction.response.send_message(
+            f"{_ls.ko_label(self._area)} 레벨 {res['old']} → {res['new']} (배움 {res['changed']}개 자동 갱신). /ui 로 패널을 새로 띄워요.",
+            ephemeral=True,
+        )
+        self.stop()
+
+    @discord.ui.button(label="아니요", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_message("취소했어요.", ephemeral=True)
+        self.stop()
 
 if TYPE_CHECKING:
     pass
@@ -287,6 +321,54 @@ def setup_commands(
             ("변형 문제: " + str(v.get("front"))) if v else "변형을 생성할 수 없습니다."
         )
 
+    @tree.command(name="level", description="영역별 레벨 설정 (1-10)", guild=guild)
+    @app_commands.describe(area="영역", level="레벨 1-10")
+    @app_commands.choices(area=[
+        app_commands.Choice(name="단어", value="vocab"),
+        app_commands.Choice(name="문법", value="grammar"),
+        app_commands.Choice(name="숙어", value="idiom"),
+    ])
+    async def level_cmd(interaction: discord.Interaction, area: app_commands.Choice[str], level: int) -> None:
+        if not allowed_interaction(interaction, allowed_user_id):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        a = area.value
+        new = _ls.clamp_level(level)
+        cur = _ls.get_level(boot_result.mount, boot_result.deck.namespace, a)
+        samples = [c for c in boot_result.deck.cards
+                   if (c.tags or {}).get("area") == a and (c.tags or {}).get("level") == new][:2]
+        if samples:
+            ex = "\n".join(
+                f"• {(c.front or {}).get('prompt') or (c.front or {}).get('text') or c.card_id}"
+                f" — {(c.back or {}).get('detail', '')}" for c in samples)
+        else:
+            ex = "(이 레벨 예시 항목이 아직 없어요.)"
+        await interaction.response.send_message(
+            f"**{_ls.ko_label(a)} 레벨 {cur} → {new}**\n이 레벨은 이정도 난이도예요:\n{ex}\n\n정말 바꾸시겠어요?",
+            view=_LevelCmdConfirm(boot_result, allowed_user_id, a, new),
+            ephemeral=True,
+        )
+
+    @tree.command(name="clear", description="채널 메시지 정리", guild=guild)
+    @app_commands.describe(n="삭제할 최근 메시지 수 (기본 100)")
+    async def clear_cmd(interaction: discord.Interaction, n: int = 100) -> None:
+        if not allowed_interaction(interaction, allowed_user_id):
+            await interaction.response.send_message("권한 없음.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"🧹 최근 메시지 {n}개를 정리할게요.", ephemeral=True)
+        try:
+            purged = await interaction.channel.purge(limit=int(n))
+            await interaction.channel.send(
+                f"🧹 {len(purged)}개 정리했어요. (14일 지난 메시지는 일괄삭제가 안 돼요.) /ui 로 패널을 다시 띄워요.")
+        except discord.Forbidden:
+            try:
+                await interaction.followup.send(
+                    "정리하려면 봇에 '메시지 관리(Manage Messages)' 권한이 필요해요.", ephemeral=True)
+            except Exception:
+                pass
+        except Exception as e:
+            log.warning("clear purge failed: %s", e)
+
     @_gate(tree, "ui", "학습 제어판", guild, "ui" in avail_cmds)
     async def ui_cmd(interaction: discord.Interaction) -> None:
         if not allowed_interaction(interaction, allowed_user_id):
@@ -306,6 +388,8 @@ def setup_commands(
             "/card <id> - 카드 조회",
             "/concept <ref> - 개념 조회",
             "/settings - 설정 조회",
+            "/level <단어|문법|숙어> <1-10> - 영역별 레벨 설정",
+            "/clear [n] - 채널 메시지 정리",
         ]
         _opt = [
             ("ui", "/ui - 학습 제어판"),

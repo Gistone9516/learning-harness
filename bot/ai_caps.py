@@ -39,6 +39,8 @@ CAP_LIMITS: dict[str, tuple[str, int]] = {
     "ai_adaptive_weight":   ("low", 200),
     "ai_session_summary":   ("low", 300),
     "ai_proactive_remind":  ("low", 120),
+    "ai_practice":          ("low", 250),
+    "ai_convo":             ("low", 350),
 }
 
 
@@ -104,9 +106,10 @@ class ConvManager:
     the prompt is deterministic for tests, regardless of what the claude session retains server side.
     """
 
-    def __init__(self, session: Any, *, window: int = 4) -> None:
+    def __init__(self, session: Any, *, window: int = 4, capability_id: str = "ai_socratic") -> None:
         self._session = session
         self._window = window
+        self._capability_id = capability_id
 
     def _windowed_prompt(self, user_text: str) -> str:
         # Keep the last `window` exchanges (a user turn plus an assistant turn each).
@@ -123,7 +126,7 @@ class ConvManager:
         role: str,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> "_ai.AIResult":
-        effort, max_tokens = CAP_LIMITS.get("ai_socratic", ("low", 200))
+        effort, max_tokens = CAP_LIMITS.get(self._capability_id, ("low", 200))
         system = build_preamble(role, persona=getattr(ctx, "ai_persona", None))
         prompt = self._windowed_prompt(user_text)
         self._session.turns.append(("user", user_text))
