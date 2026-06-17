@@ -62,8 +62,12 @@ async def invoke(
     if model:
         cmd_parts += ["--model", model]
 
-    if max_tokens is not None:
-        cmd_parts += ["--max-tokens", str(max_tokens)]
+    if effort:
+        cmd_parts += ["--effort", effort]
+    # This claude CLI has no output-token cap flag, so max_tokens is accepted for
+    # signature compatibility but never forwarded. Passing --max-tokens used to make
+    # the CLI exit with "unknown option" -> every AI call failed (ok=False).
+    _ = max_tokens
 
     # stdin payload
     payload: dict[str, Any] = {
@@ -91,7 +95,7 @@ async def invoke(
         return AIResult(text="", ok=False, error=f"Process creation failed: {e}")
 
     try:
-        timeout_sec = 120
+        timeout_sec = 300
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(input=stdin_data),
             timeout=timeout_sec,

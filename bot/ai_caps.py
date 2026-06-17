@@ -2,7 +2,7 @@
 """AI capability helper layer (ai-mode spec). Sits between the 12 ai_* capabilities and raw ai.invoke.
 
 Centralizes the cross-cutting AI concerns so the individual capabilities stay thin:
-- token control: the should_invoke gate, the CAP_LIMITS table, and persona/preamble building
+- token control: the should_invoke gate and persona/preamble building (effort from config; output uncapped)
 - session + sliding window: ConvManager, which only ai_socratic needs (one study session = one claude session)
 - binary verdict parsing plus self fallback: parse_verdict and grade_or_self_fallback (ai_openend_grade)
 - streaming transport: stream_to_livecard (ai_stream_render)
@@ -27,22 +27,9 @@ log = logging.getLogger(__name__)
 # Default invoke seam. Tests monkeypatch ai_caps._invoke to a fake returning a canned AIResult.
 _invoke = _ai.invoke
 
-# Per-capability token limits: capability_id maps to (effort, max_tokens). From the ai-mode token table.
-CAP_LIMITS: dict[str, tuple[str, int]] = {
-    "ai_openend_grade":     ("low", 150),
-    "ai_socratic":          ("low", 200),
-    "ai_hint":              ("low", 80),
-    "ai_personal_feedback": ("low", 250),
-    "ai_generate_items":    ("low", 400),
-    "ai_variant_q":         ("low", 300),
-    "ai_misconception":     ("medium", 300),
-    "ai_adaptive_weight":   ("low", 200),
-    "ai_session_summary":   ("low", 300),
-    "ai_proactive_remind":  ("low", 120),
-    "ai_practice":          ("low", 250),
-    "ai_convo":             ("low", 350),
-    "ai_explain":           ("low", 220),
-}
+# Effort is config-driven (ctx.ai_effort, from capabilities.ai.effort). There is no output-token
+# cap: this claude CLI has no such flag, and the user opts for unlimited length. So callers no
+# longer carry a per-capability (effort, max_tokens) table — effort comes from ctx, tokens uncapped.
 
 
 def should_invoke(*, enabled: bool, condition: bool = True) -> bool:
@@ -85,17 +72,17 @@ async def one_shot(
 ) -> "_ai.AIResult":
     """Single AI call with no session. Used by eleven of the twelve capabilities.
 
-    Pulls model (param override else ctx) and persona from ctx, effort and max_tokens from CAP_LIMITS.
+    Pulls model (param override else ctx), persona, and effort from ctx. Output length is uncapped.
     Never raises; the underlying invoke returns an AIResult with ok=False on failure.
     """
-    effort, max_tokens = CAP_LIMITS.get(capability_id, (getattr(ctx, "ai_effort", "low"), 200))
+    effort = getattr(ctx, "ai_effort", None) or "low"
     system = build_preamble(role, data, persona=getattr(ctx, "ai_persona", None), force_json=force_json)
     return await _invoke(
         prompt,
         system=system,
         model=model or getattr(ctx, "ai_model", None),
         effort=effort,
-        max_tokens=max_tokens,
+        max_tokens=None,
         session_id=None,
         on_stream=on_stream,
     )
@@ -130,7 +117,7 @@ class ConvManager:
         role: str,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> "_ai.AIResult":
-        effort, max_tokens = CAP_LIMITS.get(self._capability_id, ("low", 200))
+        effort = getattr(ctx, "ai_effort", None) or "low"
         system = build_preamble(role, persona=getattr(ctx, "ai_persona", None))
         prompt = self._windowed_prompt(user_text)
         self._session.turns.append(("user", user_text))
@@ -139,7 +126,7 @@ class ConvManager:
             system=system,
             model=self._model or getattr(ctx, "ai_model", None),
             effort=effort,
-            max_tokens=max_tokens,
+            max_tokens=None,
             session_id=self._session.claude_sid,
             on_stream=on_stream,
         )

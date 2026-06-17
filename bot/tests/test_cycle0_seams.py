@@ -86,7 +86,8 @@ def test_one_shot_passes_no_session_and_token_cap(monkeypatch):
         "do it", capability_id="ai_hint", ctx=_ctx(ai_persona="strict coach"), role="Give a hint."))
     assert res.ok
     assert captured["session_id"] is None          # one-shot: no session
-    assert captured["effort"] == "low" and captured["max_tokens"] == 80   # CAP_LIMITS ai_hint
+    assert captured["effort"] == "low"          # effort from ctx.ai_effort (config-driven)
+    assert captured["max_tokens"] is None        # output uncapped (CLI has no token-cap flag)
     assert "strict coach" in captured["system"] and "Give a hint." in captured["system"]
 
 
