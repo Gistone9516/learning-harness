@@ -108,10 +108,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                         future.set_result("correct")
                     self.stop()
                     try:
-                        await ia.response.edit_message(
-                            content=None,
-                            view=_done_view("✅ 정답으로 기록했어요."),
-                        )
+                        await ia.response.edit_message(content="✅ 정답으로 기록했어요.", view=None)
                     except Exception:
                         await ia.response.defer()
 
@@ -124,10 +121,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                         future.set_result("incorrect")
                     self.stop()
                     try:
-                        await ia.response.edit_message(
-                            content=None,
-                            view=_done_view("❌ 오답으로 기록했어요."),
-                        )
+                        await ia.response.edit_message(content="❌ 오답으로 기록했어요.", view=None)
                     except Exception:
                         await ia.response.defer()
 
@@ -136,28 +130,18 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
                         future.set_result("skip")
 
             judge_view = JudgeView()
-            back_text = _back_text(card)
-            judge_view.add_item(discord.ui.Container(
-                discord.ui.TextDisplay(back_text),
-                accent_colour=_COLOR_MAIN,
-            ))
+            reveal = f"{front_text}\n\n{_back_text(card)}"
             try:
-                await interaction.response.edit_message(view=judge_view)
+                await interaction.response.edit_message(content=reveal, view=judge_view)
             except Exception:
-                await interaction.response.send_message(view=judge_view, ephemeral=True)
+                await interaction.channel.send(content=reveal, view=judge_view)
 
         async def on_timeout(self) -> None:
             if not future.done():
                 future.set_result("skip")
 
-    show_view = ShowAnswerView()
     front_text = _progress_prefix(ctx) + _front_text(card)
-    show_view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(front_text),
-        accent_colour=_COLOR_MAIN,
-    ))
-
-    await channel.send(view=show_view)
+    await channel.send(content=front_text, view=ShowAnswerView())
 
     verdict = await future
     is_incorrect = verdict == "incorrect"

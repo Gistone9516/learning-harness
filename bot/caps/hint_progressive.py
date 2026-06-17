@@ -90,6 +90,10 @@ async def show_hint(ctx, card: CardDef) -> None:
     Call it from a parent handler that needs hint support alongside its own grading logic.
     Does not return a HandlerResult; the parent handler owns verdict/done signaling.
     """
+    # Silent when the card has no authored hints (do not spam "no more hints").
+    if not _get_hint_list(card):
+        return
+
     channel = ctx.channel
     user_id = ctx.user_id
     mount = ctx.mount
@@ -132,16 +136,11 @@ async def show_hint(ctx, card: CardDef) -> None:
             else:
                 msg = f"힌트 {revealed_level}: {revealed_text}"
 
-            hint_reveal_view = discord.ui.LayoutView(timeout=None)
-            hint_reveal_view.add_item(discord.ui.Container(
-                discord.ui.TextDisplay(msg),
-                accent_colour=_COLOR_HINT,
-            ))
             try:
-                await interaction.response.edit_message(view=hint_reveal_view)
+                await interaction.response.edit_message(content=msg, view=None)
             except Exception:
                 try:
-                    await interaction.response.send_message(view=hint_reveal_view, ephemeral=False)
+                    await interaction.channel.send(content=msg)
                 except Exception:
                     pass
 
@@ -150,8 +149,4 @@ async def show_hint(ctx, card: CardDef) -> None:
 
     hint_view = HintView()
     label_text = f"힌트 {next_level}/{min(len(_get_hint_list(card)), _MAX_LEVEL)} 보기"
-    hint_view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(label_text),
-        accent_colour=_COLOR_HINT,
-    ))
-    await channel.send(view=hint_view)
+    await channel.send(content=label_text, view=hint_view)
