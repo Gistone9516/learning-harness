@@ -111,6 +111,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 ├ .env.example                 .env template (blank tokens)
 ├ docs/                        planning and ideation (Korean, kept as-is)
 │   ├ 기획_v5_discord.md        planning (intent, architecture, scope)
+│   ├ 기획_web.md               web frame plan (parts+standards, ai_server bridge)
 │   ├ _이데이션_능력카탈로그.md   four-layer learning capability catalog
 │   └ _이데이션_원본.json        raw ideation data
 ├ specs/                       contracts (SoT-first)
@@ -132,10 +133,11 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ caps_ai/ai_practice.py   AI-generated composition problem + grading (per catalog item)
 │   ├ caps_ai/ai_convo.py      threaded multi-turn conversation (main model)
 │   ├ caps_ai/ai_explain.py    one-off per-card concept explanation thread (explain model, discarded after use)
+│   ├ ai_server.py             gated local HTTP server bridging a web client to claude (web AI, Discord-independent)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
-├ web/                         (reserved) frontend-design workspace for continuous interactive practice and long-form reading, deferred
+├ web/                         (planned) frontend workspace for interactive practice + long-form reading (plan: docs/기획_web.md); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
