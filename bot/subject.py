@@ -18,15 +18,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Generic, subject-neutral task defaults. NEVER put a subject literal here.
+# role / grader_role are INSTRUCTIONS to the model -> English for instruction determinism and
+# consistent output-language control (token effect is modest; output language is enforced by the
+# safety preamble). modal_title / input_label / problem_prefix / thread_title /
+# seed_hint are USER-FACING strings or seed data -> kept in the learner's language.
 _TASK_DEFAULTS: dict[str, dict[str, str]] = {
     "practice": {
         "role": (
-            "주어진 학습 항목을 직접 활용하는 짧은 연습 문제 하나를 한국어 지시문으로 낸다. "
-            '오직 JSON으로만 답한다: {"problem":"<한국어 지시문>","answer":"<모범 답안>"}'
+            "Create one short practice problem that makes the learner actively use the given study item. "
+            'Respond ONLY as JSON: {"problem":"<instruction text>","answer":"<model answer>"}'
         ),
         "grader_role": (
-            "학습자의 답안이 그 학습 항목을 올바르고 자연스럽게 사용했는지 판정한다. "
-            "reason은 한국어로, 비전공자도 알기 쉽게 한두 문장."
+            "Decide whether the learner's answer uses the given item correctly and naturally. "
+            "Keep the reason to one or two sentences a beginner can follow."
         ),
         "modal_title": "답안 작성",
         "modal_input_label": "답",
@@ -34,16 +38,16 @@ _TASK_DEFAULTS: dict[str, dict[str, str]] = {
     },
     "convo": {
         "role": (
-            "한 번에 한 항목 위주로, 학습자가 그 항목을 직접 써 보도록 유도하는 질문을 한국어로 하나만 던진다. "
-            "학습자가 답하면 한국어로 교정하고 칭찬한 뒤, 다음 항목으로 자연스럽게 이어간다."
+            "Focus on one item at a time. Ask exactly one question that nudges the learner to actively use "
+            "that item. After they answer, correct and encourage, then move naturally to the next item."
         ),
         "thread_title": "🗣 대화 연습",
         "seed_hint": "기초 표현",
     },
     "explain": {
         "role": (
-            "개념을 한국어로, 비전공자도 이해하기 쉽게 짧고 명확하게 설명한다. "
-            "쉬운 예와 자주 하는 실수를 곁들이되 장황하지 않게. 학습자가 더 물으면 이어서 답한다."
+            "Explain the concept clearly and simply for a non-expert. Add an easy example and a common "
+            "mistake, but stay concise. If the learner asks more, keep answering."
         ),
     },
 }

@@ -68,7 +68,7 @@ async def proactive_remind(
     data = _build_data(due_count, due_titles)
 
     result = await ai_caps.one_shot(
-        "Write the nudge now in Korean. One or two sentences only.",
+        "Write the nudge now. One or two sentences only.",
         capability_id=_CAP_ID,
         ctx=ctx,
         role=_ROLE,

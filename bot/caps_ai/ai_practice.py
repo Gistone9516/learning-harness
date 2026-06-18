@@ -141,10 +141,10 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     # NOTE: no force_json here — the role already mandates {"problem","answer"} JSON.
     # force_json would append the grader's {"verdict","reason"} schema and break generation.
     gen = await ai_caps.one_shot(
-        "이 학습 항목으로 풀 연습 문제 1개를 만들어 주세요. JSON만.",
+        "Create one practice problem for this study item. JSON only.",
         capability_id=_CAP_ID, ctx=ctx,
         role=task_of(ctx, "practice", "role"),
-        data=f"영역: {area_label}\n학습 항목: {item}\n뜻/설명: {meaning}",
+        data=f"Area: {area_label}\nItem: {item}\nMeaning: {meaning}",
     )
     obj = _extract_json(gen.text) if gen.ok else None
     problem = (obj or {}).get("problem")
@@ -162,7 +162,7 @@ async def handle(ctx, card: CardDef) -> HandlerResult:
     gr = await ai_caps.one_shot(
         "Grade the learner answer now.",
         capability_id=_CAP_ID, ctx=ctx, role=task_of(ctx, "practice", "grader_role"),
-        data=f"항목: {item}\n문제: {problem}\n모범답안: {model_answer}\n학습자 답: {user_answer}",
+        data=f"Item: {item}\nProblem: {problem}\nModel answer: {model_answer}\nLearner answer: {user_answer}",
         force_json=True,
     )
     verdict, reason = ai_caps.parse_verdict(gr.text) if gr.ok else (None, "")

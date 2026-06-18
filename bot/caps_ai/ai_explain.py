@@ -29,7 +29,8 @@ log = logging.getLogger(__name__)
 _CAP_ID = "ai_explain"
 _REPLY_TIMEOUT = None
 _MAX_TURNS = 100000
-_STOP = {"중단", "취소", "정지", "그만", "끝", "그만할래", "그만하기", "stop", "cancel", "quit", "exit", "end"}
+_STOP = {"중단", "취소", "정지", "그만", "끝", "종료", "삭제", "닫기", "그만할래", "그만하기",
+         "stop", "cancel", "quit", "exit", "end", "close", "delete"}
 
 
 def _is_stop_word(text: str) -> bool:
@@ -63,10 +64,10 @@ async def run_explain(ctx, client, card) -> None:
 
     # 카드 정체성을 system preamble(role)에 박아 매 턴 다시 들어가게 한다.
     # 윈도(=4)를 넘는 다회차에서 seed 메시지가 잘려도 무엇을 설명 중인지 잃지 않도록.
-    # 과목 정체성(영역·과목)은 persona가 운반하므로 role 기본값은 subject-neutral.
-    role = task_of(ctx, "explain", "role") + f"\n\n지금 설명 중인 학습 항목: {head}"
+    # 과목 정체성(영역·과목)은 persona가 운반하므로 role 기본값은 subject-neutral. 지시문은 영문(토큰 절감).
+    role = task_of(ctx, "explain", "role") + f"\n\nItem being explained: {head}"
     if detail:
-        role += f"\n참고 설명: {detail}"
+        role += f"\nReference note: {detail}"
 
     try:
         thread = await thread_in_channel(channel, "🤖 개념 해설")
@@ -78,10 +79,10 @@ async def run_explain(ctx, client, card) -> None:
     sess = SimpleNamespace(turns=[], claude_sid=None)
     cm = ai_caps.ConvManager(sess, window=4, capability_id=_CAP_ID, model=model)
 
+    # head/detail already ride in the role (system) every turn; don't duplicate them here.
     seed = (
-        f"학습 항목: {head}\n현재 간단 설명: {detail}\n"
-        "이 개념을 한국어로 더 쉽고 풍부하게(쉬운 예문과 자주 하는 실수 포함) 설명하고, "
-        "더 궁금한 점이 있으면 물어보라고 권해."
+        "Explain this item more simply and richly (include an easy example and a common mistake), "
+        "and invite the learner to ask follow-up questions."
     )
     res = await cm.turn(seed, ctx=ctx, role=role)
     if not res.ok or not (res.text or "").strip():
@@ -90,7 +91,7 @@ async def run_explain(ctx, client, card) -> None:
             await delete_thread(thread)
         return
     await _send(thread, res.text)
-    await _send(thread, "💬 이어서 궁금한 걸 물어보세요. 끝내려면 '그만' 또는 '중단'을 입력하면 돼요.")
+    await _send(thread, "💬 이어서 궁금한 걸 물어보세요. 끝내려면 '종료'(또는 그만/중단/삭제)를 입력하면 돼요.")
 
     for _ in range(_MAX_TURNS):
         reply = await _wait_for_reply(client, thread, ctx.user_id, _REPLY_TIMEOUT)

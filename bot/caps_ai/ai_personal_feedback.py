@@ -38,7 +38,7 @@ CAP_ID = "ai_personal_feedback"
 
 _ROLE = (
     "You are an encouraging coach. "
-    "Explain the mistake briefly in plain Korean. "
+    "Explain the mistake briefly and plainly. "
     "Be warm but concise. Do not repeat the question."
 )
 
@@ -114,7 +114,7 @@ async def personal_feedback(
         return None
 
     data = _build_data(card, user_answer, recent_wrongs)
-    prompt = "이 학습자에게 틀린 이유를 짧고 따뜻하게 설명해 주세요."
+    prompt = "Explain to this learner, briefly and warmly, why the answer was wrong."
 
     result = await ai_caps.one_shot(
         prompt,

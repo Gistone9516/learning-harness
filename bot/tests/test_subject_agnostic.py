@@ -12,9 +12,11 @@ import os
 _BOT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ROOT = os.path.dirname(_BOT_ROOT)
 
-# Subject-specific tokens that must never appear in generic kit code.
-# (Korean: English-subject terms + the English area labels; plus the bare word "English".)
-_DENY = ["영어", "영작", "토익", "토플", "단어", "문법", "숙어", "English", "english"]
+# Subject-specific tokens that must never appear in generic kit code: the Korean English-subject
+# terms + the English-subject area labels. (The bare word "English" is intentionally NOT here — it is
+# a legitimate language name in the i18n map / English instruction prose, not subject leakage. The
+# reliable subject-leak signal in this codebase is the Korean subject vocabulary.)
+_DENY = ["영어", "영작", "토익", "토플", "단어", "문법", "숙어"]
 
 _SCAN_DIRS = ["bot", "engine"]
 

@@ -38,7 +38,7 @@ CAP_ID = "ai_session_summary"
 
 _ROLE = (
     "You are a study coach. "
-    "Write a short, encouraging session log in Korean for the learner. "
+    "Write a short, encouraging session log for the learner. "
     "Mention what went well and suggest one thing to focus on next. "
     "Keep it under 5 sentences."
 )
@@ -95,7 +95,7 @@ async def session_summary(ctx: Any, stats: Any) -> str | None:
         return None
 
     data = _stats_data(stats)
-    prompt = "이 세션의 학습 일지를 짧게 작성해 주세요."
+    prompt = "Write a short study-session log."
 
     result = await ai_caps.one_shot(
         prompt,

@@ -63,3 +63,4 @@ class Ctx:
     progress: tuple | None = None   # (presented, total) for the session progress indicator
     ai_model_explain: str | None = None   # model for ai_explain (haiku); from .env AI_MODEL_EXPLAIN
     subject: Any = None   # SubjectProfile: injected area taxonomy + AI task overrides
+    output_lang: str = "Korean"   # AI natural-language output language (.env USER_LANG)

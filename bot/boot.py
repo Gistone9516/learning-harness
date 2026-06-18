@@ -77,6 +77,7 @@ class BootResult:
     ai_persona: str | None = None
     ai_model_explain: str | None = None
     subject: SubjectProfile | None = None           # injected area taxonomy + AI task overrides
+    output_lang: str = "Korean"                      # AI natural-language output language (.env USER_LANG)
 
 
 # -- Validation helpers -------------------------------------------------------
@@ -404,6 +405,13 @@ def load(mount: str) -> BootResult:
         os.environ.get("AI_MODEL_EXPLAIN") or ai_config.get("model_explain") or ai_model
     )
 
+    # Output language for AI natural-language text (.env USER_LANG; default Korean). Injected into
+    # every AI preamble so the kit need not hardcode a language (stays subject/locale-agnostic).
+    _LANG_NAMES = {"ko": "Korean", "en": "English", "ja": "Japanese", "zh": "Chinese",
+                   "es": "Spanish", "fr": "French", "de": "German"}
+    user_lang = (os.environ.get("USER_LANG") or "ko").strip().lower()
+    output_lang = _LANG_NAMES.get(user_lang, "Korean")
+
     # Subject profile: area taxonomy + per-capability AI task overrides (injection §5).
     subject = build_subject_profile(config)
 
@@ -430,4 +438,5 @@ def load(mount: str) -> BootResult:
         ai_persona=ai_persona,
         ai_model_explain=ai_model_explain,
         subject=subject,
+        output_lang=output_lang,
     )

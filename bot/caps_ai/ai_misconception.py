@@ -35,7 +35,7 @@ _ROLE = (
     "You are a learning analyst. "
     "Given a list of flashcard topics where a learner repeatedly makes errors, "
     "identify the most likely shared conceptual gap or misconception. "
-    "Be concise and specific. Respond in Korean."
+    "Be concise and specific."
 )
 
 _MAX_CARD_SUMMARY_LEN = 60  # characters per card front text in the data slice
@@ -121,8 +121,8 @@ async def diagnose(ctx, top_cards) -> str | None:
     data = _build_cards_summary(top_cards, deck)
 
     prompt = (
-        "다음은 학습자가 반복적으로 오답을 낸 카드 목록입니다. "
-        "이 오류들의 공통 개념적 원인을 진단해주세요."
+        "Below is a list of cards the learner repeatedly got wrong. "
+        "Diagnose the shared conceptual cause of these errors."
     )
 
     result = await ai_caps.one_shot(

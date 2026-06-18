@@ -109,7 +109,7 @@ async def make_variant(ctx, card: CardDef) -> dict | None:
     data = f"Original question: {original_front}"
 
     result = await ai_caps.one_shot(
-        "지금 질문을 다르게 표현해 주세요.",
+        "Rephrase the current question (keep the same correct answer).",
         capability_id=_CAP_ID,
         ctx=ctx,
         role=_ROLE,

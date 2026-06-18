@@ -121,6 +121,7 @@ class StudyBot(discord.Client):
                     enabled_capabilities=br.enabled_capabilities,
                     ai_model_explain=br.ai_model_explain,
                     subject=br.subject,
+                    output_lang=br.output_lang,
                 )
 
                 # adaptive_weight (layer 2, token 0): recompute weight overrides when enabled
@@ -319,6 +320,7 @@ class StudyBot(discord.Client):
             enabled_capabilities=br.enabled_capabilities,
             ai_model_explain=br.ai_model_explain,
             subject=br.subject,
+            output_lang=br.output_lang,
         )
 
     async def _refresh_panel(self, channel) -> None:

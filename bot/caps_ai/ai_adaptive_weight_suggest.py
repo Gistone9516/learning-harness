@@ -49,7 +49,7 @@ async def suggest_strategy(ctx, weakness_summary: str) -> str | None:
         return None
 
     result = await ai_caps.one_shot(
-        "학습자의 약점 분석을 바탕으로 집중 학습 전략을 제안해 주세요.",
+        "Based on the weakness analysis, suggest a focused study strategy.",
         capability_id=_CAP_ID,
         ctx=ctx,
         role=_ROLE,
