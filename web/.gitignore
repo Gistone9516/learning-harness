@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.local
+
+# The repo-root .gitignore globally ignores package.json/package-lock.json (v4 legacy).
+# The web project manifest and lockfile MUST be tracked, so re-include them here.
+!package.json
+!package-lock.json

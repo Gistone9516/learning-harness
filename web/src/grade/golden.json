@@ -1,0 +1,557 @@
+[
+  {
+    "name": "exact_match",
+    "input": {
+      "mode": "exact",
+      "user_answer": "0도",
+      "answer_spec": {
+        "normalize": [
+          "nfkc",
+          "trim",
+          "collapse_space",
+          "lower"
+        ],
+        "accepted": [
+          "0도",
+          "영도"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "0도"
+      ],
+      "missed": [],
+      "normalized_user": "0도"
+    }
+  },
+  {
+    "name": "exact_nomatch",
+    "input": {
+      "mode": "exact",
+      "user_answer": "5",
+      "answer_spec": {
+        "normalize": [
+          "nfkc",
+          "trim",
+          "collapse_space",
+          "lower"
+        ],
+        "accepted": [
+          "0도",
+          "영도"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [],
+      "missed": [],
+      "normalized_user": "5"
+    }
+  },
+  {
+    "name": "exact_nfkc_fullwidth",
+    "input": {
+      "mode": "exact",
+      "user_answer": "ＡＢＣ",
+      "answer_spec": {
+        "normalize": [
+          "nfkc",
+          "lower"
+        ],
+        "accepted": [
+          "abc"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "abc"
+      ],
+      "missed": [],
+      "normalized_user": "abc"
+    }
+  },
+  {
+    "name": "exact_lower_ascii",
+    "input": {
+      "mode": "exact",
+      "user_answer": "Hello",
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "accepted": [
+          "hello"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "hello"
+      ],
+      "missed": [],
+      "normalized_user": "hello"
+    }
+  },
+  {
+    "name": "exact_collapse_space",
+    "input": {
+      "mode": "exact",
+      "user_answer": "a   b",
+      "answer_spec": {
+        "normalize": [
+          "collapse_space"
+        ],
+        "accepted": [
+          "a b"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "a b"
+      ],
+      "missed": [],
+      "normalized_user": "a b"
+    }
+  },
+  {
+    "name": "exact_strip_all_space",
+    "input": {
+      "mode": "exact",
+      "user_answer": "a b c",
+      "answer_spec": {
+        "normalize": [
+          "strip_all_space"
+        ],
+        "accepted": [
+          "abc"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "abc"
+      ],
+      "missed": [],
+      "normalized_user": "abc"
+    }
+  },
+  {
+    "name": "exact_synonym",
+    "input": {
+      "mode": "exact",
+      "user_answer": "vlookup",
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "accepted": [
+          "조회"
+        ]
+      },
+      "synonyms": {
+        "vlookup": "조회"
+      }
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "조회"
+      ],
+      "missed": [],
+      "normalized_user": "조회"
+    }
+  },
+  {
+    "name": "exact_unify_arg_sep",
+    "input": {
+      "mode": "exact",
+      "user_answer": "SUM(A1;A2)",
+      "answer_spec": {
+        "normalize": [
+          "lower",
+          "unify_arg_sep"
+        ],
+        "accepted": [
+          "sum(a1,a2)"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "sum(a1,a2)"
+      ],
+      "missed": [],
+      "normalized_user": "sum(a1,a2)"
+    }
+  },
+  {
+    "name": "exact_unify_cell_dollar",
+    "input": {
+      "mode": "exact",
+      "user_answer": "$A$1",
+      "answer_spec": {
+        "normalize": [
+          "lower",
+          "unify_cell_dollar"
+        ],
+        "accepted": [
+          "a1"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "a1"
+      ],
+      "missed": [],
+      "normalized_user": "a1"
+    }
+  },
+  {
+    "name": "exact_strip_trailing_paren",
+    "input": {
+      "mode": "exact",
+      "user_answer": "함수 (설명)",
+      "answer_spec": {
+        "normalize": [
+          "strip_trailing_paren"
+        ],
+        "accepted": [
+          "함수"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "함수"
+      ],
+      "missed": [],
+      "normalized_user": "함수"
+    }
+  },
+  {
+    "name": "exact_fullwidth_to_halfwidth",
+    "input": {
+      "mode": "exact",
+      "user_answer": "ＳＵＭ",
+      "answer_spec": {
+        "normalize": [
+          "fullwidth_to_halfwidth",
+          "lower"
+        ],
+        "accepted": [
+          "sum"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "sum"
+      ],
+      "missed": [],
+      "normalized_user": "sum"
+    }
+  },
+  {
+    "name": "seq_match",
+    "input": {
+      "mode": "exact",
+      "user_answer": [
+        "a",
+        "b",
+        "c"
+      ],
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "sequence": [
+          "A",
+          "B",
+          "C"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "a",
+        "b",
+        "c"
+      ],
+      "missed": [],
+      "normalized_user": [
+        "a",
+        "b",
+        "c"
+      ]
+    }
+  },
+  {
+    "name": "seq_len_mismatch",
+    "input": {
+      "mode": "exact",
+      "user_answer": [
+        "a",
+        "b"
+      ],
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "sequence": [
+          "A",
+          "B",
+          "C"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [],
+      "missed": [
+        "a",
+        "b",
+        "c"
+      ],
+      "normalized_user": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "name": "seq_order_wrong",
+    "input": {
+      "mode": "exact",
+      "user_answer": [
+        "b",
+        "a",
+        "c"
+      ],
+      "answer_spec": {
+        "normalize": [],
+        "sequence": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [
+        "c"
+      ],
+      "missed": [
+        "a",
+        "b"
+      ],
+      "normalized_user": [
+        "b",
+        "a",
+        "c"
+      ]
+    }
+  },
+  {
+    "name": "keyword_all_hit",
+    "input": {
+      "mode": "keyword",
+      "user_answer": "물을 적신다 비누로 20초 문지른다",
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "required_keywords": [
+          [
+            "물",
+            "적신다"
+          ],
+          [
+            "비누",
+            "20초"
+          ]
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "물",
+        "비누"
+      ],
+      "missed": [],
+      "normalized_user": "물을 적신다 비누로 20초 문지른다"
+    }
+  },
+  {
+    "name": "keyword_missed",
+    "input": {
+      "mode": "keyword",
+      "user_answer": "물만 있다",
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "required_keywords": [
+          [
+            "물"
+          ],
+          [
+            "비누"
+          ]
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [
+        "물"
+      ],
+      "missed": [
+        "비누"
+      ],
+      "normalized_user": "물만 있다"
+    }
+  },
+  {
+    "name": "cloze_all",
+    "input": {
+      "mode": "cloze",
+      "user_answer": [
+        "3",
+        "71"
+      ],
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "blanks": [
+          [
+            "3",
+            "세"
+          ],
+          [
+            "71",
+            "칠십일"
+          ]
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [
+        "0",
+        "1"
+      ],
+      "missed": [],
+      "normalized_user": [
+        "3",
+        "71"
+      ]
+    }
+  },
+  {
+    "name": "cloze_one_wrong",
+    "input": {
+      "mode": "cloze",
+      "user_answer": [
+        "3",
+        "99"
+      ],
+      "answer_spec": {
+        "normalize": [
+          "lower"
+        ],
+        "blanks": [
+          [
+            "3",
+            "세"
+          ],
+          [
+            "71",
+            "칠십일"
+          ]
+        ]
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [
+        "0"
+      ],
+      "missed": [
+        "1"
+      ],
+      "normalized_user": [
+        "3",
+        "99"
+      ]
+    }
+  },
+  {
+    "name": "self_correct",
+    "input": {
+      "mode": "self",
+      "user_answer": "correct",
+      "answer_spec": {
+        "normalize": []
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "correct",
+      "matched": [],
+      "missed": [],
+      "normalized_user": "correct"
+    }
+  },
+  {
+    "name": "self_incorrect",
+    "input": {
+      "mode": "self",
+      "user_answer": "incorrect",
+      "answer_spec": {
+        "normalize": []
+      },
+      "synonyms": null
+    },
+    "expected": {
+      "verdict": "incorrect",
+      "matched": [],
+      "missed": [],
+      "normalized_user": "incorrect"
+    }
+  }
+]

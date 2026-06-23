@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "id": "sheet",
+      "dir": "parts/sheet",
+      "entry": "parts/sheet/sheet.ts",
+      "what": "Interactive spreadsheet with a formula engine and deterministic grading.",
+      "deps": [],
+      "ai": false,
+      "constraints": ["subject-agnostic", "token0", "binary"]
+    }
+  ]
+}
