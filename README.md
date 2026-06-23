@@ -137,7 +137,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
-├ web/                         (planned) frontend workspace for interactive practice + long-form reading (plan: docs/기획_web.md); web AI routes through bot/ai_server.py
+├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, conceptprob), src/grade (engine grader port), src/ai (ai_server client), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
@@ -177,6 +177,14 @@ cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session,
   discord or a live `claude` CLI (boot, session loop, handler grading cores, sidecar I/O, and the AI helper
   layer with a mocked `invoke`). Discord I/O and live AI are exercised only against a running bot.
 
+```bash
+cd web && npm install && npm test     # 98 headless web tests (grade parity, parts, ai client, subject-agnostic guard)
+cd web && npm run build               # tsc --noEmit + vite production build
+```
+- The web kit is verified headless with vitest (the TS grader is checked against engine-generated golden
+  vectors for parity; the AI client runs against a mock `/ai`, no live claude). For a local visual check,
+  `cd web && npm run dev` serves a dev fixture at `localhost:5173`.
+
 ## 6. Current status
 
 - Done: (1) planning, (2) specs (7 documents, passed adversarial integrity review), (3) implementation
@@ -202,8 +210,15 @@ cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session,
     subject literal in kit code.
 - 527 regression tests green (159 engine plus 368 bot), all headless. The deterministic loop and every new
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
-- Pending: live Discord verification (needs the user prerequisites: bot app, token, server) and live AI
-  smoke (needs the `claude` CLI on PATH). The web (frontend-design) workspace remains deferred.
+- Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with three
+  parts (sheet, codeproj, conceptprob), a shared engine grader port (golden-vector parity with the Python
+  engine), an `ai_server` browser client (load-once then resume sessions), a calm subtractive design layer
+  (`src/styles`), and `web/USAGE.md` (the AI operating manual, intent-first generation). 98 web tests green.
+  `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
+  with no Discord dependency.
+- Pending: live Discord verification (needs the user prerequisites: bot app, token, server), live AI smoke
+  (needs the `claude` CLI on PATH), and wiring the web kit into a consuming instance (instance config, not
+  kit work).
 
 ## 7. Where to start (for AI and new contributors)
 

@@ -2,6 +2,8 @@
 // page sets globalThis.LH_CONFIG, or a consuming instance supplies it. The kit ships NO subject/instance
 // content. For local dev only (`npm run dev`), it falls back to a mock fixture under examples/, which is
 // never part of the kit contract (excluded from the subject-agnostic guard).
+import "./styles/tokens.css";
+import "./styles/app.css";
 import { mountApp, type AppConfig } from "./shell";
 
 async function resolveConfig(): Promise<AppConfig | null> {

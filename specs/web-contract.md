@@ -132,6 +132,10 @@ type ProgressRecord = {
 
 Modules that generate content do one `POST /ai` with `effort:"medium"`, model `claude-opus-4-8[1m]`, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
 
+### 6.1 Intent-first generation (operating rule)
+
+The kit ships no subject, so the AI operating it **must elicit the learner's intent before generating**: subject/area, concrete topic, scale/difficulty, and constraints — confirmed in one short round, never assumed. Generating from an assumption is non-conforming. This is both a usability rule and a subject-agnostic guardrail: the learner is the only valid source of subject. The full operating manual for the AI is `web/USAGE.md`.
+
 ---
 
 ## 7. Errors and graceful degradation
