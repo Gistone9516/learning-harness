@@ -212,8 +212,8 @@ cd web && npm run build               # tsc --noEmit + vite production build
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
 - Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with three
   parts (sheet, codeproj, conceptprob), a shared engine grader port (golden-vector parity with the Python
-  engine), an `ai_server` browser client (load-once then resume sessions), a calm subtractive design layer
-  (`src/styles`), and `web/USAGE.md` (the AI operating manual, intent-first generation). 98 web tests green.
+  engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 98 web tests green.
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
   with no Discord dependency.
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), live AI smoke

@@ -3,24 +3,40 @@
  * (sheet, codeproj, conceptprob). Selectors stay flat (mostly single class) to avoid specificity
  * fights; verdict state is read from the data-verdict attribute the parts set on result elements.
  *
- * The signature is restraint: the active item (a panel, a concept, a focused cell) earns a thin teal
- * rail, and the deterministic grade reads as a quiet tinted chip. Nothing else competes for attention.
+ * Look: a warm study compendium. Serif display for titles, IBM Plex for body and data, an
+ * expressway-green accent, warm paper ground with a faint grain. The signature is the dark "blueprint"
+ * code panel; everything else stays quiet on paper. Correct reads green, incorrect reads crimson.
  */
 
-/* ---- Baseline ---- */
+/* ---- Baseline: warm paper ground with a faint grain ---- */
 :root {
   color-scheme: light;
 }
 body {
   margin: 0;
-  background: var(--lh-bg);
   color: var(--lh-ink);
   font-family: var(--lh-font-ui);
   font-size: 15px;
-  line-height: 1.55;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, #fbf9f2 0, transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, #f0ecdf 0, transparent 55%),
+    var(--lh-bg);
+  background-attachment: fixed;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
 }
 #app {
+  position: relative;
+  z-index: 1;
   max-width: 1080px;
   margin: 0 auto;
   padding: var(--lh-s6) var(--lh-s5);
@@ -28,7 +44,7 @@ body {
 #app :focus-visible {
   outline: 2px solid var(--lh-primary);
   outline-offset: 2px;
-  border-radius: var(--lh-r-sm);
+  border-radius: var(--lh-r-xs);
 }
 
 /* Shared form-control look so every part inherits one calm input style. */
@@ -39,7 +55,7 @@ body {
   font-size: 14px;
   color: var(--lh-ink);
   background: var(--lh-surface);
-  border: 1px solid var(--lh-line);
+  border: 1px solid var(--lh-line-strong);
   border-radius: var(--lh-r-sm);
   padding: var(--lh-s2) var(--lh-s3);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -47,7 +63,7 @@ body {
 #app input[type="text"]:focus,
 #app textarea:focus,
 #app select:focus {
-  border-color: var(--lh-primary);
+  border-color: var(--lh-primary-line);
   box-shadow: 0 0 0 3px var(--lh-primary-soft);
   outline: none;
 }
@@ -61,6 +77,7 @@ body {
   border-radius: var(--lh-r-sm);
   padding: var(--lh-s2) var(--lh-s4);
   cursor: pointer;
+  box-shadow: 0 2px 8px -3px var(--lh-primary);
   transition: background 0.15s ease, transform 0.05s ease;
 }
 #app button:hover {
@@ -70,8 +87,9 @@ body {
   transform: translateY(1px);
 }
 #app button:disabled {
-  background: var(--lh-line);
+  background: var(--lh-line-strong);
   color: var(--lh-ink-faint);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
@@ -128,7 +146,7 @@ body {
 .lh-sheet-grid input:focus {
   outline: 2px solid var(--lh-primary);
   outline-offset: -2px;
-  border-radius: 3px;
+  border-radius: 4px;
   box-shadow: none;
 }
 .lh-sheet-result,
@@ -136,7 +154,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--lh-s2);
-  font-weight: 600;
+  font-weight: 700;
   padding: var(--lh-s2) var(--lh-s4);
   border-radius: 999px;
   margin-top: var(--lh-s3);
@@ -145,11 +163,13 @@ body {
 .lh-problem-result[data-verdict="correct"] {
   color: var(--lh-ok);
   background: var(--lh-ok-soft);
+  border: 1px solid var(--lh-primary-line);
 }
 .lh-sheet-result[data-verdict="incorrect"],
 .lh-problem-result[data-verdict="incorrect"] {
   color: var(--lh-bad);
   background: var(--lh-bad-soft);
+  border: 1px solid var(--lh-bad-line);
 }
 
 /* ====================================================================== */
@@ -168,8 +188,10 @@ body {
 }
 .lh-cp-title {
   margin: 0;
-  font-size: 17px;
+  font-family: var(--lh-font-display);
+  font-size: 22px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .lh-cp-summary {
   margin: var(--lh-s2) 0 0;
@@ -214,7 +236,7 @@ body {
 }
 .lh-cp-tree-item {
   padding: var(--lh-s1) var(--lh-s2);
-  border-radius: var(--lh-r-sm);
+  border-radius: var(--lh-r-xs);
   font-family: var(--lh-font-mono);
   font-size: 13px;
   color: var(--lh-ink-soft);
@@ -256,9 +278,14 @@ body {
   font-size: 13px;
   color: var(--lh-ink-soft);
 }
+/* Signature: the dark blueprint code panel. */
 .lh-cp-code-area {
-  background: var(--lh-surface-sunk);
-  border: 1px solid var(--lh-line);
+  background:
+    linear-gradient(var(--lh-code-bg), var(--lh-code-bg)) padding-box,
+    repeating-linear-gradient(0deg, transparent, transparent 23px, #ffffff0e 23px, #ffffff0e 24px),
+    repeating-linear-gradient(90deg, transparent, transparent 23px, #ffffff0e 23px, #ffffff0e 24px);
+  background-color: var(--lh-code-bg);
+  border: 1px solid var(--lh-code-border);
   border-radius: var(--lh-r-sm);
   overflow: auto;
 }
@@ -271,15 +298,16 @@ body {
   font-family: var(--lh-font-mono);
   font-size: 13px;
   line-height: 1.7;
+  color: var(--lh-code-ink);
 }
 .lh-cp-code-line:hover {
-  background: var(--lh-line-soft);
+  background: #ffffff10;
 }
 .lh-cp-line-num {
   flex: 0 0 48px;
   text-align: right;
   padding-right: var(--lh-s3);
-  color: var(--lh-ink-faint);
+  color: var(--lh-code-faint);
   user-select: none;
 }
 .lh-cp-line-text {
@@ -292,9 +320,9 @@ body {
 .lh-cp-explain-output {
   margin-top: var(--lh-s3);
   padding: var(--lh-s3) var(--lh-s4);
-  background: var(--lh-primary-soft);
+  background: var(--lh-blue-soft);
   border-radius: var(--lh-r-sm);
-  border-left: 3px solid var(--lh-primary);
+  border-left: 3px solid var(--lh-blue);
   font-size: 14px;
   color: var(--lh-ink);
   white-space: pre-wrap;
@@ -330,10 +358,11 @@ body {
   margin-bottom: var(--lh-s3);
 }
 .lh-area-label {
-  font-size: 12px;
-  font-weight: 700;
+  font-family: var(--lh-font-mono);
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--lh-ink-faint);
   padding: var(--lh-s1) var(--lh-s2);
 }
@@ -349,8 +378,9 @@ body {
   background: transparent;
   color: var(--lh-ink-soft);
   font-weight: 500;
+  box-shadow: none;
   padding: var(--lh-s2) var(--lh-s3);
-  border-radius: var(--lh-r-sm);
+  border-radius: var(--lh-r-xs);
 }
 .lh-concept-btn:hover {
   background: var(--lh-line-soft);
@@ -370,8 +400,10 @@ body {
 }
 .lh-concept-title {
   margin: 0 0 var(--lh-s3);
-  font-size: 20px;
+  font-family: var(--lh-font-display);
+  font-size: 25px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .lh-concept-body-section {
   margin-bottom: var(--lh-s4);
@@ -379,6 +411,7 @@ body {
 .lh-concept-body-content {
   color: var(--lh-ink);
   font-size: 15px;
+  line-height: 1.78;
 }
 .lh-deepen-section {
   margin: var(--lh-s5) 0;
@@ -394,8 +427,8 @@ body {
 .lh-deepen-output {
   margin-top: var(--lh-s3);
   padding: var(--lh-s3) var(--lh-s4);
-  background: var(--lh-surface);
-  border-left: 3px solid var(--lh-primary);
+  background: var(--lh-blue-soft);
+  border-left: 3px solid var(--lh-blue);
   border-radius: var(--lh-r-sm);
   white-space: pre-wrap;
 }
@@ -405,10 +438,11 @@ body {
   padding-top: var(--lh-s4);
 }
 .lh-problems-header {
-  font-size: 13px;
-  font-weight: 700;
+  font-family: var(--lh-font-mono);
+  font-size: 12px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--lh-ink-faint);
   margin-bottom: var(--lh-s3);
 }
@@ -417,6 +451,7 @@ body {
   border: 1px solid var(--lh-line);
   border-radius: var(--lh-r-sm);
   margin-bottom: var(--lh-s3);
+  background: var(--lh-surface);
 }
 .lh-problem-front {
   margin-bottom: var(--lh-s3);
@@ -439,13 +474,14 @@ body {
 .lh-retrace-link {
   display: inline-block;
   margin-top: var(--lh-s2);
-  color: var(--lh-primary);
+  color: var(--lh-blue);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
+  border-bottom: 1px solid var(--lh-blue-line);
 }
 .lh-retrace-link:hover {
-  text-decoration: underline;
+  border-bottom-color: var(--lh-blue);
 }
 .lh-status {
   color: var(--lh-ink-soft);
@@ -467,6 +503,12 @@ body {
     flex-basis: auto;
     border-right: none;
     border-bottom: 1px solid var(--lh-line);
+  }
+  .lh-cp-title {
+    font-size: 20px;
+  }
+  .lh-concept-title {
+    font-size: 21px;
   }
 }
 

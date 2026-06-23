@@ -1,49 +1,67 @@
 /*
  * Design tokens for the learning-harness web kit.
  *
- * Identity: a calm study instrument. The kit is subject-agnostic, so the visual language carries no
- * topic flavour; it only has to make AI-generated material readable and the deterministic grade
- * unmistakable. The look is quiet on purpose: one muted-teal accent, soft rounded surfaces, and a
- * cool off-white ground. Precision surfaces (spreadsheet cells, source code, data tables) are set in
- * a monospace face; everything a person reads as prose uses a humanist system sans.
+ * Identity: a warm "study compendium" — the look of a printed research reader on warm paper. Quiet but
+ * not cold: an expressway-sign green carries the accent, a serif display gives the headings their voice,
+ * and precision surfaces (cells, code, data) stay in a mono face. The kit is subject-agnostic, so the
+ * palette carries no topic flavour; it only has to make material readable and the binary grade clear.
  *
- * Tokens only live here. Component rules in app.css consume them and never hardcode a colour.
+ * Fonts load from Google Fonts so the dependency travels with the stylesheet (a consuming instance that
+ * imports this CSS gets them too). Tokens only live here; component rules in app.css consume them.
  */
+@import url("https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
 :root {
-  /* Ground and surfaces, cool and value-adjusted (not pure white, not grey). */
-  --lh-bg: #e9eeeb;
-  --lh-surface: #fbfcfb;
-  --lh-surface-sunk: #f1f5f3;
-  --lh-line: #d4ddd9;
-  --lh-line-soft: #e3eae7;
+  /* Warm paper ground and surfaces. */
+  --lh-bg: #f4f1ea;
+  --lh-bg-2: #ece7dc;
+  --lh-surface: #fbfaf6;
+  --lh-surface-sunk: #f2eee5;
+  --lh-line: #ded7c8;
+  --lh-line-soft: #ece7dc;
+  --lh-line-strong: #cfc7b4;
 
   /* Ink. */
-  --lh-ink: #222b29;
-  --lh-ink-soft: #5a6663;
-  --lh-ink-faint: #8a9591;
+  --lh-ink: #23211c;
+  --lh-ink-soft: #5a554a;
+  --lh-ink-faint: #938c7d;
 
-  /* The one accent: muted teal. Soft variant for active/hover fills. */
-  --lh-primary: #3e7c74;
-  --lh-primary-strong: #2f615b;
-  --lh-primary-soft: #e2ece9;
+  /* The accent: expressway-sign green. Correct answers read in the same green. */
+  --lh-primary: #1f6b4a;
+  --lh-primary-strong: #124e35;
+  --lh-primary-soft: #e4efe7;
+  --lh-primary-line: #a9d3bc;
+  --lh-ok: #1f6b4a;
+  --lh-ok-soft: #e4efe7;
 
-  /* Verdict colours, value-adjusted chromatic (sage for correct, clay for incorrect). */
-  --lh-ok: #4e8a6b;
-  --lh-ok-soft: #e3efe8;
-  --lh-bad: #b5654c;
-  --lh-bad-soft: #f3e6e0;
+  /* Incorrect answers: crimson. */
+  --lh-bad: #a8301f;
+  --lh-bad-soft: #f9e7e2;
+  --lh-bad-line: #e4b3a6;
+
+  /* Blue: a quiet info accent for AI explanation / generated reading blocks. */
+  --lh-blue: #1d4f86;
+  --lh-blue-soft: #e6eef8;
+  --lh-blue-line: #aac6e6;
+
+  /* Dark blueprint surface for source code panels. */
+  --lh-code-bg: #0f2c22;
+  --lh-code-border: #1d4636;
+  --lh-code-ink: #cce8da;
+  --lh-code-faint: #5fae8b;
 
   /* Type. */
-  --lh-font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Pretendard",
-    "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --lh-font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Consolas",
-    "D2Coding", "Noto Sans Mono CJK KR", monospace;
+  --lh-font-display: "Gowun Batang", serif;
+  --lh-font-ui: "IBM Plex Sans KR", ui-sans-serif, system-ui, "Apple SD Gothic Neo",
+    "Malgun Gothic", sans-serif;
+  --lh-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Consolas", monospace;
 
-  /* Shape and depth. Rounded and soft. */
-  --lh-r: 12px;
-  --lh-r-sm: 7px;
-  --lh-shadow: 0 1px 2px rgba(34, 43, 41, 0.04), 0 4px 16px rgba(34, 43, 41, 0.06);
-  --lh-shadow-sm: 0 1px 2px rgba(34, 43, 41, 0.05);
+  /* Shape and depth: rounded, soft, warm shadow. */
+  --lh-r: 16px;
+  --lh-r-sm: 10px;
+  --lh-r-xs: 7px;
+  --lh-shadow: 0 1px 2px rgba(40, 35, 25, 0.04), 0 8px 24px -12px rgba(40, 35, 25, 0.16);
+  --lh-shadow-sm: 0 1px 2px rgba(40, 35, 25, 0.05);
 
   /* Spacing scale. */
   --lh-s1: 4px;
