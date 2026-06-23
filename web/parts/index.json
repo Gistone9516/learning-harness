@@ -9,6 +9,24 @@
       "deps": [],
       "ai": false,
       "constraints": ["subject-agnostic", "token0", "binary"]
+    },
+    {
+      "id": "codeproj",
+      "dir": "parts/codeproj",
+      "entry": "parts/codeproj/codeproj.ts",
+      "what": "AI-generated project, read-only comprehension with session-based click explanations.",
+      "deps": [],
+      "ai": true,
+      "constraints": ["subject-agnostic", "secrets-gated", "session-resume"]
+    },
+    {
+      "id": "conceptprob",
+      "dir": "parts/conceptprob",
+      "entry": "parts/conceptprob/conceptprob.ts",
+      "what": "area->concept->problem study: AI concept reading + deterministically graded linked problems.",
+      "deps": [],
+      "ai": true,
+      "constraints": ["subject-agnostic", "secrets-gated", "token0-grading", "binary"]
     }
   ]
 }

@@ -37,3 +37,5 @@ A top-of-file doc comment with these fields:
 The machine-readable list is `index.json`. Current parts:
 
 - `sheet` — interactive spreadsheet with a formula engine and deterministic grading.
+- `codeproj` — AI-generated project, read-only comprehension with click-to-explain (session resume).
+- `conceptprob` — area→concept→problem: AI concept reading + deterministically graded problems.
