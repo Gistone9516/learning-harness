@@ -1,10 +1,10 @@
-// WHAT: area->concept->problem study: AI concept reading + deterministically graded linked problems.
-// DEPS: web/src/ai/client (AiSession, AiClient, AiResponse), web/src/grade/grade (score, AnswerSpec).
-// INPUT: injected areas [{key,label,icon?,aliases?}] + concept outline [{concept_id,title}] per area.
+// WHAT: area->concept->problem study: concept reading (pre-baked or AI) + deterministically graded problems.
+// DEPS: web/src/ai/client (AiSession, AiClient, AiResponse), web/src/grade/grade (score, AnswerSpec). Markdown render is hand-rolled (no dep).
+// INPUT: injected areas [{key,label,icon?,aliases?}] + concept outline [{concept_id,title}] per area + optional pre-baked concepts {concept_id: GeneratedConcept}.
 // EVENTS: concept-read flag and per-problem verdicts {module:"conceptprob",item_id,read?|verdict?,ts}.
-// AI: yes -- concept+problem generation (POST /ai new session) + click-to-deepen (POST /ai resume). Grading is token 0.
+// AI: optional -- pre-baked concepts render+grade with zero AI (offline); with a session, missing concepts generate live (POST /ai) and deepen resumes. Grading is always token 0.
 // CONSTRAINTS: subject-agnostic, secrets-gated, token0-grading, binary.
-// DEMO: mountConceptprob(el, {session, areas, conceptOutline}) with a canned GeneratedConcept (no live AI).
+// DEMO: mountConceptprob(el, {session:null, areas, conceptOutline, concepts}) renders + grades fully offline (no live AI).
 
 import { AiSession, type AiClient, type AiResponse } from "../../src/ai/client";
 import { score, type AnswerSpec, type ScoreInput } from "../../src/grade/grade";
@@ -223,15 +223,183 @@ function saveProgress(subjectKey: string, record: ProgressRecord): void {
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 
-/** Minimal read-only markdown-ish renderer: renders body text into a <div> with basic formatting. */
+/** Escape HTML so authored/AI markdown can never inject raw tags (XSS-safe rendering). */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Slugify a heading into an anchor id (keeps Korean; spaces/punctuation become single dashes). */
+function slugify(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Inline formatting on already-escaped text: code spans, bold, italic. Only our own tags are added. */
+function inlineMd(escaped: string): string {
+  const codes: string[] = [];
+  let s = escaped.replace(/`([^`]+)`/g, (_m, c: string) => {
+    codes.push(c);
+    return `\uE000${codes.length - 1}\uE001`;
+  });
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  s = s.replace(/\uE000(\d+)\uE001/g, (_m, i: string) => `<code>${codes[+i]}</code>`);
+  return s;
+}
+
+/** Split a markdown table row into trimmed cells. */
+function splitTableRow(line: string): string[] {
+  return line
+    .replace(/^\s*\|?/, "")
+    .replace(/\|?\s*$/, "")
+    .split("|")
+    .map((c) => c.trim());
+}
+
+function isTableSeparator(line: string | undefined): boolean {
+  return !!line && /-/.test(line) && /^\s*\|?[\s:|-]+\|?\s*$/.test(line);
+}
+
+/**
+ * Hand-rolled minimal Markdown renderer (no dependency, XSS-safe). Covers the subset study content
+ * needs: headings (with anchor ids for retrace), fenced code blocks, GFM pipe tables, lists, and
+ * paragraphs with inline bold/italic/code. Headings carry slug ids so `links.concept_ref` resolves.
+ */
 function renderBody(container: HTMLElement, body: string): void {
   container.innerHTML = "";
-  const pre = document.createElement("pre");
-  pre.className = "lh-concept-body";
-  pre.style.whiteSpace = "pre-wrap";
-  pre.style.wordBreak = "break-word";
-  pre.textContent = body;
-  container.appendChild(pre);
+  const lines = body.split(/\r?\n/);
+  const frag = document.createDocumentFragment();
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // fenced code block
+    const fence = line.match(/^```(\w+)?\s*$/);
+    if (fence) {
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+        buf.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence
+      const pre = document.createElement("pre");
+      pre.className = "lh-md-pre";
+      const code = document.createElement("code");
+      if (fence[1]) code.dataset["lang"] = fence[1];
+      code.textContent = buf.join("\n");
+      pre.appendChild(code);
+      frag.appendChild(pre);
+      continue;
+    }
+
+    // heading (with anchor id)
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      const tag = h[1].length <= 2 ? "h3" : "h4";
+      const elH = document.createElement(tag);
+      elH.className = "lh-md-h";
+      elH.id = slugify(h[2]);
+      elH.innerHTML = inlineMd(escapeHtml(h[2].trim()));
+      frag.appendChild(elH);
+      i++;
+      continue;
+    }
+
+    // GFM pipe table
+    if (line.includes("|") && isTableSeparator(lines[i + 1])) {
+      const headerCells = splitTableRow(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
+      const table = document.createElement("table");
+      table.className = "lh-md-table";
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      for (const c of headerCells) {
+        const th = document.createElement("th");
+        th.innerHTML = inlineMd(escapeHtml(c));
+        htr.appendChild(th);
+      }
+      thead.appendChild(htr);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        for (const c of r) {
+          const td = document.createElement("td");
+          td.innerHTML = inlineMd(escapeHtml(c));
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      const wrap = document.createElement("div");
+      wrap.className = "lh-md-table-wrap";
+      wrap.appendChild(table);
+      frag.appendChild(wrap);
+      continue;
+    }
+
+    // unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      const ul = document.createElement("ul");
+      ul.className = "lh-md-ul";
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const li = document.createElement("li");
+        li.innerHTML = inlineMd(escapeHtml(lines[i].replace(/^\s*[-*]\s+/, "")));
+        ul.appendChild(li);
+        i++;
+      }
+      frag.appendChild(ul);
+      continue;
+    }
+
+    // ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const ol = document.createElement("ol");
+      ol.className = "lh-md-ol";
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        const li = document.createElement("li");
+        li.innerHTML = inlineMd(escapeHtml(lines[i].replace(/^\s*\d+\.\s+/, "")));
+        ol.appendChild(li);
+        i++;
+      }
+      frag.appendChild(ol);
+      continue;
+    }
+
+    // blank line
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // paragraph: accumulate until a blank line or the next block start
+    const para: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !/^(#{1,6}\s|```|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i]) &&
+      !(lines[i].includes("|") && isTableSeparator(lines[i + 1]))
+    ) {
+      para.push(lines[i]);
+      i++;
+    }
+    const p = document.createElement("p");
+    p.className = "lh-md-p";
+    p.innerHTML = inlineMd(escapeHtml(para.join(" ")));
+    frag.appendChild(p);
+  }
+
+  container.appendChild(frag);
 }
 
 /** Render a single problem block and return the answer submission handler. */
@@ -254,7 +422,21 @@ function renderProblem(
       : typeof problem.front["prompt"] === "string"
         ? problem.front["prompt"]
         : JSON.stringify(problem.front);
-  frontEl.textContent = frontText as string;
+  const promptEl = document.createElement("div");
+  promptEl.className = "lh-problem-prompt";
+  promptEl.textContent = frontText as string;
+  frontEl.appendChild(promptEl);
+
+  // Optional code block (output-prediction / SQL problems): preserve whitespace in a mono block.
+  if (typeof problem.front["code"] === "string" && (problem.front["code"] as string).trim() !== "") {
+    const pre = document.createElement("pre");
+    pre.className = "lh-problem-code";
+    const code = document.createElement("code");
+    if (typeof problem.front["lang"] === "string") code.dataset["lang"] = problem.front["lang"] as string;
+    code.textContent = problem.front["code"] as string;
+    pre.appendChild(code);
+    frontEl.appendChild(pre);
+  }
   wrapper.appendChild(frontEl);
 
   // Build answer inputs
@@ -329,9 +511,13 @@ function renderProblem(
 // ── DOM mount ─────────────────────────────────────────────────────────────────
 
 export interface ConceptprobProps {
-  session: AiSession | AiClient;
+  // Live AI session (or a plain client). null = no AI: pre-baked concepts only, deepen disabled.
+  session: AiSession | AiClient | null;
   areas: AreaDef[];
   conceptOutline: Record<string, ConceptSeed[]>;
+  // Pre-baked concepts (concept_id -> verified GeneratedConcept). Rendered/graded with zero AI.
+  // Used before any live generation; with all concepts pre-baked the part runs fully offline.
+  concepts?: Record<string, GeneratedConcept>;
   subjectKey?: string;
   onProgress?: (record: ProgressRecord) => void;
 }
@@ -345,12 +531,15 @@ export function mountConceptprob(
   props: ConceptprobProps,
 ): void {
   const { areas, conceptOutline, subjectKey = "demo", onProgress } = props;
+  const prebaked = props.concepts ?? {};
 
-  // Normalize session: if given a plain AiClient, wrap it in an AiSession
-  const session =
-    props.session instanceof AiSession
-      ? props.session
-      : new AiSession(props.session as AiClient);
+  // Normalize session: wrap a plain AiClient in an AiSession; null stays null (no-AI / pre-baked mode).
+  const session: AiSession | null =
+    props.session == null
+      ? null
+      : props.session instanceof AiSession
+        ? props.session
+        : new AiSession(props.session as AiClient);
 
   container.innerHTML = "";
   container.className = "lh-conceptprob";
@@ -451,9 +640,14 @@ export function mountConceptprob(
     deepenSection.style.display = "none";
     statusEl.textContent = "개념 불러오는 중...";
 
-    let concept = cache.get(conceptId);
+    // Pre-baked (verified) concept wins; fall back to the session cache; generate live only as a last resort.
+    let concept = cache.get(conceptId) ?? prebaked[conceptId];
 
     if (!concept) {
+      if (!session) {
+        statusEl.textContent = "이 개념은 아직 준비되지 않았습니다.";
+        return;
+      }
       const { concept: generated } = await generateConcept(session, {
         area: areaKey,
         concept_id: conceptId,
@@ -477,9 +671,10 @@ export function mountConceptprob(
 
     statusEl.textContent = "";
 
-    // Render body
+    // Render body. The title anchors the concept id so a problem's `links.concept_ref` retrace resolves.
     const bodyHeader = document.createElement("h2");
     bodyHeader.className = "lh-concept-title";
+    bodyHeader.id = conceptId;
     bodyHeader.textContent = concept.title;
     bodySection.appendChild(bodyHeader);
 
@@ -498,7 +693,8 @@ export function mountConceptprob(
     saveProgress(subjectKey, readRecord);
     onProgress?.(readRecord);
 
-    // Deepen controls
+    // Deepen controls — live AI only. With no session (pre-baked / offline) the section stays hidden.
+    if (session) {
     deepenSection.style.display = "";
     deepenSection.innerHTML = "";
 
@@ -548,6 +744,9 @@ export function mountConceptprob(
         deepenOut.textContent = res.ok ? res.text : `오류: ${res.error ?? "알 수 없음"}`;
       });
     });
+    } else {
+      deepenSection.style.display = "none";
+    }
 
     // Render problems
     if (concept.problems.length > 0) {

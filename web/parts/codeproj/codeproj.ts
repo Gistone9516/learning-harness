@@ -1,10 +1,10 @@
 // WHAT: AI-generated project, read-only comprehension with session-based click explanations.
 // DEPS: web/src/ai (ai_server client). No npm UI libs; tree and viewer are hand-rolled DOM.
-// INPUT: { topic: string; scale: "small"|"medium"|"large"; seed?: string } — all injected, no subject literal.
+// INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
 // EVENTS: file-seen flags (Set<string> per path) emitted via onFileSeen callback.
-// AI: yes — generation (/ai new session, force_json) + explanations (/ai resume same session).
+// AI: optional — with a session: generation (/ai new session, force_json) + explanations (/ai resume). With session:null: read a pre-baked project offline (generate/explain hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
-// DEMO: mountCodeproj(el, { session, project }) with a canned GeneratedProject (no live AI).
+// DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
 
 import { AiSession, type AiClient } from "../../src/ai/client";
 
@@ -42,7 +42,8 @@ export interface GenerateInput {
 }
 
 export interface CodeprojProps {
-  session: AiSession;
+  // Live AI session, or null for offline reading of a pre-baked `project` (generation/explain disabled).
+  session: AiSession | null;
   project?: GeneratedProject;
   onFileSeen?: (path: string) => void;
 }
@@ -348,9 +349,15 @@ export function mountCodeproj(
   body.appendChild(mainArea);
   container.appendChild(body);
 
+  // No AI session: reading still works, but the explain controls have nothing to call — hide them.
+  if (!session) {
+    lensBar.style.display = "none";
+    explainArea.style.display = "none";
+  }
+
   // ── Generate panel (shown when no project injected) ──────────────────────────
 
-  if (!currentProject) {
+  if (!currentProject && session) {
     const generatePanel = el("div", "lh-cp-generate-panel");
     const topicLabel = el("label", "", "주제");
     const topicInput = el("input", "lh-cp-topic-input");
@@ -413,6 +420,8 @@ export function mountCodeproj(
     generatePanel.appendChild(generateBtn);
     generatePanel.appendChild(generateStatus);
     container.insertBefore(generatePanel, body);
+  } else if (!currentProject) {
+    summaryEl.textContent = "표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).";
   } else {
     loadProject(currentProject);
   }
@@ -484,7 +493,7 @@ export function mountCodeproj(
   // ── Explain button ───────────────────────────────────────────────────────────
 
   explainBtn.addEventListener("click", async () => {
-    if (!selectedPath) return;
+    if (!selectedPath || !session) return;
     explainBtn.disabled = true;
     explainOutput.textContent = "설명을 불러오는 중...";
 

@@ -46,19 +46,25 @@ learner is the *only* correct source of subject — there is no default to reach
 ## Per-part quickstart
 
 Mount everything through the shell: set `globalThis.LH_CONFIG` to an `AppConfig`
-(`{ part, data, ai? }`) and the shell mounts the named part (`web/src/shell.ts`). The AI parts need an
-`ai` block pointing at a running `ai_server` (`web-contract.md` §2).
+(`{ part, data, ai? }`) and the shell mounts the named part (`web/src/shell.ts`).
+
+**Two content modes (they coexist).** Either generate content live (provide `ai`, ask intent first) or
+**inject verified pre-baked content** and omit `ai` to run fully offline. Pre-baked is the safer default
+for a curated study set: author and review the content once, then serve it with deterministic grading and
+zero AI at study time. Intent-first (above) governs the live path only; pre-baked content is already
+decided.
 
 - **`sheet`** — fully deterministic, no AI needed. Inject a `SheetProblem` (prompt, grid, editable /
   target cells, expected values, optional `require_formula`). Ask: which spreadsheet skill and at what
   range. Grading is the formula engine plus the grader port.
-- **`codeproj`** — AI-generated project for top-down code reading. Ask intent, then `generate` a
-  project at the chosen scale; the learner browses the tree and clicks lines to `explain`. One AI
-  session is loaded once and resumed for every explanation (cheap follow-ups). Deterministic
-  navigation; AI only for generate / explain.
-- **`conceptprob`** — area to concept to problem. Inject the `areas` taxonomy and concept outline from
-  config; `generate` a concept on demand, optionally `deepen` it. Problems generated alongside carry a
-  `CardDef`-compatible `answer_spec`, so they are graded deterministically — not by the AI.
+- **`codeproj`** — top-down code reading. Either inject a pre-baked `project` (offline reading; the
+  explain controls hide) or, with `ai`, `generate` one at the chosen scale and let the learner click
+  lines to `explain` (one session, loaded once then resumed). Navigation is deterministic.
+- **`conceptprob`** — area to concept to problem. Inject the `areas` taxonomy and concept outline. Either
+  inject pre-baked `concepts` (`{concept_id: GeneratedConcept}`, rendered + graded offline) or, with
+  `ai`, `generate` a concept on demand and optionally `deepen` it. Problems carry a `CardDef`-compatible
+  `answer_spec`, so they grade deterministically — never by the AI. Concept bodies are Markdown
+  (headings, tables, code); a problem `front` may include a `code` block for output-prediction / SQL.
 
 ## Guardrails the AI must honour
 

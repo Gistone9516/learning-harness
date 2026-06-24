@@ -107,6 +107,7 @@ The web consumes the **same injection source** as the bot (injection-interface),
 - The app loads a **SubjectProfile-equivalent** from the subject's `config` (the web analog of `bot/subject.py`): `areas` taxonomy `[{key,label,icon?,aliases?}]`, `persona`, AI `tasks` templates (e.g. concept-generation, project-generation roles/wording), `output_lang` (default Korean), and the enabled parts list.
 - `areas` drives the concept-problem index (§ web-conceptprob). All learner-facing copy and domain wording come from config; web code carries none.
 - Problems/content data (where injected rather than generated) follow `CardDef` (core SoT §1).
+- **AI is optional for the AI parts.** Content may be **pre-baked** (verified and injected) instead of generated: `conceptprob` accepts `concepts` and `codeproj` accepts a `project`. With content pre-baked, a part mounts with **no `ai_server`** (`ai` omitted) and runs fully offline — deterministic grading and navigation are token 0 (§3, §7). Live generation (and its §6.1 intent-first rule) applies only when a session is configured.
 
 ---
 

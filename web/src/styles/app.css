@@ -489,6 +489,90 @@ body::before {
   padding: var(--lh-s3);
 }
 
+/* ---- Rendered Markdown inside a concept body (renderBody output) ---- */
+.lh-concept-body-content .lh-md-h {
+  font-family: var(--lh-font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: var(--lh-s5) 0 var(--lh-s2);
+  scroll-margin-top: var(--lh-s5);
+}
+.lh-concept-body-content h3.lh-md-h {
+  font-size: 18px;
+}
+.lh-concept-body-content h4.lh-md-h {
+  font-size: 15px;
+  color: var(--lh-ink-soft);
+}
+.lh-concept-body-content .lh-md-p {
+  margin: var(--lh-s3) 0;
+}
+.lh-concept-body-content .lh-md-ul,
+.lh-concept-body-content .lh-md-ol {
+  margin: var(--lh-s3) 0;
+  padding-left: var(--lh-s5);
+}
+.lh-concept-body-content .lh-md-ul li,
+.lh-concept-body-content .lh-md-ol li {
+  margin: var(--lh-s1) 0;
+}
+.lh-concept-body-content code {
+  font-family: var(--lh-font-mono);
+  font-size: 0.88em;
+  background: var(--lh-surface-sunk);
+  border: 1px solid var(--lh-line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.lh-md-table-wrap {
+  overflow-x: auto;
+  margin: var(--lh-s3) 0;
+  border: 1px solid var(--lh-line);
+  border-radius: var(--lh-r-sm);
+}
+.lh-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  background: var(--lh-surface);
+}
+.lh-md-table th {
+  background: var(--lh-surface-sunk);
+  text-align: left;
+  font-weight: 700;
+  color: var(--lh-ink-soft);
+  padding: var(--lh-s2) var(--lh-s3);
+  border-bottom: 1px solid var(--lh-line-strong);
+}
+.lh-md-table td {
+  padding: var(--lh-s2) var(--lh-s3);
+  border-bottom: 1px solid var(--lh-line);
+}
+.lh-md-table tr:last-child td {
+  border-bottom: none;
+}
+/* Fenced code in a concept body and the code block on a problem: dark blueprint, mono. */
+.lh-md-pre,
+.lh-problem-code {
+  margin: var(--lh-s3) 0;
+  padding: var(--lh-s3) var(--lh-s4);
+  background: var(--lh-code-bg);
+  border: 1px solid var(--lh-code-border);
+  border-radius: var(--lh-r-sm);
+  overflow-x: auto;
+}
+.lh-md-pre code,
+.lh-problem-code code {
+  font-family: var(--lh-font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--lh-code-ink);
+  white-space: pre;
+}
+.lh-problem-prompt {
+  margin-bottom: var(--lh-s2);
+}
+
 /* ---- Narrow screens: collapse the two-pane parts to a single column ---- */
 @media (max-width: 720px) {
   #app {

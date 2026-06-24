@@ -178,12 +178,13 @@ cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session,
   layer with a mocked `invoke`). Discord I/O and live AI are exercised only against a running bot.
 
 ```bash
-cd web && npm install && npm test     # 98 headless web tests (grade parity, parts, ai client, subject-agnostic guard)
+cd web && npm install && npm test     # 105 headless web tests (grade parity, parts, ai client, pre-baked offline mount, subject-agnostic guard)
 cd web && npm run build               # tsc --noEmit + vite production build
 ```
 - The web kit is verified headless with vitest (the TS grader is checked against engine-generated golden
-  vectors for parity; the AI client runs against a mock `/ai`, no live claude). For a local visual check,
-  `cd web && npm run dev` serves a dev fixture at `localhost:5173`.
+  vectors for parity; the AI client runs against a mock `/ai`, no live claude; a jsdom gate mounts a
+  pre-baked concept with no session and grades it with zero AI). For a local visual check,
+  `cd web && npm run dev` serves a dev fixture at `localhost:5173` (`#conceptprob` for the offline module).
 
 ## 6. Current status
 
@@ -213,9 +214,11 @@ cd web && npm run build               # tsc --noEmit + vite production build
 - Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with three
   parts (sheet, codeproj, conceptprob), a shared engine grader port (golden-vector parity with the Python
   engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
-  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 98 web tests green.
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 105 web tests green.
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
-  with no Discord dependency.
+  with no Discord dependency. **AI is optional**: the AI parts also run from **pre-baked verified content**
+  injected by the instance (`concepts` / `project`) — mounting with no `ai_server` and grading fully
+  offline (token 0); concept bodies render Markdown (headings, tables, code) via a hand-rolled renderer.
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), live AI smoke
   (needs the `claude` CLI on PATH), and wiring the web kit into a consuming instance (instance config, not
   kit work).
