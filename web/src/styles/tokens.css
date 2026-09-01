@@ -1,67 +1,89 @@
 /*
  * Design tokens for the learning-harness web kit.
  *
- * Identity: a warm "study compendium" — the look of a printed research reader on warm paper. Quiet but
- * not cold: an expressway-sign green carries the accent, a serif display gives the headings their voice,
- * and precision surfaces (cells, code, data) stay in a mono face. The kit is subject-agnostic, so the
- * palette carries no topic flavour; it only has to make material readable and the binary grade clear.
+ * Identity: a clean, modern study product — cool paper-gray ground, white floating cards, a calm
+ * indigo-blue accent, and Pretendard for a crisp Korean sans voice. Precision surfaces (code, data)
+ * use a system mono. The kit is subject-agnostic, so the palette carries no topic flavour; it only has
+ * to make material readable and the binary grade clear (correct = green, incorrect = red).
  *
- * Fonts load from Google Fonts so the dependency travels with the stylesheet (a consuming instance that
- * imports this CSS gets them too). Tokens only live here; component rules in app.css consume them.
+ * Token names are stable so component rules in app.css (and the sheet/codeproj parts) keep working;
+ * only the values change. Fonts load from a CDN so the dependency travels with the stylesheet.
  */
-@import url("https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css");
 
 :root {
-  /* Warm paper ground and surfaces. */
-  --lh-bg: #f4f1ea;
-  --lh-bg-2: #ece7dc;
-  --lh-surface: #fbfaf6;
-  --lh-surface-sunk: #f2eee5;
-  --lh-line: #ded7c8;
-  --lh-line-soft: #ece7dc;
-  --lh-line-strong: #cfc7b4;
+  /* Cool paper ground and surfaces. */
+  --lh-bg: #f4f5f8;
+  --lh-bg-2: #eef0f3;
+  --lh-surface: #ffffff;
+  --lh-surface-sunk: #f6f7f9;
+  --lh-surface-soft: #fbfbfc;
+  --lh-line: #e7eaee;
+  --lh-line-soft: #eef0f3;
+  --lh-line-strong: #e4e7ec;
 
   /* Ink. */
-  --lh-ink: #23211c;
-  --lh-ink-soft: #5a554a;
-  --lh-ink-faint: #938c7d;
+  --lh-ink: #1a1d21;
+  --lh-ink-soft: #3d434c;
+  --lh-ink-mid: #525960;
+  --lh-ink-faint: #9aa1ac;
+  --lh-ink-faint-2: #a6adb8;
 
-  /* The accent: expressway-sign green. Correct answers read in the same green. */
-  --lh-primary: #1f6b4a;
-  --lh-primary-strong: #124e35;
-  --lh-primary-soft: #e4efe7;
-  --lh-primary-line: #a9d3bc;
-  --lh-ok: #1f6b4a;
-  --lh-ok-soft: #e4efe7;
+  /* The accent: a calm indigo-blue. */
+  --lh-primary: #2a6fdb;
+  --lh-primary-strong: #1f5bbf;
+  --lh-primary-soft: #eaf2fd;
+  --lh-primary-line: #bcd3f5;
 
-  /* Incorrect answers: crimson. */
-  --lh-bad: #a8301f;
-  --lh-bad-soft: #f9e7e2;
-  --lh-bad-line: #e4b3a6;
+  /* Correct answers read green; incorrect read red. */
+  --lh-ok: #1f8a5b;
+  --lh-ok-strong: #15633f;
+  --lh-ok-soft: #e7f4ed;
+  --lh-ok-line: #aadcc3;
+  --lh-bad: #d64545;
+  --lh-bad-soft: #fce9e9;
+  --lh-bad-line: #f0bdbd;
 
-  /* Blue: a quiet info accent for AI explanation / generated reading blocks. */
-  --lh-blue: #1d4f86;
-  --lh-blue-soft: #e6eef8;
-  --lh-blue-line: #aac6e6;
+  /* Blue: reused for the accent family (info / links / retrace). */
+  --lh-blue: #2a6fdb;
+  --lh-blue-soft: #eaf2fd;
+  --lh-blue-line: #bcd3f5;
 
-  /* Dark blueprint surface for source code panels. */
-  --lh-code-bg: #0f2c22;
-  --lh-code-border: #1d4636;
-  --lh-code-ink: #cce8da;
-  --lh-code-faint: #5fae8b;
+  /* Code panels: light card with a quiet header (matches the clean ground). */
+  --lh-code-bg: #fbfbfc;
+  --lh-code-head: #f6f7f9;
+  --lh-code-border: #e7eaee;
+  --lh-code-ink: #2d333b;
+  --lh-code-faint: #8a929e;
+  /* Syntax tokens — calm, value-adjusted (not neon), readable on the light code ground. */
+  --lh-tok-kw: #8a52b6;    /* keyword — muted purple */
+  --lh-tok-type: #2b7f88;  /* builtin/type — muted teal */
+  --lh-tok-str: #3f8352;   /* string — muted green */
+  --lh-tok-num: #a06a24;   /* number — muted amber */
+  --lh-tok-fn: #3a6aad;    /* function call — muted blue */
+  --lh-tok-com: #8a929e;   /* comment — code faint gray */
 
-  /* Type. */
-  --lh-font-display: "Gowun Batang", serif;
-  --lh-font-ui: "IBM Plex Sans KR", ui-sans-serif, system-ui, "Apple SD Gothic Neo",
-    "Malgun Gothic", sans-serif;
-  --lh-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Consolas", monospace;
+  /* Type — Pretendard everywhere; titles are heavy weights, not a separate serif. */
+  --lh-font-display: "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --lh-font-ui: "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --lh-font-mono: "SF Mono", ui-monospace, Menlo, "Cascadia Code", "Consolas", monospace;
 
-  /* Shape and depth: rounded, soft, warm shadow. */
-  --lh-r: 16px;
-  --lh-r-sm: 10px;
-  --lh-r-xs: 7px;
-  --lh-shadow: 0 1px 2px rgba(40, 35, 25, 0.04), 0 8px 24px -12px rgba(40, 35, 25, 0.16);
-  --lh-shadow-sm: 0 1px 2px rgba(40, 35, 25, 0.05);
+  /* Shape and depth: rounded, soft, cool shadow. */
+  --lh-r: 18px;
+  --lh-r-sm: 12px;
+  --lh-r-xs: 9px;
+  --lh-r-pill: 99px;
+  --lh-shadow: 0 10px 36px rgba(20, 30, 50, 0.07);
+  --lh-shadow-sm: 0 6px 20px rgba(20, 30, 50, 0.06);
+
+  /* Figures keep a light frame even in dark mode (diagrams read best on light). */
+  --lh-figbg: #ffffff;
+  /* Amber accent — the "반드시 외워야 할 것" memorize card. */
+  --lh-amber-bg: #fdf8ec;
+  --lh-amber-soft: #f6e6c2;
+  --lh-amber-line: #ecd7a6;
+  --lh-amber-ink: #9a6412;
+  --lh-amber-accent: #c9821a;
 
   /* Spacing scale. */
   --lh-s1: 4px;
@@ -70,4 +92,44 @@
   --lh-s4: 16px;
   --lh-s5: 24px;
   --lh-s6: 32px;
+}
+
+/*
+ * Dark theme. Same token names, dark values — every component styled through tokens flips
+ * automatically. Applied when the OS prefers dark (unless the user forced light via the toggle),
+ * or when the user forces dark (data-theme="dark"). Figures keep a light frame (--lh-figbg).
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --lh-bg: #14171c; --lh-bg-2: #1a1e24;
+    --lh-surface: #1c2129; --lh-surface-sunk: #232a33; --lh-surface-soft: #191d23;
+    --lh-line: #2b313b; --lh-line-soft: #242a33; --lh-line-strong: #333b46;
+    --lh-ink: #e8ebf0; --lh-ink-soft: #c4cad3; --lh-ink-mid: #a2abb6; --lh-ink-faint: #7b8592; --lh-ink-faint-2: #6f7883;
+    --lh-primary: #6f9eef; --lh-primary-strong: #8bb4f5; --lh-primary-soft: #1e2a3d; --lh-primary-line: #33475f;
+    --lh-ok: #46b483; --lh-ok-strong: #6fce9f; --lh-ok-soft: #14261e; --lh-ok-line: #2e5a44;
+    --lh-bad: #ef6b6b; --lh-bad-soft: #2c1a1c; --lh-bad-line: #5c3535;
+    --lh-blue: #6f9eef; --lh-blue-soft: #1e2a3d; --lh-blue-line: #33475f;
+    --lh-code-bg: #12151a; --lh-code-head: #1a1e24; --lh-code-border: #2b313b; --lh-code-ink: #d4dae3; --lh-code-faint: #7b8592;
+    --lh-tok-kw: #c99be6; --lh-tok-type: #6fd0d6; --lh-tok-str: #8fd19e; --lh-tok-num: #e0b877; --lh-tok-fn: #82aef0; --lh-tok-com: #7b8592;
+    --lh-shadow: 0 10px 36px rgba(0, 0, 0, 0.42); --lh-shadow-sm: 0 6px 20px rgba(0, 0, 0, 0.34);
+    --lh-figbg: #eef1f6;
+    --lh-amber-bg: #2a2418; --lh-amber-soft: #3a3220; --lh-amber-line: #4a3f26; --lh-amber-ink: #e6bd6a; --lh-amber-accent: #e0a944;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --lh-bg: #14171c; --lh-bg-2: #1a1e24;
+  --lh-surface: #1c2129; --lh-surface-sunk: #232a33; --lh-surface-soft: #191d23;
+  --lh-line: #2b313b; --lh-line-soft: #242a33; --lh-line-strong: #333b46;
+  --lh-ink: #e8ebf0; --lh-ink-soft: #c4cad3; --lh-ink-mid: #a2abb6; --lh-ink-faint: #7b8592; --lh-ink-faint-2: #6f7883;
+  --lh-primary: #6f9eef; --lh-primary-strong: #8bb4f5; --lh-primary-soft: #1e2a3d; --lh-primary-line: #33475f;
+  --lh-ok: #46b483; --lh-ok-strong: #6fce9f; --lh-ok-soft: #14261e; --lh-ok-line: #2e5a44;
+  --lh-bad: #ef6b6b; --lh-bad-soft: #2c1a1c; --lh-bad-line: #5c3535;
+  --lh-blue: #6f9eef; --lh-blue-soft: #1e2a3d; --lh-blue-line: #33475f;
+  --lh-code-bg: #12151a; --lh-code-head: #1a1e24; --lh-code-border: #2b313b; --lh-code-ink: #d4dae3; --lh-code-faint: #7b8592;
+  --lh-tok-kw: #c99be6; --lh-tok-type: #6fd0d6; --lh-tok-str: #8fd19e; --lh-tok-num: #e0b877; --lh-tok-fn: #82aef0; --lh-tok-com: #7b8592;
+  --lh-shadow: 0 10px 36px rgba(0, 0, 0, 0.42); --lh-shadow-sm: 0 6px 20px rgba(0, 0, 0, 0.34);
+  --lh-figbg: #eef1f6;
+  --lh-amber-bg: #2a2418; --lh-amber-soft: #3a3220; --lh-amber-line: #4a3f26; --lh-amber-ink: #e6bd6a; --lh-amber-accent: #e0a944;
 }

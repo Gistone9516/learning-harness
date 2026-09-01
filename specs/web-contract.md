@@ -83,7 +83,42 @@ type AiResponse = {
 3. Subsequent calls (click-to-explain, deepen) send that `session_id` → `--resume`, so only the small targeted ask is added; the content is not re-sent by the client.
 4. The session is volatile (no server persistence); a new generation starts a new session. The web client owns the id for the lifetime of that artifact view.
 
-**Config (server env / `.env`)** — `AI_SERVER_TOKEN` (required; server refuses to start without it), `AI_SERVER_HOST` (default `127.0.0.1`), `AI_SERVER_PORT` (default `8765`), `AI_SERVER_ORIGIN` (CORS, default `*`; token gates regardless). Remote access is via a tunnel in front of the local bind only.
+**Config (server env / `.env`)** — `AI_SERVER_TOKEN` (required; server refuses to start without it), `AI_SERVER_HOST` (default `127.0.0.1`), `AI_SERVER_PORT` (default `8765`), `AI_SERVER_ORIGIN` (CORS, default `*`; token gates regardless), `STATE_ROOT` (state folder to mount, §2.2; also accepted as the first CLI argument). Remote access is via a tunnel in front of the local bind only.
+
+**Session lifetime (no orphan processes)** — every `/ai` call runs a `claude -p` child. The server owns that child for its whole lifetime and terminates *and reaps* it on every exit path: normal return, timeout, error, task cancellation (a browser dropping the connection) and server shutdown. Implementation: `bot/session_guard.py` (registry + `track()` context manager + `shutdown_all()`), used by `ai.invoke`. Timeouts are split by call kind — a fresh session loading an artifact (`generate`) gets the long bound, a resumed follow-up (`followup`) a short one (`ai.TIMEOUT_BY_KIND`). `GET /sessions` (token-gated) reports in-flight calls, which is also how tests assert that nothing leaked.
+
+### 2.2 State store endpoints (records + derived index)
+
+Browsers cannot write files, and an operator AI cannot read `localStorage`. The same gated server therefore exposes a **generic record store** over a mounted state root, so instance state is both browser-writable and directly readable/writable as files. Unset `STATE_ROOT` → `503` with an explicit reason (never a silent failure).
+
+**Storage model** — one record is one file; a shared file is never appended to. The index is a pure **derivative** of the record files, so it cannot drift out of sync by construction:
+```
+<state_root>/<doc>.json                    doc: bounded settings (no accumulation)
+<state_root>/<coll>/<id>.json              record: envelope below
+<state_root>/<coll>/index.json             derived index: one entry per record, copied from `summary`
+```
+```ts
+type StateRecord<T = unknown> = {
+  schema_version: number; kind: string; id: string;
+  created_at: number; updated_at: number;
+  summary: Record<string, unknown>;   // small; copied verbatim into the index (≤ 4KB)
+  data: T;                            // payload; never read to list a collection
+};
+type IndexEntry = Omit<StateRecord, "data" | "schema_version">;
+```
+
+| Method | Path | Result |
+|---|---|---|
+| GET / PUT | `/state/doc/<name>` | `{ok, doc}` |
+| GET | `/state/<coll>` | `{ok, index}` |
+| GET / PUT / DELETE | `/state/<coll>/<id>` | `{ok, record}` / `{ok, entry}` / `{ok, deleted}` |
+| GET | `/state/<coll>/_verify` | `{ok, issues}` — index/record mismatches, no mutation |
+| POST | `/state/<coll>/_rebuild` | `{ok, count}` — regenerate the index from the files |
+
+- **Names** match `^[a-z0-9][a-z0-9-]{0,63}$`. The pattern excludes dots, slashes and underscores, which rules out path traversal and keeps `_verify`/`_rebuild` from ever shadowing a record id. Violations are `400` at the boundary.
+- **Durability** — records and the index are written to a temp file and `os.replace`d, so a crash never leaves a truncated file as the source of truth. The record is written before its index entry; `_rebuild` recovers the entry if the process dies between the two.
+- **Concurrency** — one lock per collection serialises a record write with its index update.
+- Subject-agnostic: collection names, record kinds and summary fields are chosen by the consuming instance. Reference implementation `bot/state_store.py` (pure file logic) + `ai_server.handle_state` (routing and locking).
 
 ---
 
@@ -111,9 +146,14 @@ The web consumes the **same injection source** as the bot (injection-interface),
 
 ---
 
-## 5. Progress store (localStorage, v1)
+## 5. Progress store
 
-- **Scope** — browser `localStorage`, namespaced per subject. No engine/`_state` sharing in v1 (decoupled by decision; hybrid is backlog).
+Two tiers, chosen per instance:
+
+- **Browser-only (v1 default)** — `localStorage` alone, as below. Nothing outside the browser can read it, so an instance that wants an operator AI to run on its records uses the tier below.
+- **File-backed source of truth (operator instances)** — records live under the state root through §2.2, and `localStorage` becomes an *offline buffer* rather than the truth: writes fall back to it when the server is unreachable and flush on the next successful call. The web reaches both through one `StoragePort` interface (adapters: state API, localStorage, buffered decorator), so parts never learn which medium answered. Pending writes are keyed one entry per record, never a growing array.
+
+- **Scope** — browser `localStorage`, namespaced per subject.
 - **Key scheme** — `lh:<subject>:<module>:<rest>` (e.g. `lh:demo:conceptprob:<area>/<concept>`).
 - **Record** — binary results plus light module state:
 ```ts
@@ -126,6 +166,14 @@ type ProgressRecord = {
 };
 ```
 - Writes are idempotent per `item_id`; aggregates (per area/concept mastery) are derived, not stored redundantly.
+
+### 5.1 Shell flows and the history dashboard
+
+`web/src/flow` holds the two flows the shell mounts around the parts; keeping them out of the parts is what lets a part stay a working unit on its own (§1).
+
+- `flow/study.ts` — **proposal → launch → generated project**. Proposals are records the operator AI writes; the learner picks one (or names a topic) and the generation form opens pre-filled. **Generation starts only on the learner's own action** — the operator's autonomy ends at writing a proposal, so nothing may auto-generate on load.
+- `flow/workspace.ts` — the archive: a generated project is stored as a record at generation time and reopened from there. Reopening is read-only and must work with no `ai_server` at all (§7).
+- `parts/dashboard` — study history, read from **index summaries only** (`history`, `progress`, `projects`), never by opening every record. Token 0: it renders what the store already derived, and computes no aggregate the store does not have.
 
 ---
 
@@ -153,3 +201,6 @@ The kit ships no subject, so the AI operating it **must elicit the learner's int
 - `subject_agnostic` — no subject literal in `web/` code (§0.1).
 - `parts_index` — every `parts/<id>/` has a header-standard entry and an `index.json` row; ids match.
 - `ai_client` — request/response shape, token header, session_id round-trip (against a mock `/ai`, no live claude).
+- `state_store` / `ai_server_state` (server side) — record CRUD, derived index, `_verify` drift detection and `_rebuild` repair, name validation at the boundary, atomic write leaving no partial file.
+- `session_lifecycle` (server side) — no orphan process on normal exit, timeout, error, cancellation or shutdown; split timeouts per call kind.
+- `storage_port` (web side) — adapter contracts, offline fallback, idempotent outbox flush.

@@ -14,10 +14,19 @@
       "id": "codeproj",
       "dir": "parts/codeproj",
       "entry": "parts/codeproj/codeproj.ts",
-      "what": "AI-generated project, read-only comprehension with session-based click explanations.",
+      "what": "AI-generated project, IDE-shaped read-only comprehension with session-based explanations and questions.",
       "deps": [],
       "ai": true,
       "constraints": ["subject-agnostic", "secrets-gated", "session-resume"]
+    },
+    {
+      "id": "dashboard",
+      "dir": "parts/dashboard",
+      "entry": "parts/dashboard/dashboard.ts",
+      "what": "Study history dashboard: sessions, reading progress and topic/stack history from index summaries.",
+      "deps": [],
+      "ai": false,
+      "constraints": ["subject-agnostic", "token0"]
     },
     {
       "id": "conceptprob",

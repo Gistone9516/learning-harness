@@ -38,6 +38,12 @@ type GeneratedProject = {
 
 ---
 
+### 1.1 Generation quality clause (mandatory)
+
+The generator preamble carries a fixed quality clause (`prompts.ts` `QUALITY_CLAUSE`), because the learner is reading this code *to learn from it*: code that teaches bad habits fails the module's purpose. It requires the generated project to imitate how professionals ship software in the chosen stack (conventional layout, naming, config separated from code, error handling, validation, logging, a test file, a README), to keep layers apart (entry point / domain / storage / config), to persist data as one record per file behind an index rather than appending to one growing file, and to avoid toy or textbook-abridged code. The clause is subject-agnostic; topic, scale and stack always arrive as injected input.
+
+---
+
 ## 2. Explanation contract (click → resume)
 
 Clicking a file, a symbol, or a line range requests a targeted explanation from the **same session** (so the codebase is not re-sent).
@@ -46,20 +52,45 @@ Clicking a file, a symbol, or a line range requests a targeted explanation from 
 ```ts
 type ExplainRequest = {
   target: { path: string; symbol?: string; lines?: [number, number] };
-  lens: "overview" | "libs_methods" | "flow" | "modify_tip";
+  lens: "overview" | "libs_methods" | "flow" | "modify_tip" | "concepts";
+};
+
+/** The learner's own question about the same target. Same resume path, same cost model. */
+type AskRequest = {
+  target: { path: string; symbol?: string; lines?: [number, number] };
+  question: string;      // passed through verbatim
 };
 ```
 - `overview` what this file/part does; `libs_methods` libraries/methods used and why; `flow` how it is called from input to output; `modify_tip` if you wanted to change this, what to touch.
-- **Response**: `text` (Markdown, in `output_lang`), rendered in the explanation pane. Tables in the text follow the kit table standard. Graceful on `ok:false`.
+- **`concepts`** answers in a fixed four-part shape — concept definition, general application, industry practice, how it is used in *this* project — so a line of code connects to the idea behind it. The prompt caps the third part at widely documented practice and forbids asserting unverified internals of a named company (hallucination guard).
+- **Line selection**: when the learner selects a line range in the code panel, `lines` is set and the quoted source of exactly that range is included, so the model sees the same thing the learner pointed at.
+- **Response**: `text` (Markdown, in `output_lang`), appended to the AI pane as one entry. Graceful on `ok:false` (a readable message, never a throw).
 
 ---
 
-## 3. UI
+## 3. UI — three panes, IDE shape
 
-- **Left**: file/folder tree (from `files[].path`), collapsible. Selecting a file loads it on the right.
-- **Right**: read-only code panel with syntax highlighting (CodeMirror, read-only mode). Clicking a symbol or selecting lines triggers §2 with the chosen `lens`; a lens menu offers overview/libs_methods/flow/modify_tip.
-- **Explanation pane**: streamed/rendered Markdown of the §2 response, anchored to the clicked target.
-- Korean UI from config/defaults (subject-agnostic).
+- **Left, files**: file/folder tree (from `files[].path`), collapsible, with a read marker per file and a seen/total counter.
+- **Centre, code**: read-only code with line numbers. Clicking a line selects it, shift-clicking extends the range; the selection is the target for §2. Clearing the selection returns the target to the whole file.
+- **Right, AI**: lens picker plus explain button, a thread of exchanges (explanations and questions in order), and a free-form question box at the bottom. With no session the pane is hidden entirely rather than left as dead controls, and reading keeps working.
+- Panes stack into one column on narrow screens. Korean UI from config/defaults (subject-agnostic).
+
+**Module layout** (one concern per file, so the view can change without touching prompts or transport): `model.ts` pure types/parse/tree, `prompts.ts` all wording including the quality clause and lens formats, `session.ts` the three AI calls, `view.ts` the three panel factories, `launcher.ts` the proposal and archive entry screen, `components/` the composed-answer block system (§3.2), `codeproj.ts` assembly plus the public surface.
+
+### 3.1 Code rendering — highlighting and scrap
+
+- **Syntax highlighting is dependency-free and lives in `web/src/highlight`**, shared by every part; `parts/conceptprob/highlight.ts` is a re-export of it, not a second implementation. No CDN, because the tool must work offline.
+- Five token classes only (keyword, string, comment, number, call). More classes means more colour and less legibility.
+- **Selection and syntax occupy different layers**: selection paints the background, syntax paints the glyphs, so neither can hide the other.
+- **Scrap**: several non-adjacent ranges, possibly across files, can be collected into one explanation target. The scrap set is what §2 sends; clearing it returns the target to the current file.
+
+### 3.2 Composed answers — the block system
+
+An explanation is not free prose. The model returns `{blocks: [...]}` and the renderer draws each block; a block type it does not know **degrades to plain text and is never dropped silently**.
+
+- `components/types.ts` is the type SoT: `KNOWN_BLOCKS` is the closed list the renderer handles — 24 types covering the 25 catalogue entries, since an inline and a block code reference are one `ref` type separated by the optional `lines` field.
+- `components/parse.ts` parses tolerantly (a malformed block becomes text, never an exception); `components/render.ts` builds the DOM; `components/catalog.ts` carries the per-type label and assembly rules.
+- Blocks that point into code (`ref`, `focus`, `related`, `next`) navigate the centre pane; that is the whole reason the system exists, so those types must keep working when a renderer changes.
 
 ---
 
@@ -87,7 +118,7 @@ The generator system preamble forces the §1 `GeneratedProject` JSON only (no pr
 
 `web/parts/codeproj/codeproj.ts` header (Web SoT §1):
 - `WHAT` AI-generated project, read-only comprehension with session-based click explanations.
-- `DEPS` shell + `web/src/ai` (ai_server client) + CodeMirror (read-only).
+- `DEPS` shell + `web/src/ai` (ai_server client) + `web/src/highlight` (own highlighter; no third-party editor, no CDN) + `web/src/storage` (record store port).
 - `INPUT` `{topic, scale, seed?}`; consumes `GeneratedProject`.
 - `EVENTS` file-seen flags (and, fast-follow, scored-task verdicts).
 - `AI` yes — generation (`/ai` new session) + explanations (`/ai` resume).

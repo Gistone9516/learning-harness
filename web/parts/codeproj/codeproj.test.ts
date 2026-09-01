@@ -21,6 +21,7 @@ function makeSession(send: (req: { prompt: string }) => AiResponse): AiSession {
   const client: AiClient = {
     ai: vi.fn().mockImplementation(async (req) => send(req)),
     health: vi.fn().mockResolvedValue(true),
+    problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
   };
   return new AiSession(client);
 }
@@ -195,6 +196,7 @@ describe("explain", () => {
         } satisfies AiResponse;
       }),
       health: vi.fn().mockResolvedValue(true),
+    problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
     };
     const session = new AiSession(client);
 
@@ -243,6 +245,7 @@ describe("explain", () => {
         return { ok: true, text: "ok", session_id: "s1", error: null } satisfies AiResponse;
       }),
       health: vi.fn().mockResolvedValue(true),
+    problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
     };
     const session = new AiSession(client);
 
@@ -263,6 +266,7 @@ describe("explain", () => {
         return { ok: true, text: "ok", session_id: "s1", error: null } satisfies AiResponse;
       }),
       health: vi.fn().mockResolvedValue(true),
+    problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
     };
     const session = new AiSession(client);
 

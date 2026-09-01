@@ -1,294 +1,58 @@
-// WHAT: AI-generated project, read-only comprehension with session-based click explanations.
-// DEPS: web/src/ai (ai_server client). No npm UI libs; tree and viewer are hand-rolled DOM.
+// WHAT: AI-generated project, IDE-shaped read-only comprehension with session-based explanations and questions.
+// DEPS: web/src/ai (ai_server client). No npm UI libs; tree, code panel and AI panel are hand-rolled DOM.
 // INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
-// EVENTS: file-seen flags (Set<string> per path) emitted via onFileSeen callback.
-// AI: optional — with a session: generation (/ai new session, force_json) + explanations (/ai resume). With session:null: read a pre-baked project offline (generate/explain hidden).
+// EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
+// AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
 // DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
+//
+// Layout is the three-pane IDE shape: files left, code centre, AI right. This file only assembles
+// the panels and routes events; the pure model, the prompts, the AI calls and the DOM panels each
+// live in their own module beside it.
 
-import { AiSession, type AiClient } from "../../src/ai/client";
+import { AiSession } from "../../src/ai/client";
+import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
+import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
+import { generateProject, explain, explainScraps, ask } from "./session";
+import { LENS_LABELS } from "./prompts";
+import { createAiPanel, createCodePanel, createFilePanel, el } from "./view";
+import { parseComposed } from "./components/parse";
+import { renderComposed, type RenderContext } from "./components/render";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface ProjectFile {
+export interface ExchangeEvent {
+  kind: "explain" | "ask";
+  lens?: Lens;
   path: string;
-  content: string;
-  lang?: string;
-}
-
-export interface GeneratedProject {
-  title: string;
-  summary: string;
-  files: ProjectFile[];
-  entrypoints?: string[];
-}
-
-export interface TreeNode {
-  name: string;
-  path: string;
-  isFile: boolean;
-  children: TreeNode[];
-}
-
-export interface ExplainRequest {
-  target: { path: string; symbol?: string; lines?: [number, number] };
-  lens: "overview" | "libs_methods" | "flow" | "modify_tip";
-}
-
-export interface GenerateInput {
-  topic: string;
-  scale: "small" | "medium" | "large";
-  seed?: string;
+  lines?: [number, number];
+  question?: string;
+  /** Number of collected regions, when the exchange was about a basket rather than one place. */
+  scrapCount?: number;
 }
 
 export interface CodeprojProps {
-  // Live AI session, or null for offline reading of a pre-baked `project` (generation/explain disabled).
+  // Live AI session, or null for offline reading of a pre-baked `project` (generation/AI disabled).
   session: AiSession | null;
   project?: GeneratedProject;
+  /** Pre-filled generation inputs (e.g. from an accepted proposal); the learner still starts it. */
+  initialInput?: Partial<GenerateInput>;
   onFileSeen?: (path: string) => void;
+  onProjectGenerated?: (project: GeneratedProject, input: GenerateInput) => void;
+  onExchange?: (event: ExchangeEvent) => void;
 }
 
-// ── Pure core ─────────────────────────────────────────────────────────────────
-
-/**
- * parseProject: tolerant JSON parse — strips markdown code fences, then JSON.parse.
- * Returns null if the text is unparseable or structurally invalid (missing title/summary/files).
- */
-export function parseProject(text: string): GeneratedProject | null {
-  let cleaned = text.trim();
-
-  // Strip opening code fence (```json or ```)
-  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, "");
-  // Strip closing code fence
-  cleaned = cleaned.replace(/\n?```\s*$/, "");
-  cleaned = cleaned.trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
-
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    typeof (parsed as Record<string, unknown>)["title"] !== "string" ||
-    typeof (parsed as Record<string, unknown>)["summary"] !== "string" ||
-    !Array.isArray((parsed as Record<string, unknown>)["files"])
-  ) {
-    return null;
-  }
-
-  const raw = parsed as Record<string, unknown>;
-  const files: ProjectFile[] = (raw["files"] as unknown[]).filter(
-    (f): f is ProjectFile =>
-      typeof f === "object" &&
-      f !== null &&
-      typeof (f as Record<string, unknown>)["path"] === "string" &&
-      typeof (f as Record<string, unknown>)["content"] === "string",
-  );
-
-  const entrypoints = Array.isArray(raw["entrypoints"])
-    ? (raw["entrypoints"] as unknown[]).filter((e): e is string => typeof e === "string")
-    : undefined;
-
-  return {
-    title: raw["title"] as string,
-    summary: raw["summary"] as string,
-    files,
-    entrypoints,
-  };
-}
-
-/**
- * buildTree: converts a flat list of ProjectFile paths into a nested TreeNode tree.
- * Paths are split on "/" and "\". Folders sort before files; siblings sort alphabetically.
- */
-export function buildTree(files: ProjectFile[]): TreeNode[] {
-  const root: TreeNode = { name: "", path: "", isFile: false, children: [] };
-
-  for (const file of files) {
-    const parts = file.path.split(/[\\/]/).filter((p) => p.length > 0);
-    let node = root;
-    for (let i = 0; i < parts.length; i++) {
-      const isLast = i === parts.length - 1;
-      const segName = parts[i];
-      const segPath = parts.slice(0, i + 1).join("/");
-      let child = node.children.find((c) => c.name === segName);
-      if (!child) {
-        child = { name: segName, path: segPath, isFile: isLast, children: [] };
-        node.children.push(child);
-      } else if (isLast) {
-        // Existing folder entry becoming a file entry — mark it
-        child.isFile = true;
-      }
-      node = child;
-    }
-  }
-
-  function sortNodes(nodes: TreeNode[]): void {
-    nodes.sort((a, b) => {
-      if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
-      return a.name.localeCompare(b.name);
-    });
-    for (const n of nodes) sortNodes(n.children);
-  }
-  sortNodes(root.children);
-
-  return root.children;
-}
-
-/**
- * fileByPath: lookup a file by its path in a GeneratedProject.
- * Path comparison is case-sensitive and slash-normalized (/ vs \).
- */
-export function fileByPath(project: GeneratedProject, path: string): ProjectFile | undefined {
-  const norm = (p: string) => p.replace(/\\/g, "/");
-  const target = norm(path);
-  return project.files.find((f) => norm(f.path) === target);
-}
-
-// ── AI helpers ────────────────────────────────────────────────────────────────
-
-const LENS_LABELS: Record<ExplainRequest["lens"], string> = {
-  overview: "개요",
-  libs_methods: "라이브러리/메서드",
-  flow: "호출 흐름",
-  modify_tip: "수정 포인트",
-};
-
-function buildExplainPrompt(req: ExplainRequest): string {
-  const { target, lens } = req;
-  let location = `파일: ${target.path}`;
-  if (target.symbol) location += `, 심볼: ${target.symbol}`;
-  if (target.lines) location += `, 라인: ${target.lines[0]}-${target.lines[1]}`;
-  return `[설명 요청]\n${location}\n렌즈: ${lens} (${LENS_LABELS[lens]})\n\n위 대상에 대해 "${LENS_LABELS[lens]}" 관점에서 설명해 주세요.`;
-}
-
-/**
- * generateProject: sends one generation call (force_json) to a new session and returns
- * the parsed GeneratedProject. Returns null on AI failure or parse failure.
- */
-export async function generateProject(
-  session: AiSession,
-  input: GenerateInput,
-): Promise<GeneratedProject | null> {
-  const system =
-    "You are a project generator. Output ONLY valid JSON matching the GeneratedProject schema: " +
-    '{ "title": string, "summary": string, "files": [{path, content, lang?}], "entrypoints"?: string[] }. ' +
-    "No prose, no markdown outside the JSON. The codebase must be complete, coherent, and self-consistent.";
-
-  const scaleGuide: Record<string, string> = {
-    small: "3-6 files, ~300 lines total",
-    medium: "7-15 files, ~600 lines total",
-    large: "16-30 files, ~1200 lines total",
-  };
-
-  const prompt =
-    `Generate a project: topic="${input.topic}", scale=${input.scale} (${scaleGuide[input.scale] ?? input.scale})` +
-    (input.seed ? `, constraints/stack: ${input.seed}` : "") +
-    ".";
-
-  const res = await session.send({ prompt, system, effort: "medium" });
-  if (!res.ok) return null;
-  return parseProject(res.text);
-}
-
-/**
- * explain: sends a resume call to the session for a targeted explanation.
- * Returns the explanation text, or an error message string on failure.
- */
-export async function explain(
-  session: AiSession,
-  req: ExplainRequest,
-): Promise<string> {
-  const prompt = buildExplainPrompt(req);
-  const res = await session.send({ prompt, effort: "medium" });
-  if (!res.ok) {
-    return `설명을 불러오지 못했습니다. (${res.error ?? "알 수 없는 오류"})`;
-  }
-  return res.text;
-}
-
-// ── DOM mount ─────────────────────────────────────────────────────────────────
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  cls?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
-
-function buildTreeDOM(
-  nodes: TreeNode[],
-  onSelect: (path: string) => void,
-  depth = 0,
-): HTMLElement {
-  const ul = el("ul", "lh-cp-tree-list");
-  ul.style.paddingLeft = depth > 0 ? "1rem" : "0";
-
-  for (const node of nodes) {
-    const li = el("li", "lh-cp-tree-item");
-
-    if (node.isFile) {
-      const btn = el("button", "lh-cp-tree-file", node.name);
-      btn.dataset["path"] = node.path;
-      btn.addEventListener("click", () => onSelect(node.path));
-      li.appendChild(btn);
-    } else {
-      const details = document.createElement("details");
-      details.open = depth < 2;
-      const summary = document.createElement("summary");
-      summary.className = "lh-cp-tree-folder";
-      summary.textContent = node.name;
-      details.appendChild(summary);
-      if (node.children.length > 0) {
-        details.appendChild(buildTreeDOM(node.children, onSelect, depth + 1));
-      }
-      li.appendChild(details);
-    }
-
-    ul.appendChild(li);
-  }
-
-  return ul;
-}
-
-function renderLineNumbers(content: string): HTMLElement {
-  const pre = el("pre", "lh-cp-code");
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const lineEl = document.createElement("div");
-    lineEl.className = "lh-cp-code-line";
-
-    const num = el("span", "lh-cp-line-num", String(i + 1));
-    const code = el("span", "lh-cp-line-text", lines[i]);
-
-    lineEl.appendChild(num);
-    lineEl.appendChild(code);
-    pre.appendChild(lineEl);
-  }
-  return pre;
-}
-
-export function mountCodeproj(
-  container: HTMLElement,
-  props: CodeprojProps,
-): void {
-  const { session, project, onFileSeen } = props;
+export function mountCodeproj(container: HTMLElement, props: CodeprojProps): void {
+  const { session, project, initialInput, onFileSeen, onProjectGenerated, onExchange } = props;
   container.innerHTML = "";
   container.classList.add("lh-codeproj");
 
-  // State
-  let currentProject = project ?? null;
+  let currentProject: GeneratedProject | null = project ?? null;
+  let selectedPath: string | null = null;
   const seenPaths = new Set<string>();
+  // Collected regions, possibly from several files. They become the subject of the next request.
+  let scraps: Scrap[] = [];
+  let scrapSeq = 0;
 
-  // ── Layout ──────────────────────────────────────────────────────────────────
+  // ── shell ───────────────────────────────────────────────────────────────────
 
   const header = el("div", "lh-cp-header");
   const titleEl = el("h2", "lh-cp-title", "코드 프로젝트 탐색");
@@ -297,74 +61,119 @@ export function mountCodeproj(
   header.appendChild(summaryEl);
   container.appendChild(header);
 
-  const body = el("div", "lh-cp-body");
-  const sidebar = el("nav", "lh-cp-sidebar");
-  const mainArea = el("div", "lh-cp-main");
-  const codeArea = el("div", "lh-cp-code-area");
-  const explainArea = el("div", "lh-cp-explain-area");
-
-  const sidebarToggle = el("button", "lh-cp-sidebar-toggle", "파일 목록 접기");
-  let sidebarCollapsed = false;
-  sidebarToggle.addEventListener("click", () => {
-    sidebarCollapsed = !sidebarCollapsed;
-    sidebar.style.display = sidebarCollapsed ? "none" : "";
-    sidebarToggle.textContent = sidebarCollapsed ? "파일 목록 펼치기" : "파일 목록 접기";
+  const panes = el("div", "lh-cp-panes");
+  const filePanel = createFilePanel((path) => selectFile(path));
+  const codePanel = createCodePanel();
+  const aiPanel = createAiPanel({
+    onExplain: (lens) => void runExplain(lens),
+    onAsk: (question) => void runAsk(question),
+    onScrapRemove: (id) => {
+      scraps = scraps.filter((s) => s.id !== id);
+      syncScraps();
+    },
+    onScrapReveal: (id) => {
+      const scrap = scraps.find((s) => s.id === id);
+      if (!scrap) return;
+      if (scrap.path !== selectedPath) selectFile(scrap.path);
+      codePanel.reveal(scrap.lines);
+    },
+    onScrapClear: () => {
+      scraps = [];
+      syncScraps();
+    },
   });
 
-  const treeContainer = el("div", "lh-cp-tree");
-  sidebar.appendChild(treeContainer);
+  panes.appendChild(filePanel.root);
+  panes.appendChild(codePanel.root);
+  panes.appendChild(aiPanel.root);
+  container.appendChild(panes);
 
-  // Lens menu
-  const lensBar = el("div", "lh-cp-lens-bar");
-  const lensLabel = el("span", "lh-cp-lens-label", "설명 렌즈: ");
-  const lensSelect = el("select", "lh-cp-lens-select");
-  const lensOptions: { value: ExplainRequest["lens"]; label: string }[] = [
-    { value: "overview", label: "개요" },
-    { value: "libs_methods", label: "라이브러리/메서드" },
-    { value: "flow", label: "호출 흐름" },
-    { value: "modify_tip", label: "수정 포인트" },
-  ];
-  for (const opt of lensOptions) {
-    const o = document.createElement("option");
-    o.value = opt.value;
-    o.textContent = opt.label;
-    lensSelect.appendChild(o);
+  aiPanel.setEnabled(false);
+  codePanel.onSelectionChange(updateTargetHint);
+  codePanel.onScrapAdd((lines) => addScrap(lines));
+
+  function addScrap(lines: [number, number]): void {
+    if (!currentProject || !selectedPath) return;
+    const file = fileByPath(currentProject, selectedPath);
+    if (!file) return;
+
+    if (!canAddScrap(scraps, lines)) {
+      aiPanel.notice(`구간은 ${SCRAP_MAX_COUNT}개, 총 ${SCRAP_MAX_LINES}행까지 담을 수 있습니다.`);
+      return;
+    }
+    // Same region twice is a mis-click, not an intent to duplicate.
+    const already = scraps.some(
+      (s) => s.path === selectedPath && s.lines[0] === lines[0] && s.lines[1] === lines[1],
+    );
+    if (already) return;
+
+    scraps = [
+      ...scraps,
+      {
+        id: `scrap-${++scrapSeq}`,
+        path: selectedPath,
+        lines,
+        code: sliceLines(file.content, lines),
+      },
+    ];
+    syncScraps();
   }
-  const explainBtn = el("button", "lh-cp-explain-btn", "이 파일 설명 보기");
-  explainBtn.disabled = true;
-  lensBar.appendChild(lensLabel);
-  lensBar.appendChild(lensSelect);
-  lensBar.appendChild(explainBtn);
 
-  const explainOutput = el("div", "lh-cp-explain-output", "파일을 선택하면 설명을 요청할 수 있습니다.");
+  /**
+   * Show an answer. A composed answer is rendered as components; anything else falls back to the
+   * raw text, so a malformed response still says what it has to say.
+   */
+  function showAnswer(entry: { setBody(t: string): void; setContent(n: HTMLElement): void }, text: string): void {
+    const composed = parseComposed(text);
+    if (!composed) {
+      entry.setBody(text);
+      return;
+    }
+    entry.setContent(renderComposed(composed, renderContext()));
+  }
 
-  codeArea.appendChild(lensBar);
-  explainArea.appendChild(explainOutput);
+  function renderContext(): RenderContext {
+    return {
+      currentPath: selectedPath ?? undefined,
+      exists: (path) => !!currentProject && !!fileByPath(currentProject, path),
+      navigate: (path, lines) => {
+        if (path && path !== selectedPath) selectFile(path);
+        if (lines) codePanel.reveal(lines);
+      },
+    };
+  }
 
-  mainArea.appendChild(codeArea);
-  mainArea.appendChild(explainArea);
+  /** Keep both panels showing the same basket after any change. */
+  function syncScraps(): void {
+    aiPanel.setScraps(scraps.map((s) => ({ id: s.id, path: s.path, lines: s.lines })));
+    codePanel.markScraps(scraps.filter((s) => s.path === selectedPath).map((s) => s.lines));
+    if (!scraps.length) updateTargetHint(codePanel.selection());
+  }
 
-  container.appendChild(sidebarToggle);
-  body.appendChild(sidebar);
-  body.appendChild(mainArea);
-  container.appendChild(body);
-
-  // No AI session: reading still works, but the explain controls have nothing to call — hide them.
+  // Without a session there is nothing for the AI panel to call, so it is not shown at all
+  // rather than left as a row of dead buttons.
   if (!session) {
-    lensBar.style.display = "none";
-    explainArea.style.display = "none";
+    aiPanel.root.style.display = "none";
+    panes.classList.add("lh-cp-no-ai");
   }
 
-  // ── Generate panel (shown when no project injected) ──────────────────────────
+  // ── generation (only starts on an explicit action) ───────────────────────────
 
   if (!currentProject && session) {
-    const generatePanel = el("div", "lh-cp-generate-panel");
-    const topicLabel = el("label", "", "주제");
+    container.insertBefore(buildGeneratePanel(), panes);
+  } else if (!currentProject) {
+    summaryEl.textContent = "표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).";
+  } else {
+    loadProject(currentProject);
+  }
+
+  function buildGeneratePanel(): HTMLElement {
+    const panel = el("div", "lh-cp-generate-panel");
     const topicInput = el("input", "lh-cp-topic-input");
     topicInput.type = "text";
     topicInput.placeholder = "예: 간단한 메모 앱";
+    topicInput.value = initialInput?.topic ?? "";
 
-    const scaleLabel = el("label", "", "규모");
     const scaleSelect = el("select", "lh-cp-scale-select");
     for (const [val, label] of [
       ["small", "소 (3-6 파일)"],
@@ -376,136 +185,166 @@ export function mountCodeproj(
       o.textContent = label;
       scaleSelect.appendChild(o);
     }
+    scaleSelect.value = initialInput?.scale ?? "medium";
 
-    const seedLabel = el("label", "", "제약/스택 (선택)");
     const seedInput = el("input", "lh-cp-seed-input");
     seedInput.type = "text";
     seedInput.placeholder = "예: Python, 외부 라이브러리 없이";
+    seedInput.value = initialInput?.seed ?? "";
 
-    const generateBtn = el("button", "lh-cp-generate-btn", "프로젝트 생성");
-    const generateStatus = el("div", "lh-cp-generate-status", "");
+    const startBtn = el("button", "lh-cp-generate-btn", "프로젝트 생성");
+    const status = el("div", "lh-cp-generate-status", "");
 
-    generateBtn.addEventListener("click", async () => {
+    startBtn.addEventListener("click", async () => {
       const topic = topicInput.value.trim();
       if (!topic) {
-        generateStatus.textContent = "주제를 입력해 주세요.";
+        status.textContent = "주제를 입력해 주세요.";
         return;
       }
-      generateBtn.disabled = true;
-      generateStatus.textContent = "프로젝트를 생성하는 중...";
-
-      const result = await generateProject(session, {
+      const input: GenerateInput = {
         topic,
-        scale: scaleSelect.value as "small" | "medium" | "large",
+        scale: scaleSelect.value as GenerateInput["scale"],
         seed: seedInput.value.trim() || undefined,
-      });
+      };
+      startBtn.disabled = true;
+      status.textContent = "프로젝트를 생성하는 중...";
 
+      const result = await generateProject(session!, input);
       if (!result) {
-        generateStatus.textContent = "프로젝트 생성에 실패했습니다. 다시 시도해 주세요.";
-        generateBtn.disabled = false;
+        status.textContent = "프로젝트 생성에 실패했습니다. 다시 시도해 주세요.";
+        startBtn.disabled = false;
         return;
       }
 
       currentProject = result;
-      generatePanel.remove();
+      panel.remove();
+      // Announce before rendering: loading the project immediately emits its first file-seen
+      // event, and the owner has to be able to set up storage for it first.
+      onProjectGenerated?.(result, input);
       loadProject(result);
     });
 
-    generatePanel.appendChild(topicLabel);
-    generatePanel.appendChild(topicInput);
-    generatePanel.appendChild(scaleLabel);
-    generatePanel.appendChild(scaleSelect);
-    generatePanel.appendChild(seedLabel);
-    generatePanel.appendChild(seedInput);
-    generatePanel.appendChild(generateBtn);
-    generatePanel.appendChild(generateStatus);
-    container.insertBefore(generatePanel, body);
-  } else if (!currentProject) {
-    summaryEl.textContent = "표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).";
-  } else {
-    loadProject(currentProject);
+    panel.appendChild(el("label", "", "주제"));
+    panel.appendChild(topicInput);
+    panel.appendChild(el("label", "", "규모"));
+    panel.appendChild(scaleSelect);
+    panel.appendChild(el("label", "", "제약/스택 (선택)"));
+    panel.appendChild(seedInput);
+    panel.appendChild(startBtn);
+    panel.appendChild(status);
+    return panel;
   }
 
-  // ── Load a project into the UI ───────────────────────────────────────────────
+  // ── project + file selection ────────────────────────────────────────────────
 
   function loadProject(proj: GeneratedProject): void {
     titleEl.textContent = proj.title;
     summaryEl.textContent = proj.summary;
-
-    treeContainer.innerHTML = "";
-    const tree = buildTree(proj.files);
-    const treeDOM = buildTreeDOM(tree, (path) => selectFile(path));
-    treeContainer.appendChild(treeDOM);
-
-    // Show entrypoints hint if present
-    if (proj.entrypoints && proj.entrypoints.length > 0) {
-      const hint = el("p", "lh-cp-entrypoints-hint", `권장 읽기 순서: ${proj.entrypoints.join(", ")}`);
-      treeContainer.insertBefore(hint, treeDOM);
-    }
-
-    // Default: select first file
-    if (proj.files.length > 0) {
-      selectFile(proj.files[0].path);
-    }
+    filePanel.render(proj, buildTree(proj.files));
+    filePanel.markSeen(seenPaths);
+    if (proj.files.length > 0) selectFile(proj.files[0].path);
   }
-
-  // ── File selection ───────────────────────────────────────────────────────────
-
-  let selectedPath: string | null = null;
 
   function selectFile(path: string): void {
     if (!currentProject) return;
-    selectedPath = path;
-    explainBtn.disabled = false;
+    const file = fileByPath(currentProject, path);
+    if (!file) return;
 
-    // Mark seen
+    selectedPath = path;
     if (!seenPaths.has(path)) {
       seenPaths.add(path);
       onFileSeen?.(path);
     }
 
-    // Highlight selected in tree
-    treeContainer.querySelectorAll(".lh-cp-tree-file").forEach((btn) => {
-      (btn as HTMLElement).classList.toggle("lh-cp-selected", (btn as HTMLElement).dataset["path"] === path);
-    });
-
-    // Render code
-    const file = fileByPath(currentProject, path);
-    if (!file) return;
-
-    // Remove old code view if any (keep lensBar)
-    const existing = codeArea.querySelector(".lh-cp-code");
-    if (existing) existing.remove();
-    const pathLabel = codeArea.querySelector(".lh-cp-path-label");
-    if (pathLabel) pathLabel.remove();
-
-    const pathEl = el("div", "lh-cp-path-label", file.path);
-    if (file.lang) pathEl.dataset["lang"] = file.lang;
-    codeArea.insertBefore(pathEl, lensBar);
-
-    const codeView = renderLineNumbers(file.content);
-    codeArea.appendChild(codeView);
-
-    // Reset explanation
-    explainOutput.textContent = "렌즈를 선택하고 [이 파일 설명 보기]를 클릭하세요.";
+    filePanel.markSelected(path);
+    filePanel.markSeen(seenPaths);
+    codePanel.show(file.path, file.content, file.lang);
+    // Regions collected in this file stay visible when returning to it.
+    codePanel.markScraps(scraps.filter((s) => s.path === path).map((s) => s.lines));
+    if (session) aiPanel.setEnabled(true);
+    updateTargetHint(null);
   }
 
-  // ── Explain button ───────────────────────────────────────────────────────────
+  function updateTargetHint(range: [number, number] | null): void {
+    if (!selectedPath) {
+      aiPanel.setTargetHint("");
+      return;
+    }
+    aiPanel.setTargetHint(range ? `대상: ${selectedPath} (${range[0]}-${range[1]}행)` : `대상: ${selectedPath}`);
+  }
 
-  explainBtn.addEventListener("click", async () => {
-    if (!selectedPath || !session) return;
-    explainBtn.disabled = true;
-    explainOutput.textContent = "설명을 불러오는 중...";
+  // ── AI exchanges (both resume the same session) ─────────────────────────────
 
-    const lens = lensSelect.value as ExplainRequest["lens"];
-    const text = await explain(session, { target: { path: selectedPath }, lens });
+  function currentTarget() {
+    if (!selectedPath || !currentProject) return null;
+    const file = fileByPath(currentProject, selectedPath);
+    if (!file) return null;
+    const lines = codePanel.selection() ?? undefined;
+    return { target: { path: selectedPath, lines }, content: file.content };
+  }
 
-    explainOutput.textContent = text;
-    explainBtn.disabled = false;
-  });
+  async function runExplain(lens: Lens): Promise<void> {
+    if (!session) return;
+
+    // A filled basket is the subject; otherwise the current file or selection is.
+    if (scraps.length) {
+      const entry = aiPanel.startEntry(`${LENS_LABELS[lens]} · ${scraps.length}개 구간`);
+      aiPanel.setEnabled(false);
+      const text = await explainScraps(session, scraps, lens);
+      showAnswer(entry, text);
+      aiPanel.setEnabled(true);
+      onExchange?.({ kind: "explain", lens, path: scraps[0].path, scrapCount: scraps.length });
+      return;
+    }
+
+    const ctx = currentTarget();
+    if (!ctx) return;
+    const where = ctx.target.lines ? ` (${ctx.target.lines[0]}-${ctx.target.lines[1]}행)` : "";
+    const entry = aiPanel.startEntry(`${LENS_LABELS[lens]} · ${ctx.target.path}${where}`);
+    aiPanel.setEnabled(false);
+    const text = await explain(session, { target: ctx.target, lens }, ctx.content);
+    showAnswer(entry, text);
+    aiPanel.setEnabled(true);
+    onExchange?.({ kind: "explain", lens, path: ctx.target.path, lines: ctx.target.lines });
+  }
+
+  async function runAsk(question: string): Promise<void> {
+    if (!session) return;
+
+    if (scraps.length) {
+      const entry = aiPanel.startEntry(`질문 · ${question}`);
+      aiPanel.setEnabled(false);
+      const text = await ask(session, {
+        target: { path: scraps[0].path },
+        question,
+        scraps,
+      });
+      showAnswer(entry, text);
+      aiPanel.setEnabled(true);
+      onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length });
+      return;
+    }
+
+    const ctx = currentTarget();
+    if (!ctx) return;
+    const entry = aiPanel.startEntry(`질문 · ${question}`);
+    aiPanel.setEnabled(false);
+    const text = await ask(session, { target: ctx.target, question }, ctx.content);
+    showAnswer(entry, text);
+    aiPanel.setEnabled(true);
+    onExchange?.({
+      kind: "ask",
+      path: ctx.target.path,
+      lines: ctx.target.lines,
+      question,
+    });
+  }
 }
 
-// ── createAiClient re-export helper (so callers can build a session easily) ───
-
+// Public surface: the pure model, the prompt builders and the session calls are re-exported so
+// callers and tests keep importing one module path.
+export * from "./model";
+export { LENS_LABELS, LENS_ORDER, QUALITY_CLAUSE } from "./prompts";
+export { generateProject, explain, ask } from "./session";
 export { AiSession };
 export { createAiClient } from "../../src/ai/client";

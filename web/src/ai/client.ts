@@ -3,11 +3,14 @@
 // the load-once -> resume lifecycle (generate heavy content once, then resume for small follow-ups).
 // The token comes from runtime config (never embedded in the bundle). fetch is injectable for tests.
 
+/** Effort levels the CLI accepts (`--effort`). Callers pick per call kind. */
+export type AiEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface AiRequest {
   prompt: string;
   system?: string;
   model?: string;
-  effort?: "low" | "medium" | "high";
+  effort?: AiEffort;
   session_id?: string | null;
 }
 
@@ -25,8 +28,25 @@ export interface AiClientConfig {
   fetchImpl?: typeof fetch; // injectable for tests
 }
 
+// On-demand practice-problem generation (server generates + execution-verifies; see bot/probgen.py).
+export interface GenProblemsRequest {
+  concept: { area?: string; concept_id: string; title: string; body: string };
+  existing?: string[];   // prompts of problems already shown (dedup guard)
+  feedback?: string[];   // past deletion reasons for this concept
+  count?: number;
+  course_title?: string;
+  model?: string;
+}
+export interface GenProblemsResponse {
+  ok: boolean;
+  problems: unknown[];    // raw ProblemDef-shaped objects (verified server-side)
+  error: string | null;
+  dropped?: number;
+}
+
 export interface AiClient {
   ai(req: AiRequest): Promise<AiResponse>;
+  problems(req: GenProblemsRequest): Promise<GenProblemsResponse>;
   health(): Promise<boolean>;
 }
 
@@ -54,6 +74,21 @@ export function createAiClient(cfg: AiClientConfig): AiClient {
     }
   }
 
+  async function problems(req: GenProblemsRequest): Promise<GenProblemsResponse> {
+    const body = JSON.stringify({ model: cfg.model, ...req });
+    try {
+      const res = await f(`${cfg.baseUrl}/problems`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AI-Token": cfg.token },
+        body,
+      });
+      if (!res.ok) return { ok: false, problems: [], error: `HTTP ${res.status}` };
+      return (await res.json()) as GenProblemsResponse;
+    } catch (e) {
+      return { ok: false, problems: [], error: String((e as Error)?.message ?? e) };
+    }
+  }
+
   async function health(): Promise<boolean> {
     try {
       const res = await f(`${cfg.baseUrl}/health`);
@@ -63,7 +98,7 @@ export function createAiClient(cfg: AiClientConfig): AiClient {
     }
   }
 
-  return { ai, health };
+  return { ai, problems, health };
 }
 
 // Load-once then resume. The first send mints a session (server returns session_id); later sends resume
