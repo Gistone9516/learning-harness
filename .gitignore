@@ -7,7 +7,8 @@ node_modules/
 package-lock.json
 package.json
 
-# 백업 HTML
+# 편집 전 백업본(원본 옆에 남기는 사본)
+*.bak
 *.bak.html
 
 # 봇 진도 상태(콘텐츠 폴더가 런타임에 생성)

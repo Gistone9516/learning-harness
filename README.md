@@ -133,11 +133,13 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ caps_ai/ai_practice.py   AI-generated composition problem + grading (per catalog item)
 │   ├ caps_ai/ai_convo.py      threaded multi-turn conversation (main model)
 │   ├ caps_ai/ai_explain.py    one-off per-card concept explanation thread (explain model, discarded after use)
-│   ├ ai_server.py             gated local HTTP server bridging a web client to claude (web AI, Discord-independent)
+│   ├ ai_server.py             gated local HTTP server bridging a web client to claude (web AI, Discord-independent) + the /state record API
+│   ├ state_store.py           record-per-file store with derived indexes (_verify drift check, _rebuild full rescan)
+│   ├ session_guard.py         claude session lifetime tracking and shutdown (no orphan processes)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
-├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, conceptprob), src/grade (engine grader port), src/ai (ai_server client), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
+├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob), src/grade (engine grader port), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
@@ -209,19 +211,28 @@ cd web && npm run build               # tsc --noEmit + vite production build
     (`bot/subject.py` SubjectProfile); the per-subject `clone` tool was removed in favor of one app
     running against per-subject data folders (each with its own `.env`). Guardrail test enforces zero
     subject literal in kit code.
-- 527 regression tests green (159 engine plus 368 bot), all headless. The deterministic loop and every new
+- 578 python tests green, all headless (measured 2026-09-01). The deterministic loop and every new
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
-- Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with three
-  parts (sheet, codeproj, conceptprob), a shared engine grader port (golden-vector parity with the Python
-  engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
-  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 105 web tests green.
+- Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with four
+  parts (sheet, codeproj, dashboard, conceptprob), a shared engine grader port (golden-vector parity with the
+  Python engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 239 web tests green plus a clean `tsc --noEmit` (measured 2026-09-01).
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
   with no Discord dependency. **AI is optional**: the AI parts also run from **pre-baked verified content**
   injected by the instance (`concepts` / `project`) — mounting with no `ai_server` and grading fully
   offline (token 0); concept bodies render Markdown (headings, tables, code) via a hand-rolled renderer.
+- Record store and study flows: `bot/state_store.py` plus the `/state` API on `ai_server` give the kit a
+  record-per-file store with derived indexes (`_verify` drift check, `_rebuild` full rescan); `web/src/storage`
+  is its browser port with an offline buffer (localStorage is a buffer, never the source of truth), and
+  `web/src/flow` holds the proposal→generation study flow and the archived-project workspace.
+  `codeproj` grew to the IDE shape it was specified for: a dependency-free syntax highlighter (`web/src/highlight`,
+  no CDN so it works offline), multi-range code scrap, and a composed-answer block system
+  (`parts/codeproj/components`, 24 block types covering the 25 catalogue entries — inline and block code
+  references share one `ref` type). `session_guard` ends claude sessions so no process is orphaned.
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), live AI smoke
-  (needs the `claude` CLI on PATH), and wiring the web kit into a consuming instance (instance config, not
-  kit work).
+  (needs the `claude` CLI on PATH; the whole generation path is still unproven against a real model), and
+  an annotation layer with instant Ctrl-hover popups plus semi-answers — designed in the consuming instance's
+  docs, not yet built.
 
 ## 7. Where to start (for AI and new contributors)
 
