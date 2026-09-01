@@ -52,7 +52,9 @@ async def _run_cases():
 
 
 def test_gating_health_and_roundtrip(monkeypatch):
-    async def fake_invoke(prompt, *, system=None, model=None, effort="low", session_id=None, on_stream=None):
+    async def fake_invoke(prompt, *, system=None, model=None, effort="low", session_id=None,
+                          on_stream=None, **kwargs):
+        # **kwargs absorbs the lifetime options the server passes through (kind, timeout_sec).
         return AIResult(text="MOCK:" + prompt, ok=True, session_id=session_id or "sid-x")
 
     monkeypatch.setattr(ai, "invoke", fake_invoke)

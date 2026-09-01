@@ -15,8 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _paths
 _paths.setup()
 
-from dotenv import load_dotenv
-load_dotenv()
+from env_load import load_instance_env
+
+# The mount argument names the instance, so its .env is the one loaded (its token, channel and
+# state). A plain load_dotenv() would resolve relative to bot/ and never see it.
+load_instance_env(sys.argv[1] if len(sys.argv) > 1 else None)
 
 import discord
 from discord import app_commands

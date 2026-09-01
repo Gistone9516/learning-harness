@@ -24,6 +24,15 @@ async def invoke(prompt, *, system=None, model=None, effort="low",
 - **No session specified**: one-shot (generate a new session_id, no resume). **Session specified**: `--resume` with that session_id (multi-turn).
 - Returns `AIResult{text, ok, error}`. On failure (subprocess error or timeout): `ok=False`, `error` set (no throw — caller handles gracefully).
 
+### 1.1 Two rules the CLI forces on us (measured 2026-07-21)
+
+`claude -p` is an **agent**, not a completion endpoint. Two consequences are contract, not preference:
+
+- **Tools off (`--tools ""`).** With the default toolset a task-shaped prompt ("generate a project") makes it do the work on disk — it wrote a full project into the server's working directory, ran the tests, and replied with a prose report, so the caller's structured output never arrived and the mounted instance folder was polluted. The kit only ever wants text back, so `invoke` passes `--tools ""` by default; `tools=None` restores the CLI default for a caller that genuinely wants an agent.
+- **The preamble travels in the user message.** A `system` key in the stdin JSON is **ignored** by the CLI (a sentinel instruction sent that way had no effect), which silently dropped every preamble the kit believed it was sending, safety clause included. This CLI version exposes only `--system-prompt` with no file variant, and passing a multi-line preamble containing quotes as a Windows command-line argument is its own breakage, so `invoke` prepends the preamble to the message content (`<system>\n\n---\n\n<prompt>`). stdin is JSON, so newlines, quotes and non-ASCII survive intact.
+
+Guarded by `bot/tests/test_ai_invocation.py`. A structured-output caller should also state the rule in its own prompt ("return JSON only, do not create files"), since defence in depth costs nothing here.
+
 ---
 
 ## 2. Token Control Discipline (contract, all AI capabilities)

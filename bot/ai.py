@@ -15,7 +15,24 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Awaitable
 
+import session_guard
+
 log = logging.getLogger(__name__)
+
+# Generation loads a whole artifact into the session and is slow; follow-ups resume an existing
+# session and must not hang for half an hour when something goes wrong. Callers pick a kind.
+TIMEOUT_BY_KIND = {"generate": 1800, "followup": 180}
+DEFAULT_TIMEOUT_SEC = 1800
+
+# Replaces the CLI's coding-agent system prompt. Without this the model keeps acting like an agent
+# even with tools disabled: it announces a plan and emits imitation tool-call blocks as text instead
+# of answering (measured 2026-07-21). Deliberately one line of plain ASCII with no shell
+# metacharacters, because it travels as a Windows command-line argument.
+TEXT_ONLY_SYSTEM = (
+    "You are a non-interactive text service. You have no tools and no filesystem access. "
+    "Never emit tool calls or blocks that imitate tool calls. "
+    "Follow the instructions at the start of the user message exactly and reply with the requested content only."
+)
 
 
 @dataclass
@@ -36,6 +53,9 @@ async def invoke(
     max_tokens: int | None = None,
     session_id: str | None = None,
     on_stream: Callable[[str], Awaitable[None]] | None = None,
+    kind: str = "generate",
+    timeout_sec: int | None = None,
+    tools: str | None = "",
 ) -> AIResult:
     """claude -p stream-json adapter (ai-mode §1, SoT §5).
 
@@ -43,6 +63,9 @@ async def invoke(
     Sends the message as a single JSON line on stdin.
     Parses stdout lines: type==assistant -> on_stream callback, type==result -> final value.
     On failure (process error, timeout) -> ok=False (no raise, AIInvokeError graceful).
+
+    tools: passed to `--tools`. Default "" disables every tool so the call can only return text
+    (see the note where the argument list is built). Pass None to leave the CLI default in place.
     """
     # Session handling (ai-mode §1, §4)
     is_new_session = session_id is None
@@ -53,6 +76,17 @@ async def invoke(
                  "--input-format", "stream-json",
                  "--output-format", "stream-json",
                  "--verbose"]
+
+    # `claude -p` is an agent, not a completion endpoint: with its default toolset a prompt like
+    # "generate a project" makes it WRITE THE FILES into the server's working directory and reply
+    # with a prose report, so the caller's structured output never arrives and the instance folder
+    # gets polluted (measured 2026-07-21). The kit only ever wants text back, so tools are off
+    # unless a caller explicitly asks for them.
+    if tools is not None:
+        cmd_parts += ["--tools", tools]
+        # Tools off is not enough on its own: the agent persona lives in the CLI's own system
+        # prompt, so it has to be replaced too. Only done when the caller wants the text-only mode.
+        cmd_parts += ["--system-prompt", TEXT_ONLY_SYSTEM]
 
     if is_new_session:
         cmd_parts += ["--session-id", effective_sid]
@@ -69,13 +103,19 @@ async def invoke(
     # the CLI exit with "unknown option" -> every AI call failed (ok=False).
     _ = max_tokens
 
-    # stdin payload
+    # stdin payload.
+    #
+    # The preamble rides at the head of the user message rather than in a `system` key: the CLI
+    # ignores that key entirely (measured 2026-07-21 — a sentinel instruction sent that way never
+    # took effect, so every kit preamble, safety clause included, was silently dropped). This CLI
+    # version offers only --system-prompt, with no file variant, and passing a multi-line preamble
+    # with quotes as a Windows command-line argument is its own well-known breakage. stdin is JSON,
+    # so newlines, quotes and non-ASCII survive intact.
+    content = f"{system}\n\n---\n\n{prompt}" if system else prompt
     payload: dict[str, Any] = {
         "type": "user",
-        "message": {"role": "user", "content": prompt},
+        "message": {"role": "user", "content": content},
     }
-    if system:
-        payload["system"] = system
 
     stdin_data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -83,31 +123,32 @@ async def invoke(
     import subprocess as _sp
     cmd_str = _sp.list2cmdline(cmd_parts)
 
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_str,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            limit=1024 * 1024,  # buffer for long reasoning lines (ai-mode §1)
-        )
-    except Exception as e:
-        return AIResult(text="", ok=False, error=f"Process creation failed: {e}")
+    effective_timeout = timeout_sec if timeout_sec else TIMEOUT_BY_KIND.get(kind, DEFAULT_TIMEOUT_SEC)
 
-    try:
-        timeout_sec = 1800
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(input=stdin_data),
-            timeout=timeout_sec,
-        )
-    except asyncio.TimeoutError:
+    # The guard owns the child from here on: it kills and reaps the process on every exit path,
+    # including timeout, error and task cancellation, so no orphan claude process survives.
+    async with session_guard.track(kind=kind, session_id=effective_sid) as slot:
         try:
-            proc.kill()
-        except Exception:
-            pass
-        return AIResult(text="", ok=False, error="Timeout")
-    except Exception as e:
-        return AIResult(text="", ok=False, error=f"communicate error: {e}")
+            proc = await asyncio.create_subprocess_shell(
+                cmd_str,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                limit=1024 * 1024,  # buffer for long reasoning lines (ai-mode §1)
+            )
+        except Exception as e:
+            return AIResult(text="", ok=False, error=f"Process creation failed: {e}")
+        slot.attach(proc)
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(input=stdin_data),
+                timeout=effective_timeout,
+            )
+        except asyncio.TimeoutError:
+            return AIResult(text="", ok=False, error=f"Timeout after {effective_timeout}s")
+        except Exception as e:
+            return AIResult(text="", ok=False, error=f"communicate error: {e}")
 
     if proc.returncode != 0:
         err_msg = stderr_bytes.decode("utf-8", errors="replace").strip()
