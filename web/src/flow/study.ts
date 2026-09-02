@@ -93,7 +93,12 @@ export interface HistoryCounters {
   explains: number;
   questions: number;
   lens_counts: Record<string, number>;
-  asked: { at: number; path: string; lines?: [number, number]; text: string }[];
+  /**
+   * `depth` is optional because records written before short answers existed do not have it.
+   * Without it a promotion and a fresh question are the same row, and the operator reading this
+   * back cannot tell one costly call from two cheap ones.
+   */
+  asked: { at: number; path: string; lines?: [number, number]; text: string; depth?: string }[];
 }
 
 function str(v: unknown, fallback = ""): string {
@@ -362,7 +367,14 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
      */
     async recordExchange(
       historyId: string,
-      event: { kind: "explain" | "ask"; lens?: string; path: string; lines?: [number, number]; question?: string },
+      event: {
+        kind: "explain" | "ask";
+        lens?: string;
+        path: string;
+        lines?: [number, number];
+        question?: string;
+        depth?: string;
+      },
     ): Promise<void> {
       const record = await storage.get<HistoryCounters>(COLLECTIONS.history, historyId);
       if (!record) return;
@@ -378,7 +390,13 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         if (event.lens) counters.lens_counts[event.lens] = (counters.lens_counts[event.lens] ?? 0) + 1;
       } else {
         counters.questions += 1;
-        counters.asked.push({ at: now(), path: event.path, lines: event.lines, text: event.question ?? "" });
+        counters.asked.push({
+          at: now(),
+          path: event.path,
+          lines: event.lines,
+          text: event.question ?? "",
+          depth: event.depth,
+        });
       }
 
       await storage.put(COLLECTIONS.history, {

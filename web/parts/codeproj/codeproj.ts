@@ -18,8 +18,9 @@ import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_
 import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
 import { LENS_LABELS } from "./prompts";
-import { createAiPanel, createCodePanel, createFilePanel, el } from "./view";
+import { createAiPanel, createCodePanel, createFilePanel, el, type AnswerDepth } from "./view";
 import { parseComposed } from "./components/parse";
+import { normalizeSemi } from "./components/semi";
 import { renderComposed, type RenderContext } from "./components/render";
 
 export interface ExchangeEvent {
@@ -30,6 +31,11 @@ export interface ExchangeEvent {
   question?: string;
   /** Number of collected regions, when the exchange was about a basket rather than one place. */
   scrapCount?: number;
+  /**
+   * How much answer was asked for. Recorded because a short answer and a full one cost very
+   * differently, and a history that counts them as one thing cannot tell the operator which.
+   */
+  depth?: AnswerDepth;
 }
 
 export interface CodeprojProps {
@@ -139,7 +145,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   const codePanel = createCodePanel();
   const aiPanel = createAiPanel({
     onExplain: (lens) => void runExplain(lens),
-    onAsk: (question) => void runAsk(question),
+    onAsk: (question, depth) => void runAsk(question, depth),
     onScrapRemove: (id) => {
       scraps = scraps.filter((s) => s.id !== id);
       syncScraps();
@@ -166,6 +172,16 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   codePanel.onScrapAdd((lines) => addScrap(lines));
   // A note may point at another file. Moving between files belongs to the mount, which is the
   // only thing that knows the project; the panel just says where the learner wanted to go.
+  // Registered only with a session, so the popup renders its promote button only where pressing
+  // it can do something. The note itself becomes the question, which keeps the promotion on the
+  // ordinary ask path instead of inventing a second kind of request.
+  if (session) {
+    codePanel.onNoteExpand((lines, what) => {
+      void runAsk(`${what} 이 부분을 더 자세히 설명해 주세요.`, "semi");
+      void lines;
+    });
+  }
+
   codePanel.onNoteRef((path, line) => {
     if (!currentProject || !fileByPath(currentProject, path)) return;
     selectFile(path);
@@ -203,13 +219,20 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
    * Show an answer. A composed answer is rendered as components; anything else falls back to the
    * raw text, so a malformed response still says what it has to say.
    */
-  function showAnswer(entry: { setBody(t: string): void; setContent(n: HTMLElement): void }, text: string): void {
+  function showAnswer(
+    entry: { setBody(t: string): void; setContent(n: HTMLElement): void },
+    text: string,
+    depth: AnswerDepth = "full",
+  ): void {
     const composed = parseComposed(text);
     if (!composed) {
       entry.setBody(text);
       return;
     }
-    entry.setContent(renderComposed(composed, renderContext()));
+    // The directive asks for a short answer; this is where the ask is enforced. A model that
+    // answered at full length would otherwise arrive wearing the short answer's badge.
+    const shaped = depth === "semi" ? normalizeSemi(composed) : composed;
+    entry.setContent(renderComposed(shaped, renderContext()));
   }
 
   function renderContext(): RenderContext {
@@ -468,36 +491,79 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     onExchange?.({ kind: "explain", lens, path: ctx.target.path, lines: ctx.target.lines });
   }
 
-  async function runAsk(question: string): Promise<void> {
+  /**
+   * The annotation covering the asked-about lines, when there is one. A short answer starts
+   * from what the annotation layer already established instead of rediscovering it.
+   */
+  function groundsFor(target: { path: string; lines?: [number, number] }): { what: string; why?: string } | undefined {
+    if (!target.lines) return undefined;
+    const forFile = annotations.files[target.path];
+    if (forFile?.status !== "ok") return undefined;
+    const file = currentProject && fileByPath(currentProject, target.path);
+    if (!file) return undefined;
+    const items = parseAnnotations(forFile.items, file.content.split(String.fromCharCode(10)).length).items;
+    const hit = items.find(
+      (a) => a.kind !== "file" && a.target.lines[0] <= target.lines![0] && a.target.lines[1] >= target.lines![0],
+    );
+    return hit ? { what: hit.what, why: hit.why } : undefined;
+  }
+
+  async function runAsk(question: string, depth: AnswerDepth = "semi"): Promise<void> {
     if (!session) return;
 
     if (scraps.length) {
-      const entry = aiPanel.startEntry(`질문 · ${question}`);
+      const entry = aiPanel.startEntry(`질문 · ${question}`, { depth });
       beginCall();
+      // No grounds here on purpose: a basket spans several regions and often several files,
+      // and `grounds` carries one annotation. Sending the first region's note as if it covered
+      // the rest would be worse than sending none.
       const text = await ask(
         session,
-        { target: { path: scraps[0].path }, question, scraps },
+        { target: { path: scraps[0].path }, question, scraps, depth },
         undefined,
         reseedFor(entry),
       );
-      showAnswer(entry, text);
+      showAnswer(entry, text, depth);
       endCall(entry);
-      onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length });
+      offerPromotion(entry, question, depth);
+      onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length, depth });
       return;
     }
 
     const ctx = currentTarget();
     if (!ctx) return;
-    const entry = aiPanel.startEntry(`질문 · ${question}`);
+    const entry = aiPanel.startEntry(`질문 · ${question}`, { depth });
     beginCall();
-    const text = await ask(session, { target: ctx.target, question }, ctx.content, reseedFor(entry));
-    showAnswer(entry, text);
+    const text = await ask(
+      session,
+      { target: ctx.target, question, depth, grounds: depth === "semi" ? groundsFor(ctx.target) : undefined },
+      ctx.content,
+      reseedFor(entry),
+    );
+    showAnswer(entry, text, depth);
     endCall(entry);
+    offerPromotion(entry, question, depth);
     onExchange?.({
       kind: "ask",
       path: ctx.target.path,
       lines: ctx.target.lines,
       question,
+      depth,
+    });
+  }
+
+  /**
+   * A short answer always offers the way up. Asking again appends a new entry rather than
+   * replacing this one: the thread is a log of what was asked, not a view of the latest answer.
+   */
+  function offerPromotion(
+    entry: { setFooter(label: string, run: () => void): void },
+    question: string,
+    depth: AnswerDepth,
+  ): void {
+    if (depth !== "semi") return;
+    entry.setFooter("전체 해설로 보기", () => {
+      void runAsk(question, "full");
     });
   }
 }

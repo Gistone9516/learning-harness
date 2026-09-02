@@ -749,6 +749,43 @@ body {
   padding: 2px 10px; background: var(--lh-primary); border: none;
   border-radius: var(--lh-r-pill); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
 }
+/* ── 짧은 답 (FR-22) ─────────────────────────────────────────────────────────
+   All scoped under .lh-codeproj: the lh-cp- prefix is shared with conceptprob and both
+   instances load one compiled stylesheet, so a bare rule here ships into the other product. */
+.lh-codeproj .lh-cp-depth { display: flex; align-items: center; gap: var(--lh-s2); padding: 0 var(--lh-s4) var(--lh-s2); }
+.lh-codeproj .lh-cp-depth-label { font-size: 11px; color: var(--lh-ink-faint); letter-spacing: 0.02em; }
+/* A quiet state pair, not a third filled button: 설명 요청 and 질문 are the primary actions
+   on this panel and a fourth solid control would flatten that. */
+#app .lh-codeproj .lh-cp-depth-btn {
+  background: transparent;
+  border: 1px solid var(--lh-line-strong);
+  color: var(--lh-ink-mid);
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: var(--lh-r-xs);
+  cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-depth-btn.lh-cp-depth--on {
+  background: var(--lh-primary-soft);
+  color: var(--lh-primary-strong);
+  border-color: var(--lh-primary-line);
+  font-weight: 700;
+}
+.lh-codeproj .lh-cp-entry-title { display: flex; align-items: baseline; gap: var(--lh-s2); }
+.lh-codeproj .lh-cp-entry-foot { margin-top: var(--lh-s2); display: flex; justify-content: flex-end; }
+#app .lh-codeproj .lh-cp-entry-promote, #app .lh-codeproj .lh-cp-note-expand {
+  background: transparent;
+  border: 1px solid var(--lh-line-strong);
+  color: var(--lh-ink-mid);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--lh-r-xs);
+  cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-entry-promote:hover, #app .lh-codeproj .lh-cp-note-expand:hover {
+  color: var(--lh-ink);
+  border-color: var(--lh-primary);
+}
 /* ── 주석 레이어 (FR-21) ─────────────────────────────────────────────────────
    Three channels have to be readable on one line at once: selection owns the row
    background, a scrap owns the left rail, so an annotation gets the text's underline.
@@ -791,7 +828,9 @@ body {
   font-family: var(--lh-font-mono); font-size: 11.5px; color: var(--lh-ink-mid); cursor: pointer;
 }
 #app .lh-codeproj .lh-cp-note-ref:hover { color: var(--lh-primary); text-decoration: underline; }
-.lh-codeproj .lh-cp-note-foot { margin-top: 10px; display: flex; justify-content: flex-end; }
+/* Two actions of different cost: collecting the region is free, asking for more is a call.
+   They sit at opposite ends so a mis-click cannot spend one while reaching for the other. */
+.lh-codeproj .lh-cp-note-foot { margin-top: 10px; display: flex; justify-content: space-between; gap: var(--lh-s2); }
 
 /* The two header entry points are labels, not new buttons: the panel head is a single nowrap
    row with overflow hidden, so a fifth control there would simply be clipped away. */

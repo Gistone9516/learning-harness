@@ -121,6 +121,11 @@ export interface CodePanel {
   offerAnnotationRetry(show: boolean, run: () => void): void;
   /** A reference followed from inside a note; the mount owns moving between files. */
   onNoteRef(cb: (path: string, line?: number) => void): void;
+  /**
+   * Promote a note to a short answer. Registering this is what makes the popup's button appear,
+   * so an instance with no session never renders a control that cannot work.
+   */
+  onNoteExpand(cb: (lines: [number, number], what: string) => void): void;
   /** Scroll a line into view and select it, for a code reference or a scrap list entry. */
   reveal(range: [number, number]): void;
 }
@@ -156,6 +161,7 @@ export function createCodePanel(): CodePanel {
   let noteIndex: Int32Array | null = null;
   let lineCount = 0;
   let refListener: ((path: string, line?: number) => void) | null = null;
+  let expandListener: ((lines: [number, number], what: string) => void) | null = null;
   let closeTimer: number | null = null;
   let retry: (() => void) | null = null;
 
@@ -218,6 +224,11 @@ export function createCodePanel(): CodePanel {
     onScrap: (r) => {
       setRange(r);
       scrapListener?.(r);
+    },
+    canExpand: () => expandListener !== null,
+    onExpand: (note) => {
+      setRange(note.target.lines);
+      expandListener?.(note.target.lines, note.what);
     },
     onRef: (path, line) => refListener?.(path, line),
   });
@@ -378,6 +389,9 @@ export function createCodePanel(): CodePanel {
     onNoteRef(cb) {
       refListener = cb;
     },
+    onNoteExpand(cb) {
+      expandListener = cb;
+    },
     offerAnnotationRetry(show, run) {
       retry = show ? run : null;
       paint();
@@ -413,9 +427,11 @@ export function createCodePanel(): CodePanel {
 
 // ── AI panel (right) ──────────────────────────────────────────────────────────
 
+export type AnswerDepth = "full" | "semi";
+
 export interface AiPanelHandlers {
   onExplain(lens: Lens): void;
-  onAsk(question: string): void;
+  onAsk(question: string, depth: AnswerDepth): void;
   onScrapRemove?(id: string): void;
   onScrapReveal?(id: string): void;
   onScrapClear?(): void;
@@ -439,9 +455,14 @@ export interface AiPanel {
    * `setContent` takes a rendered element (a composed answer); `setBody` takes plain text, which
    * is what a malformed or degraded answer falls back to.
    */
-  startEntry(title: string): {
+  startEntry(title: string, opts?: { depth?: AnswerDepth }): {
     setBody(text: string): void;
     setContent(node: HTMLElement): void;
+    /**
+     * Offer one action under the answer. Used for the promotion path out of a short answer; the
+     * entry has no footer at all until something asks for one.
+     */
+    setFooter(label: string, run: () => void): void;
     /**
      * Replace the pending text and mark it as a long wait. The ordinary 5-13s call keeps the
      * quiet static line; this is for the rare generation-class wait, where unchanging grey text
@@ -488,7 +509,21 @@ export function createAiPanel(handlers: AiPanelHandlers): AiPanel {
   root.appendChild(targetHint);
   root.appendChild(scrapBox);
   root.appendChild(lensBar);
+  // Depth lives beside the question box, always visible: a mode tucked into a settings screen is
+  // one the learner forgets is on. It is styled as a quiet selected state, not a third filled
+  // button competing with 설명 요청 and 질문 for the eye.
+  const depthRow = el("div", "lh-cp-depth");
+  depthRow.appendChild(el("span", "lh-cp-depth-label", "답변 길이"));
+  const shortBtn = el("button", "lh-cp-depth-btn", "짧게");
+  const longBtn = el("button", "lh-cp-depth-btn", "자세히");
+  shortBtn.type = "button";
+  longBtn.type = "button";
+  depthRow.appendChild(shortBtn);
+  depthRow.appendChild(longBtn);
+  let depth: AnswerDepth = "semi";
+
   root.appendChild(thread);
+  root.appendChild(depthRow);
   root.appendChild(askBar);
 
   explainBtn.addEventListener("click", () => handlers.onExplain(lensSelect.value as Lens));
@@ -497,8 +532,17 @@ export function createAiPanel(handlers: AiPanelHandlers): AiPanel {
     const question = askInput.value.trim();
     if (!question) return;
     askInput.value = "";
-    handlers.onAsk(question);
+    handlers.onAsk(question, depth);
   });
+
+  function setDepth(next: AnswerDepth): void {
+    depth = next;
+    shortBtn.classList.toggle("lh-cp-depth--on", next === "semi");
+    longBtn.classList.toggle("lh-cp-depth--on", next === "full");
+  }
+  shortBtn.addEventListener("click", () => setDepth("semi"));
+  longBtn.addEventListener("click", () => setDepth("full"));
+  setDepth("semi");
 
   return {
     root,
@@ -539,10 +583,17 @@ export function createAiPanel(handlers: AiPanelHandlers): AiPanel {
         scrapBox.appendChild(item);
       }
     },
-    startEntry(title) {
+    startEntry(title, opts) {
       empty.remove();
       const entry = el("div", "lh-cp-entry");
-      entry.appendChild(el("div", "lh-cp-entry-title", title));
+      const head = el("div", "lh-cp-entry-title", title);
+      if (opts?.depth === "semi") {
+        entry.classList.add("lh-cp-entry--semi");
+        // The badge the kit already uses to qualify a title, rather than a second one that would
+        // mean the same thing.
+        head.appendChild(el("span", "lh-cp-ai-badge", "짧은 답"));
+      }
+      entry.appendChild(head);
       const body = el("div", "lh-cp-entry-body", "불러오는 중...");
       entry.appendChild(body);
       thread.appendChild(entry);
@@ -562,6 +613,14 @@ export function createAiPanel(handlers: AiPanelHandlers): AiPanel {
         setWaiting(text: string) {
           body.classList.add("lh-cp-entry-waiting");
           body.textContent = text;
+          thread.scrollTop = thread.scrollHeight;
+        },
+        setFooter(label: string, run: () => void) {
+          const foot = el("div", "lh-cp-entry-foot");
+          const btn = el("button", "lh-cp-entry-promote", label);
+          btn.addEventListener("click", run);
+          foot.appendChild(btn);
+          entry.appendChild(foot);
           thread.scrollTop = thread.scrollHeight;
         },
       };

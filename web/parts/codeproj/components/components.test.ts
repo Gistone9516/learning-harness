@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 import { parseComposed } from "./parse";
 import { renderComposed, renderBlock } from "./render";
 import { buildComponentDirective } from "./catalog";
+import { normalizeSemi, SEMI_CAP } from "./semi";
 import { KNOWN_BLOCKS, type Block } from "./types";
 
 const ctx = { navigate: vi.fn(), currentPath: "app/service.py", exists: () => true };
@@ -186,5 +187,33 @@ describe("the semi answer catalogue", () => {
     // afford; the full answer keeps it.
     expect(buildComponentDirective("semi")).not.toContain('"t":"lead"');
     expect(buildComponentDirective("full")).toContain('"t":"lead"');
+  });
+});
+
+describe("normalizeSemi", () => {
+  const b = (t: string, text = 'x') => ({ t, text }) as never;
+
+  it("puts the answer first however late it arrived", () => {
+    // A model that opens with two paragraphs before the answer has produced exactly the full
+    // answer this layer exists to avoid.
+    const out = normalizeSemi({ blocks: [b("text"), b("flow"), b("answer")] });
+    expect(out.blocks[0].t).toBe("answer");
+  });
+
+  it("keeps the rest in the order the model chose", () => {
+    const out = normalizeSemi({ blocks: [b("text"), b("answer"), b("why")] });
+    expect(out.blocks.map((x) => x.t)).toEqual(["answer", "text", "why"]);
+  });
+
+  it("caps the length, because the block budget is a request the model can ignore", () => {
+    const out = normalizeSemi({ blocks: [b("answer"), b("text"), b("why"), b("flow"), b("caution"), b("ref")] });
+    expect(out.blocks).toHaveLength(SEMI_CAP);
+  });
+
+  it("leaves an answer-less reply alone rather than inventing one", () => {
+    // Nothing here is allowed to write content; if the model gave no direct answer, saying so
+    // by absence is more honest than promoting some other block into the slot.
+    const out = normalizeSemi({ blocks: [b("text"), b("why")] });
+    expect(out.blocks.map((x) => x.t)).toEqual(["text", "why"]);
   });
 });

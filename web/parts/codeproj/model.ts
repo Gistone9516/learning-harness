@@ -53,6 +53,17 @@ export interface AskRequest {
   question: string;
   /** When set, these regions are the subject instead of `target` alone. */
   scraps?: Scrap[];
+  /**
+   * How much answer to ask for. Required, not defaulted: depth decides what the call costs and
+   * how long the learner waits, and a cost that can be chosen implicitly is one nobody chose.
+   * Lens explanations are always full; only free questions carry this.
+   */
+  depth: "full" | "semi";
+  /**
+   * The annotation covering the asked-about lines, when there is one. Sent as prior knowledge so
+   * a short answer can start from what is already known instead of rediscovering it.
+   */
+  grounds?: { what: string; why?: string };
 }
 
 /** Total size guard: past this the call gets slow and the answer unfocused. */

@@ -170,7 +170,7 @@ describe("asking about the basket", () => {
 
 describe("prompt builders", () => {
   it("keeps single-target behaviour when no region is collected", () => {
-    const prompt = buildAskPrompt({ target: { path: "a.py", lines: [2, 4] }, question: "왜?" }, "code");
+    const prompt = buildAskPrompt({ target: { path: "a.py", lines: [2, 4] }, question: "왜?", depth: "full" }, "code");
     expect(prompt).toContain("파일: a.py");
     expect(prompt).not.toContain("구간 1");
   });

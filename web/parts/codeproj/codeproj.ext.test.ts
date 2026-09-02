@@ -101,12 +101,12 @@ describe("concept lens (FR-13)", () => {
 describe("free-form question (FR-4, FR-5)", () => {
   it("passes the learner's wording through untouched", () => {
     const question = "왜 여기서 캐시를 안 쓰나요?";
-    expect(buildAskPrompt({ target: { path: "src/app.ts" }, question })).toContain(question);
+    expect(buildAskPrompt({ target: { path: "src/app.ts" }, question, depth: "full" })).toContain(question);
   });
 
   it("quotes the selected lines so the model sees the exact target", () => {
     const prompt = buildAskPrompt(
-      { target: { path: "src/app.ts", lines: [2, 3] }, question: "이 부분은?" },
+      { target: { path: "src/app.ts", lines: [2, 3] }, question: "이 부분은?", depth: "full"  },
       sliceLines(PROJECT.files[0].content, [2, 3]),
     );
     expect(prompt).toContain("라인: 2-3");
@@ -118,7 +118,7 @@ describe("free-form question (FR-4, FR-5)", () => {
     const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
     const session = new AiSession(client);
     await generateProject(session, { topic: "t", scale: "small" });
-    await ask(session, { target: { path: "src/app.ts" }, question: "질문" });
+    await ask(session, { target: { path: "src/app.ts" }, question: "질문", depth: "full"  });
 
     expect(sent).toHaveLength(2);
     expect(sent[1].session_id).toBe("s1");
@@ -127,7 +127,7 @@ describe("free-form question (FR-4, FR-5)", () => {
 
   it("reports a failure as readable text rather than throwing", async () => {
     const { client } = stubClient({ ok: false, error: "boom", text: "" });
-    const out = await ask(new AiSession(client), { target: { path: "p" }, question: "q" });
+    const out = await ask(new AiSession(client), { target: { path: "p" }, question: "q", depth: "full"  });
     expect(out).toContain("boom");
   });
 });

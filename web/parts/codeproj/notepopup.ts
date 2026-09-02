@@ -12,6 +12,14 @@ import { el } from "./view";
 export interface NotePopupHandlers {
   /** Collect the annotated range, exactly as the header's own button does. */
   onScrap(range: [number, number]): void;
+  /** Promote this note to a short answer. */
+  onExpand(note: Annotation): void;
+  /**
+   * Whether promotion is possible at all, asked when the popup is drawn rather than when it is
+   * built: the mount registers its handlers after this exists, so construction time is too early
+   * to know. Without it an instance with no session draws a button that does nothing.
+   */
+  canExpand(): boolean;
   /** A reference the learner followed. Closing is the popup's job; navigating is the mount's. */
   onRef(path: string, line?: number): void;
 }
@@ -87,6 +95,14 @@ export function createNotePopup(handlers: NotePopupHandlers): NotePopup {
       handlers.onScrap(note.target.lines);
     });
     foot.appendChild(scrap);
+    if (handlers.canExpand()) {
+      const expand = el("button", "lh-cp-note-expand", "더 알아보기");
+      expand.addEventListener("click", () => {
+        hide();
+        handlers.onExpand(note);
+      });
+      foot.appendChild(expand);
+    }
     root.appendChild(foot);
   }
 

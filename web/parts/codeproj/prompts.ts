@@ -178,11 +178,18 @@ export function buildAskPrompt(req: AskRequest, quoted?: string): string {
   const context = req.scraps?.length
     ? describeScraps(req.scraps)
     : describeTarget(req.target, quoted);
+  // What the annotation layer already said about this code. It is a generated artifact too,
+  // so it is offered as a prior and explicitly loses to the code.
+  const grounds = req.grounds
+    ? `[이미 알려진 것]\n${req.grounds.what}${req.grounds.why ? `\n${req.grounds.why}` : ""}\n` +
+      "이 내용을 근거로 삼되, 코드와 어긋나면 코드를 따르세요.\n\n"
+    : "";
   return (
     `[질문]\n${context}\n\n` +
+    grounds +
     `${req.question}\n\n` +
     "이 프로젝트의 실제 코드를 근거로 답하세요. 확실하지 않은 부분은 추측하지 말고 그렇다고 밝히세요." +
-    buildComponentDirective("full")
+    buildComponentDirective(req.depth)
   );
 }
 
