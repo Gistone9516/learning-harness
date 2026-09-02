@@ -60,8 +60,8 @@ The web reaches the claude subscription only through `bot/ai_server.py` (built a
 type AiRequest = {
   prompt: string;                 // required, non-empty
   system?: string;                // optional preamble
-  model?: string;                 // default = server/ctx model (claude-opus-5[1m])
-  effort?: "low"|"medium"|"high"; // default "low"; web modules pass "medium"
+  model?: string;                 // the instance decides; the kit names no model
+  effort?: "low"|"medium"|"high"|"xhigh"|"max"; // default "low"; explanations pass "medium", generation "xhigh"
   session_id?: string|null;       // null/absent = new session; a prior id = --resume
 };
 ```
@@ -73,6 +73,8 @@ type AiResponse = {
   text: string;
   session_id: string|null;        // the effective session id; store it to --resume later
   error: string|null;
+  error_kind: string|null;        // "resume_missing" = the session to resume is gone. Reload the
+                                  // context and retry once; every other failure must NOT reload.
 };
 ```
 - Failure of the underlying call is reported as `ok:false` with `error` (HTTP still `200`); transport/auth/shape errors use `401`/`400`/`404`/`500` with `{"ok":false,"error":...}`.
@@ -172,14 +174,15 @@ type ProgressRecord = {
 `web/src/flow` holds the two flows the shell mounts around the parts; keeping them out of the parts is what lets a part stay a working unit on its own (§1).
 
 - `flow/study.ts` — **proposal → launch → generated project**. Proposals are records the operator AI writes; the learner picks one (or names a topic) and the generation form opens pre-filled. **Generation starts only on the learner's own action** — the operator's autonomy ends at writing a proposal, so nothing may auto-generate on load.
-- `flow/workspace.ts` — the archive: a generated project is stored as a record at generation time and reopened from there. Reopening is read-only and must work with no `ai_server` at all (§7).
+- `flow/workspace.ts` — the archive: a generated project is stored as a record at generation time and reopened from there. Reopening **resumes the session that already holds the codebase** (the id is kept in its own record), so explanation and questions carry on. Adopting costs no call; whether the server still holds the session only surfaces on the first request, and a lost one is reseeded once per mount.
+- Reading an archive must still work with **no `ai_server` at all** (§7): with no session the AI pane is hidden rather than left as dead controls, and the annotation layer keeps working because it is stored, not asked for.
 - `parts/dashboard` — study history, read from **index summaries only** (`history`, `progress`, `projects`), never by opening every record. Token 0: it renders what the store already derived, and computes no aggregate the store does not have.
 
 ---
 
 ## 6. AI generation contract (shared shape)
 
-Modules that generate content do one `POST /ai` with `effort:"medium"`, model `claude-opus-5[1m]`, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
+Modules that generate content do one `POST /ai` with `effort:"xhigh"` (generation only — every other call is `"medium"`), the model the instance configured, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
 
 ### 6.1 Intent-first generation (operating rule)
 

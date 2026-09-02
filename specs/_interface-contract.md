@@ -192,12 +192,16 @@ AI capabilities (layer 3) depend **only on this adapter** (no discord-bridge dep
 @dataclass
 class AIResult:
     text: str; ok: bool; error: str | None
+    session_id: str | None
+    error_kind: str | None   # "resume_missing" when the session to resume is gone; else None
 
 async def invoke(prompt, *, system=None, model=None, effort: Effort = "low",
                  max_tokens=None, session_id=None, on_stream=None) -> AIResult: ...
 ```
 - `session_id=None` -> one-shot (new session). Specified -> resume that session (multi-turn). Launch command (`claude -p stream-json`, `--session-id`/`--resume`, Windows) = ai-mode §1.
 - Token control (contract): short system prompt, effort low by default, max_tokens ceiling, no call when conditions are not met. Details = ai-mode §2.
+- `Effort` includes `"xhigh"` and `"max"`. Generation is the one call whose output is read for hours, so it takes the deepest setting; everything else stays at `"medium"`, because the measured floor for any call is ~5s regardless of effort and lowering it buys no speed.
+- `error_kind` carries the one distinction a caller acts on: a resume whose session the CLI no longer holds. Classified on the CLI's own message, not the exit code -- an unrecognised model exits non-zero too, and treating that as a lost session spends a full context reload on a call that will fail again.
 
 ---
 

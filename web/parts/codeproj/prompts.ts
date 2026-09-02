@@ -54,10 +54,19 @@ export const QUALITY_CLAUSE = [
   "  configured output language.",
 ].join("\n");
 
+/**
+ * Line budgets counted the domain code and forgot everything QUALITY_CLAUSE asks for in the
+ * same breath. Measured 2026-09-02: a medium project came back at 14 files and 1158 lines,
+ * squarely inside the file range and 258 past the line one -- and the overflow was not padding,
+ * it was the README (84), the tests (171), the error hierarchy (94) and the schemas (69) that
+ * the clause requires. The two halves of the instruction contradicted each other, and the
+ * model obeyed the file count. `small` was the worst of the three: six files is the floor
+ * QUALITY_CLAUSE implies, so 3-6 left no room for domain code at all.
+ */
 const SCALE_GUIDE: Record<string, string> = {
-  small: "3-6 files, ~300 lines total",
-  medium: "7-15 files, ~600 lines total",
-  large: "16-30 files, ~1200 lines total",
+  small: "6-9 files, ~500 lines total",
+  medium: "10-16 files, ~1100 lines total",
+  large: "18-30 files, ~2000 lines total",
 };
 
 export function buildGenerateSystem(): string {

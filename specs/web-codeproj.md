@@ -9,7 +9,7 @@
 
 - **Comprehension, not execution** — v1 has no code sandbox. The learner reads; AI explains. (A sandbox is backlog.)
 - **AI-centric** — project generation and explanations go through `ai_server` (Web SoT §2); navigation and rendering are token 0.
-- **Session load-once → resume** (Web SoT §2 lifecycle) is the cost model: generate the project once (codebase enters the session context), then each click resumes that session for a small targeted explanation. Model `claude-opus-5[1m]`, effort `medium` (1M context holds a small-to-mid project; project scale is the difficulty knob and the natural ceiling).
+- **Session load-once → resume** (Web SoT §2 lifecycle) is the cost model: generate the project once (codebase enters the session context), then each click resumes that session for a small targeted explanation. The instance names the model; the kit does not. Generation runs at `xhigh` and everything else at `medium`. Project scale is the difficulty knob and the natural ceiling.
 - Subject-agnostic: topic/scale/seed are injected or user-chosen; the part carries no subject literal.
 
 ---
@@ -21,7 +21,7 @@ One `POST /ai` (force_json) generates a coherent project and seeds the session.
 **Input** (web → `/ai`):
 - `system`: generator role (from config `tasks.codeproj`, subject-agnostic) + the §6 JSON directive.
 - `prompt`: `{ topic, scale, seed? }` rendered to text — `topic` (what the project does), `scale` (difficulty, §4), optional `seed` (constraints/stack).
-- `session_id: null` (new session), `effort:"medium"`, `model: claude-opus-5[1m]`.
+- `session_id: null` (new session), `effort:"xhigh"`, model from the instance config.
 
 **Return** (parsed from `text`):
 ```ts

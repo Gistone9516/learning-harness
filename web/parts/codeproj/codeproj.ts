@@ -6,6 +6,7 @@
 // EVENTS: the freshly built annotation layer via onAnnotations — the part makes it, the owner stores it.
 // AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
+// CONSTRAINTS: generation is the only xhigh call; annotations, explanations and questions are medium.
 // DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
 //
 // Layout is the three-pane IDE shape: files left, code centre, AI right. This file only assembles
