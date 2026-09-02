@@ -65,4 +65,41 @@ describe("ai client", () => {
     await session.send({ prompt: "explain X" });
     expect(JSON.parse((calls[1].init as any).body).session_id).toBe("sid-9"); // second: resume
   });
+
+  it("adopt() resumes a session minted by an earlier visit", async () => {
+    // Reopening an archived project has to reach the session that already holds the codebase,
+    // and it must do so without spending a call: adopt sets the id, the next send uses it.
+    const { f, calls } = mockFetch(() => ({ status: 200, json: { ok: true, text: "r", session_id: "old-sid", error: null } }));
+    const session = new AiSession(createAiClient({ baseUrl: "http://x", token: "t", fetchImpl: f }));
+    session.adopt("old-sid");
+    expect(session.sessionId).toBe("old-sid");
+    expect(calls.length).toBe(0); // adopting costs nothing
+    await session.send({ prompt: "explain X" });
+    expect(JSON.parse((calls[0].init as any).body).session_id).toBe("old-sid");
+  });
+
+  it("adopt(null) leaves the next send minting a new session", async () => {
+    const { f, calls } = mockFetch(() => ({ status: 200, json: { ok: true, text: "r", session_id: "fresh", error: null } }));
+    const session = new AiSession(createAiClient({ baseUrl: "http://x", token: "t", fetchImpl: f }));
+    session.adopt(null);
+    await session.send({ prompt: "generate" });
+    expect(JSON.parse((calls[0].init as any).body).session_id).toBe(null);
+  });
+
+  it("carries error_kind through so a lost session is distinguishable", async () => {
+    // The server answers 200 with ok:false for every AI-level failure, so this field is the
+    // only thing separating "your session is gone, resend the codebase" from "that model does
+    // not exist" -- and reseeding on the wrong one costs a whole generation budget.
+    const { f } = mockFetch(() => ({
+      status: 200,
+      json: { ok: false, text: "", session_id: null, error: "claude exit code 1: No conversation found", error_kind: "resume_missing" },
+    }));
+    const session = new AiSession(createAiClient({ baseUrl: "http://x", token: "t", fetchImpl: f }));
+    session.adopt("dead-sid");
+    const res = await session.send({ prompt: "explain X" });
+    expect(res.ok).toBe(false);
+    expect(res.error_kind).toBe("resume_missing");
+    // A failed send must not clear the id: the reseed needs to know which session was lost.
+    expect(session.sessionId).toBe("dead-sid");
+  });
 });

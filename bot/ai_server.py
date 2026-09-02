@@ -296,6 +296,9 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                 "text": result.text,
                 "session_id": result.session_id,
                 "error": result.error,
+                # Without this key the browser can never see a lost session, and the reseed
+                # path in the web client degrades silently to "never reseed".
+                "error_kind": result.error_kind,
             }, ensure_ascii=False).encode("utf-8")
             writer.write(_response("200 OK", out, origin))
             await writer.drain()

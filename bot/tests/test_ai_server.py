@@ -74,3 +74,24 @@ def test_check_auth():
     assert not ai_server.check_auth({"authorization": "Bearer wrong"}, "secret")
     assert not ai_server.check_auth({}, "secret")
     assert not ai_server.check_auth({"x-ai-token": "secret"}, "")   # no server token -> never authed
+
+
+def test_error_kind_reaches_the_client(monkeypatch):
+    """The serializer lists its keys explicitly, so a new field is invisible until added there.
+
+    Without this key on the wire the browser can never tell a lost session from any other
+    failure, and the reseed path degrades silently to "never reseed".
+    """
+
+    async def fake_invoke(prompt, *, system=None, model=None, effort="low", session_id=None,
+                          on_stream=None, **kwargs):
+        return AIResult(text="", ok=False, error="claude exit code 1: No conversation found",
+                        session_id=None, error_kind="resume_missing")
+
+    monkeypatch.setattr(ai, "invoke", fake_invoke)
+    _health, _unauth, ok, _empty = asyncio.run(_run_cases())
+
+    assert ok[0].startswith("HTTP/1.1 200")   # an AI failure is still a 200 with ok:false
+    data = json.loads(ok[1])
+    assert data["ok"] is False
+    assert data["error_kind"] == "resume_missing"

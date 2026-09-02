@@ -173,14 +173,14 @@ nothing (zero file I/O, discord, or harness imports).
 
 ```bash
 cd engine && python -m pytest tests/ -q      # 159 pure-engine regression tests
-cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session, handlers, caps, AI seam, renderers)
+cd bot    && python -m pytest tests/ -q      # 425 headless tests (boot/session, handlers, caps, AI seam, renderers)
 ```
 - The engine core is pure functions (`now` is injected for determinism). The bot is verified headless without
   discord or a live `claude` CLI (boot, session loop, handler grading cores, sidecar I/O, and the AI helper
   layer with a mocked `invoke`). Discord I/O and live AI are exercised only against a running bot.
 
 ```bash
-cd web && npm install && npm test     # 239 headless web tests (grade parity, parts, ai client, pre-baked offline mount, subject-agnostic guard)
+cd web && npm install && npm test     # 242 headless web tests (grade parity, parts, ai client, pre-baked offline mount, subject-agnostic guard)
 cd web && npm run build               # tsc --noEmit + vite production build
 ```
 - The web kit is verified headless with vitest (the TS grader is checked against engine-generated golden
@@ -191,7 +191,7 @@ cd web && npm run build               # tsc --noEmit + vite production build
 One test is opt-in because it spends money: `parts/codeproj/codeproj.live.test.ts` calls a running
 `ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`. There is no
 vitest config in this repo, so the default include glob picks the file up and the gate lives inside it —
-without `LH_LIVE` the suite is skipped and `npm test` stays at 239 green.
+without `LH_LIVE` the suite is skipped and `npm test` stays at 242 green.
 
 ```bash
 cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/codeproj.live.test.ts
@@ -226,12 +226,12 @@ cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codepro
     (`bot/subject.py` SubjectProfile); the per-subject `clone` tool was removed in favor of one app
     running against per-subject data folders (each with its own `.env`). Guardrail test enforces zero
     subject literal in kit code.
-- 578 python tests green, all headless (measured 2026-09-01). The deterministic loop and every new
+- 584 python tests green, all headless (measured 2026-09-02). The deterministic loop and every new
   capability are proven without discord or a live `claude` CLI (mocked `invoke`).
 - Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with four
   parts (sheet, codeproj, dashboard, conceptprob), a shared engine grader port (golden-vector parity with the
   Python engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
-  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 239 web tests green plus a clean `tsc --noEmit` (measured 2026-09-02).
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 242 web tests green plus a clean `tsc --noEmit` (measured 2026-09-02).
   Project generation is now proven end to end against a live CLI, not just against a mock: one opt-in run
   (§5) returned a 14-file, 1158-line FastAPI project in 279s with no fabricated tool-call blocks and no
   stray writes. That run also showed `SCALE_GUIDE` is miscalibrated — its `medium` line budget does not

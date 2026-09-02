@@ -19,6 +19,12 @@ export interface AiResponse {
   text: string;
   session_id: string | null;
   error: string | null;
+  /**
+   * "resume_missing" when the server was asked to resume a session it no longer holds.
+   * Optional on purpose: the HTTP-failure and fetch-exception paths build a response without
+   * it, so a caller that tests for the one value it acts on stays correct on every path.
+   */
+  error_kind?: string | null;
 }
 
 export interface AiClientConfig {
@@ -111,6 +117,15 @@ export class AiSession {
     const res = await this.client.ai({ ...req, session_id: this.sid });
     if (res.ok && res.session_id) this.sid = res.session_id;
     return res;
+  }
+
+  /**
+   * Take over a session minted by an earlier visit (a project reopened from the record store).
+   * The session may already be gone server-side; that surfaces on the next send rather than
+   * here, because probing it would cost a call on the path that is supposed to be free.
+   */
+  adopt(sid: string | null): void {
+    this.sid = sid;
   }
 
   get sessionId(): string | null {

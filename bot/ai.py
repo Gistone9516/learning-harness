@@ -41,7 +41,12 @@ class AIResult:
     text: str
     ok: bool
     error: str | None = None
-    session_id: str | None = None   # the effective claude session id used (lets the caller --resume on later turns)
+    session_id: str | None = None
+    # The single distinction a caller acts on. "resume_missing" means the CLI no longer holds
+    # the session we asked it to resume, so the caller must re-send the context it had loaded.
+    # Every other failure leaves it None: re-sending a codebase after a timeout or a bad model
+    # buys nothing and costs a full generation budget.
+    error_kind: str | None = None   # the effective claude session id used (lets the caller --resume on later turns)
 
 
 async def invoke(
@@ -152,7 +157,20 @@ async def invoke(
 
     if proc.returncode != 0:
         err_msg = stderr_bytes.decode("utf-8", errors="replace").strip()
-        return AIResult(text="", ok=False, error=f"claude exit code {proc.returncode}: {err_msg}")
+        # Classify on the CLI's own message, not on the exit code: an unrecognized model also
+        # exits 1 ("[claude-code:unrecognized_model]"), and treating that as a lost session
+        # would spend a codebase reseed on a call that is going to fail again anyway.
+        # Measured 2026-09-02 against claude 2.1.247: resuming an id the CLI never had returns
+        # exit 1 with "No conversation found with session ID: <id>".
+        # If a future CLI changes that wording the match simply stops firing, which degrades to
+        # "never reseed" -- the safe direction, since the learner can still reload the page.
+        resume_lost = not is_new_session and "no conversation found" in err_msg.lower()
+        return AIResult(
+            text="",
+            ok=False,
+            error=f"claude exit code {proc.returncode}: {err_msg}",
+            error_kind="resume_missing" if resume_lost else None,
+        )
 
     # Parse stdout lines (ai-mode §1)
     final_text = ""

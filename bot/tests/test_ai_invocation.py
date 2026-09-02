@@ -101,3 +101,85 @@ def test_new_session_mints_an_id(spawned):
     result = run()
     assert "--session-id" in spawned["cmd"]
     assert result.session_id
+
+
+# ── error_kind: the one bit a caller acts on ──────────────────────────────────
+#
+# A caller that sees "resume_missing" re-sends the context it had loaded (a whole codebase).
+# Getting the classification wrong is expensive in both directions: a miss makes the feature
+# dead, a false positive spends a generation budget on a call that will fail again.
+
+LOST_SESSION_STDERR = "No conversation found with session ID: 00000000-dead-4000-8000-000000000000"
+BAD_MODEL_STDERR = '[claude-code:unrecognized_model] {"model":"claude-opus-99","query_source":"sdk"}'
+
+
+class FailingProc:
+    """A claude process that exits non-zero with a given stderr."""
+
+    def __init__(self, returncode, stderr):
+        self.returncode = returncode
+        self._stderr = stderr
+
+    async def communicate(self, input=None):
+        return b"", self._stderr.encode("utf-8")
+
+    def kill(self):
+        pass
+
+    async def wait(self):
+        return self.returncode
+
+
+class TimingOutProc(FailingProc):
+    async def communicate(self, input=None):
+        raise asyncio.TimeoutError()
+
+
+@pytest.fixture()
+def spawns(monkeypatch):
+    """Install a fake claude process for one invoke()."""
+
+    def arrange(proc):
+        async def fake_spawn(cmd_str, **kwargs):
+            return proc
+
+        monkeypatch.setattr(ai.asyncio, "create_subprocess_shell", fake_spawn)
+
+    return arrange
+
+
+def test_a_resumed_session_the_cli_lost_is_tagged(spawns):
+    spawns(FailingProc(1, LOST_SESSION_STDERR))
+    result = asyncio.run(ai.invoke("PROMPT", session_id="sid-42"))
+    assert result.ok is False
+    assert result.error_kind == "resume_missing"
+
+
+def test_an_unrecognized_model_is_not_a_lost_session(spawns):
+    # Both failures exit 1 (measured 2026-09-02, claude 2.1.247), so classifying on the exit
+    # code would send the whole codebase again here for nothing.
+    spawns(FailingProc(1, BAD_MODEL_STDERR))
+    result = asyncio.run(ai.invoke("PROMPT", session_id="sid-42"))
+    assert result.ok is False
+    assert result.error_kind is None
+
+
+def test_a_new_session_is_never_tagged_as_lost(spawns):
+    # You cannot lose a session you never asked to resume, whatever the CLI printed.
+    spawns(FailingProc(1, LOST_SESSION_STDERR))
+    result = asyncio.run(ai.invoke("PROMPT"))
+    assert result.ok is False
+    assert result.error_kind is None
+
+
+def test_a_timeout_is_never_tagged(spawns):
+    # Silence means the model is still working, not that the session is gone.
+    spawns(TimingOutProc(1, ""))
+    result = asyncio.run(ai.invoke("PROMPT", session_id="sid-42"))
+    assert result.ok is False
+    assert "Timeout" in result.error
+    assert result.error_kind is None
+
+
+def test_a_successful_call_carries_no_error_kind(spawned):
+    assert asyncio.run(ai.invoke("PROMPT", session_id="sid-42")).error_kind is None
