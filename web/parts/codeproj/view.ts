@@ -2,6 +2,8 @@
 // right. Each panel is a small factory returning its element plus the handful of operations the
 // mount needs, so the mount wires panels together instead of manipulating their internals.
 
+import { buildLineIndex, fileNote, type Annotation } from "./annotations";
+import { createNotePopup } from "./notepopup";
 import type { GeneratedProject, Lens, TreeNode } from "./model";
 import { LENS_LABELS, LENS_ORDER } from "./prompts";
 import { highlightLines } from "../../src/highlight/highlight";
@@ -107,6 +109,13 @@ export interface CodePanel {
   onScrapAdd(cb: (range: [number, number]) => void): void;
   /** Ranges already collected in the file on screen, marked so they are visible while reading. */
   markScraps(ranges: [number, number][]): void;
+  /**
+   * The annotations for the file on screen. A method rather than a callback because the two
+   * callback slots this panel exposes are single-assignment and both are already taken.
+   */
+  setAnnotations(items: Annotation[]): void;
+  /** A reference followed from inside a note; the mount owns moving between files. */
+  onNoteRef(cb: (path: string, line?: number) => void): void;
   /** Scroll a line into view and select it, for a code reference or a scrap list entry. */
   reveal(range: [number, number]): void;
 }
@@ -114,14 +123,19 @@ export interface CodePanel {
 export function createCodePanel(): CodePanel {
   const root = el("div", "lh-cp-panel lh-cp-code-panel");
   const head = el("div", "lh-cp-panel-head");
-  const pathLabel = el("span", "lh-cp-path-label", "파일을 선택하세요");
+  const pathLabel = el("button", "lh-cp-path-label", "파일을 선택하세요");
   const selectionLabel = el("span", "lh-cp-selection-label", "");
+  // Shown only when the selected line actually has a note, so it is never a control that does
+  // nothing. It carries the gesture too, because nothing else on screen teaches it.
+  const noteLink = el("button", "lh-cp-note-link", "주석 보기 (Alt+Enter)");
+  noteLink.hidden = true;
   const scrapBtn = el("button", "lh-cp-scrap-btn", "스크랩 담기");
   scrapBtn.hidden = true;
   const clearBtn = el("button", "lh-cp-clear-selection", "선택 해제");
   clearBtn.hidden = true;
   head.appendChild(pathLabel);
   head.appendChild(selectionLabel);
+  head.appendChild(noteLink);
   head.appendChild(scrapBtn);
   head.appendChild(clearBtn);
   const codeArea = el("div", "lh-cp-code-scroll");
@@ -133,6 +147,11 @@ export function createCodePanel(): CodePanel {
   let listener: ((r: [number, number] | null) => void) | null = null;
   let scrapListener: ((r: [number, number]) => void) | null = null;
   let scrapRanges: [number, number][] = [];
+  let notes: Annotation[] = [];
+  let noteIndex: Int32Array | null = null;
+  let lineCount = 0;
+  let refListener: ((path: string, line?: number) => void) | null = null;
+  let closeTimer: number | null = null;
 
   function paint(): void {
     codeArea.querySelectorAll(".lh-cp-code-line").forEach((lineEl) => {
@@ -141,21 +160,141 @@ export function createCodePanel(): CodePanel {
       e.classList.toggle("lh-cp-line-selected", !!range && n >= range[0] && n <= range[1]);
       // Collected regions stay marked while reading, in a quieter way than the live selection.
       e.classList.toggle("lh-cp-line-scrapped", scrapRanges.some(([a, b]) => n >= a && n <= b));
+      // Inert on its own; it only becomes visible while Ctrl is held. The class is static so
+      // holding Ctrl costs one class toggle on the container instead of a pass over every line.
+      e.classList.toggle("lh-cp-has-note", !!noteIndex && noteIndex[n] >= 0);
     });
+
+    const selected = range && noteIndex ? noteIndex[range[0]] : -1;
     selectionLabel.textContent = range ? `선택: ${range[0]}-${range[1]}행` : "";
+    // The keyboard and touch way in. It is a label rather than a header button because the head
+    // is a single nowrap row with overflow hidden, and a fifth control there is simply clipped.
+    noteLink.hidden = selected < 0;
     scrapBtn.hidden = !range;
     clearBtn.hidden = !range;
     listener?.(range);
+  }
+
+  /**
+   * Open the note covering a line, anchored to the whole range it explains.
+   *
+   * Anchoring to the hovered row alone puts the popup on top of the rest of the range, so a
+   * six-line note covers five of the lines it is about (08 §3.5: the popup must not hide the
+   * code). The union of the range's rows pushes it clear.
+   */
+  function openNoteAt(line: number): void {
+    if (!noteIndex || line < 1 || line > lineCount) return;
+    const i = noteIndex[line];
+    if (i < 0) return;
+    const [lo, hi] = notes[i].target.lines;
+    const first = codeArea.querySelector(`.lh-cp-code-line[data-line="${lo}"]`);
+    const last = codeArea.querySelector(`.lh-cp-code-line[data-line="${hi}"]`) ?? first;
+    if (!first || !last) return;
+    const a = first.getBoundingClientRect();
+    const b = last.getBoundingClientRect();
+    popup.showFor(notes[i], new DOMRect(a.left, a.top, a.width, b.bottom - a.top));
   }
 
   scrapBtn.addEventListener("click", () => {
     if (range) scrapListener?.(range);
   });
 
+  const popup = createNotePopup({
+    onScrap: (r) => {
+      setRange(r);
+      scrapListener?.(r);
+    },
+    onRef: (path, line) => refListener?.(path, line),
+  });
+  root.appendChild(popup.root);
+
+  function closeNote(): void {
+    if (closeTimer !== null) window.clearTimeout(closeTimer);
+    closeTimer = null;
+    popup.hide();
+  }
+
+  // Ctrl state is read off the pointer event rather than tracked with a global keydown listener.
+  // That listener is the one that gets stuck "held" when the window loses focus mid-press, and
+  // not having it means the bug cannot happen.
+  codeArea.addEventListener("mousemove", (ev) => {
+    const e = ev as MouseEvent;
+    codeArea.classList.toggle("lh-cp-ctrl-held", e.ctrlKey);
+    if (!e.ctrlKey) {
+      closeNote();
+      return;
+    }
+    const row = (e.target as HTMLElement | null)?.closest?.(".lh-cp-code-line") as HTMLElement | null;
+    if (!row) return;
+    const line = Number(row.dataset["line"]);
+    // A line with no note opens nothing. An empty popup is worse than no popup.
+    if (!noteIndex || noteIndex[line] < 0) {
+      closeNote();
+      return;
+    }
+    if (closeTimer !== null) {
+      window.clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    openNoteAt(line);
+  });
+
+  // Leaving the code gives a moment to reach the popup, which sits outside this element.
+  codeArea.addEventListener("mouseleave", () => {
+    if (closeTimer !== null) window.clearTimeout(closeTimer);
+    closeTimer = window.setTimeout(() => {
+      if (!popup.hovered) popup.hide();
+      closeTimer = null;
+    }, 120);
+  });
+
+  // Scrolling moves the code out from under a stationary cursor without firing any mouse event,
+  // so none of the documented close triggers would fire and the popup would hang in place.
+  codeArea.addEventListener("scroll", closeNote);
+
+  window.addEventListener("keyup", (ev) => {
+    if ((ev as KeyboardEvent).key === "Control") {
+      codeArea.classList.remove("lh-cp-ctrl-held");
+      closeNote();
+    }
+  });
+
+  window.addEventListener("keydown", (ev) => {
+    const e = ev as KeyboardEvent;
+    if (e.key === "Escape") {
+      codeArea.classList.remove("lh-cp-ctrl-held");
+      closeNote();
+      return;
+    }
+    // Alt+Enter is the path for a learner who is not using a mouse. It must not fire while the
+    // caret is in the question box, where Enter belongs to the text.
+    const tag = (document.activeElement as HTMLElement | null)?.tagName;
+    if (e.altKey && e.key === "Enter" && tag !== "INPUT" && tag !== "TEXTAREA" && range) {
+      e.preventDefault();
+      openNoteAt(range[0]);
+    }
+  });
+
+  // Alt-tabbing away while Ctrl is down would otherwise leave the affordance painted on.
+  window.addEventListener("blur", () => {
+    codeArea.classList.remove("lh-cp-ctrl-held");
+    closeNote();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      codeArea.classList.remove("lh-cp-ctrl-held");
+      closeNote();
+    }
+  });
+
   function setRange(next: [number, number] | null): void {
     range = next;
     paint();
   }
+
+  noteLink.addEventListener("click", () => {
+    if (range) openNoteAt(range[0]);
+  });
 
   clearBtn.addEventListener("click", () => {
     anchor = null;
@@ -170,9 +309,15 @@ export function createCodePanel(): CodePanel {
       anchor = null;
       range = null;
       codeArea.innerHTML = "";
+      // The previous file's notes are indexed against the previous file's line numbers, so
+      // they are void the instant the content changes. The mount hands the new ones over next.
+      notes = [];
+      noteIndex = null;
+      closeNote();
 
       const pre = el("pre", "lh-cp-code");
       const lines = content.split("\n");
+      lineCount = lines.length;
       // Highlight the whole file at once so multi-line constructs (docstrings, block comments) are
       // recognised, then take it back apart with tags balanced per row. The language comes from the
       // file's own `lang` when the generator set one, otherwise from its extension.
@@ -210,6 +355,22 @@ export function createCodePanel(): CodePanel {
     },
     onScrapAdd(cb) {
       scrapListener = cb;
+    },
+    onNoteRef(cb) {
+      refListener = cb;
+    },
+    setAnnotations(items) {
+      notes = items;
+      noteIndex = items.length ? buildLineIndex(items, lineCount) : null;
+      const file = fileNote(items);
+      // The file-level note has no line range worth underlining, so it hangs off the one element
+      // that is always present and always names the file.
+      pathLabel.classList.toggle("lh-cp-path-label--noted", !!file);
+      pathLabel.title = file ? file.what : "";
+      pathLabel.onclick = file
+        ? () => popup.showFor(file, pathLabel.getBoundingClientRect())
+        : null;
+      paint();
     },
     markScraps(ranges) {
       scrapRanges = ranges;

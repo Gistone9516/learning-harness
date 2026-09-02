@@ -3,6 +3,7 @@
 // (it moves records), and the sequencing lives here.
 
 import { mountCodeproj, type ExchangeEvent, type GeneratedProject } from "../../parts/codeproj/codeproj";
+import type { AnnotationSet } from "../../parts/codeproj/annotations";
 import { renderLauncher } from "../../parts/codeproj/launcher";
 import type { AiSession } from "../ai/client";
 import type { ArchivedProject, Proposal, StudyFlow } from "./study";
@@ -108,10 +109,15 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     // as the session's files_seen, and seeding it from disk would report "15 of 10 files read".
     seenCount = 0;
 
+    // The explanation layer is a plain read: it works with no session at all, which is why the
+    // popup keeps working on an instance that has no ai_server.
+    const annotations = (await flow.readAnnotations(project.id)) as AnnotationSet | null;
+
     renderStudyShell();
     mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
       session,                              // null on an offline instance; the AI pane hides itself
       project: record.data.project as GeneratedProject,
+      annotations: annotations ?? undefined,
       onFileSeen: (path) => void onFileSeen(path),
       onExchange: (event: ExchangeEvent) => recordExchange(event),
     });

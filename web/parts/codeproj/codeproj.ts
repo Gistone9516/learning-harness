@@ -1,6 +1,7 @@
 // WHAT: AI-generated project, IDE-shaped read-only comprehension with session-based explanations and questions.
 // DEPS: web/src/ai (ai_server client). No npm UI libs; tree, code panel and AI panel are hand-rolled DOM.
 // INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
+// INPUT: `annotations` (AnnotationSet) — the explanation layer, injected; the part renders it and never stores it.
 // EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
 // AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
@@ -14,6 +15,7 @@ import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
 import { generateProject, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
+import { parseAnnotations, type AnnotationSet } from "./annotations";
 import { LENS_LABELS } from "./prompts";
 import { createAiPanel, createCodePanel, createFilePanel, el } from "./view";
 import { parseComposed } from "./components/parse";
@@ -38,10 +40,17 @@ export interface CodeprojProps {
   onFileSeen?: (path: string) => void;
   onProjectGenerated?: (project: GeneratedProject, input: GenerateInput) => void;
   onExchange?: (event: ExchangeEvent) => void;
+  /**
+   * The annotation layer for this project, keyed by file path. A snapshot: the part renders what
+   * it is given and never writes it back, because the record id is the project id and only the
+   * flow knows that id.
+   */
+  annotations?: AnnotationSet;
 }
 
 export function mountCodeproj(container: HTMLElement, props: CodeprojProps): void {
   const { session, project, initialInput, onFileSeen, onProjectGenerated, onExchange } = props;
+  const annotations = props.annotations ?? { files: {} };
   container.innerHTML = "";
   container.classList.add("lh-codeproj");
 
@@ -147,6 +156,13 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   aiPanel.setEnabled(false);
   codePanel.onSelectionChange(updateTargetHint);
   codePanel.onScrapAdd((lines) => addScrap(lines));
+  // A note may point at another file. Moving between files belongs to the mount, which is the
+  // only thing that knows the project; the panel just says where the learner wanted to go.
+  codePanel.onNoteRef((path, line) => {
+    if (!currentProject || !fileByPath(currentProject, path)) return;
+    selectFile(path);
+    if (line) codePanel.reveal([line, line]);
+  });
 
   function addScrap(lines: [number, number]): void {
     if (!currentProject || !selectedPath) return;
@@ -317,6 +333,12 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     codePanel.show(file.path, file.content, file.lang);
     // Regions collected in this file stay visible when returning to it.
     codePanel.markScraps(scraps.filter((s) => s.path === path).map((s) => s.lines));
+    // Parsed here rather than at storage time: the file's own length is what separates a real
+    // line range from one the model invented, and only this side knows it.
+    const forFile = annotations.files[path];
+    codePanel.setAnnotations(
+      forFile?.status === "ok" ? parseAnnotations(forFile.items, file.content.split(String.fromCharCode(10)).length).items : [],
+    );
     // Not while a request is in flight: re-arming here is what let a file click cancel the
     // lock a running call had taken.
     if (session && !aiBusy && !sessionUnrecoverable) aiPanel.setEnabled(true);

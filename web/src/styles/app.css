@@ -731,6 +731,64 @@ body {
   padding: 2px 10px; background: var(--lh-primary); border: none;
   border-radius: var(--lh-r-pill); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
 }
+/* ── 주석 레이어 (FR-21) ─────────────────────────────────────────────────────
+   Three channels have to be readable on one line at once: selection owns the row
+   background, a scrap owns the left rail, so an annotation gets the text's underline.
+   The colour is pinned rather than inherited -- currentcolor here is the bright code ink,
+   which is far too loud for something meant to sit under running code. It is also kept out
+   of the accent family, because the selected-row background is already drawn from it. */
+.lh-codeproj .lh-cp-ctrl-held .lh-cp-has-note .lh-cp-line-text {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--lh-ink-faint);
+  text-underline-offset: 3px;
+}
+.lh-codeproj .lh-cp-ctrl-held .lh-cp-has-note { cursor: help; }
+
+/* Light enough to appear and vanish constantly, separated from the code by its border and a
+   small shadow rather than by its background -- surface and code-bg are nearly the same
+   luminance in both themes, so a background swap alone would not read. */
+.lh-codeproj .lh-cp-note-popup {
+  position: fixed;
+  z-index: 70;
+  max-width: 340px;
+  padding: 11px 14px;
+  background: var(--lh-surface);
+  border: 1px solid var(--lh-line-strong);
+  border-radius: var(--lh-r-sm);
+  box-shadow: var(--lh-shadow-sm);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--lh-ink);
+}
+.lh-codeproj .lh-cp-note-head { display: flex; gap: var(--lh-s2); align-items: baseline; margin-bottom: 6px; }
+.lh-codeproj .lh-cp-note-where { font-family: var(--lh-font-mono); font-size: 11px; color: var(--lh-ink-faint); }
+.lh-codeproj .lh-cp-note-symbol { font-family: var(--lh-font-mono); font-size: 11.5px; color: var(--lh-ink-mid); }
+.lh-codeproj .lh-cp-note-what { margin: 0; }
+.lh-codeproj .lh-cp-note-why { margin: 6px 0 0; color: var(--lh-ink-soft); font-size: 12.5px; }
+.lh-codeproj .lh-cp-note-tags { margin-top: 8px; }
+.lh-codeproj .lh-cb-caution { margin-top: 8px; }
+.lh-codeproj .lh-cp-note-refs { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+#app .lh-codeproj .lh-cp-note-ref {
+  background: none; border: none; padding: 0; text-align: left;
+  font-family: var(--lh-font-mono); font-size: 11.5px; color: var(--lh-ink-mid); cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-note-ref:hover { color: var(--lh-primary); text-decoration: underline; }
+.lh-codeproj .lh-cp-note-foot { margin-top: 10px; display: flex; justify-content: flex-end; }
+
+/* The two header entry points are labels, not new buttons: the panel head is a single nowrap
+   row with overflow hidden, so a fifth control there would simply be clipped away. */
+#app .lh-cp-path-label {
+  background: none; border: none; padding: 0; font: inherit; color: inherit;
+  text-align: left; cursor: default;
+}
+#app .lh-cp-path-label.lh-cp-path-label--noted { cursor: pointer; text-decoration: underline dotted; text-decoration-color: var(--lh-ink-faint); text-underline-offset: 3px; }
+#app .lh-cp-path-label.lh-cp-path-label--noted:hover { color: var(--lh-primary); }
+#app .lh-cp-note-link, #app .lh-codeproj .lh-cp-note-scrap {
+  background: transparent; border: 1px solid var(--lh-line-strong); color: var(--lh-ink-mid);
+  font-size: 11px; letter-spacing: 0.02em; border-radius: var(--lh-r-xs); padding: 2px 8px; cursor: pointer;
+}
+#app .lh-cp-note-link:hover, #app .lh-codeproj .lh-cp-note-scrap:hover { color: var(--lh-ink); border-color: var(--lh-primary); }
+
 .lh-cp-code-line.lh-cp-line-scrapped { box-shadow: inset 2px 0 0 var(--lh-primary-line); background: var(--lh-surface-soft); }
 .lh-cp-code-line.lh-cp-line-scrapped.lh-cp-line-selected { background: var(--lh-primary-soft); }
 
