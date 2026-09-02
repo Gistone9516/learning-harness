@@ -2,7 +2,7 @@
 // Generation mints the session (the codebase enters its context once); explain and ask resume it,
 // so a click costs a small follow-up instead of re-sending the project.
 
-import type { AiSession } from "../../src/ai/client";
+import type { AiResponse, AiSession } from "../../src/ai/client";
 import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
 import { parseProject, sliceLines } from "./model";
 import {
@@ -10,8 +10,50 @@ import {
   buildExplainPrompt,
   buildGeneratePrompt,
   buildGenerateSystem,
+  buildReseedPrompt,
+  buildReseedSystem,
   buildScrapExplainPrompt,
 } from "./prompts";
+
+/**
+ * Put the codebase back and report whether it worked. Supplied by the mount, which owns the
+ * project and the once-per-mount budget; undefined when there is nothing to reseed from.
+ */
+export type Reseed = () => Promise<boolean>;
+
+/**
+ * Send, and if the server says the session it was told to resume is gone, reseed and ask again.
+ *
+ * This lives here rather than in the flow layer because `error_kind` dies at this boundary:
+ * explain/ask flatten the whole response into a human sentence, so a caller downstream can no
+ * longer tell a lost session from a bad model or a timeout. Only "resume_missing" retries --
+ * re-sending a codebase after a timeout would spend a full context on a model that is still busy.
+ */
+async function sendResuming(
+  session: AiSession,
+  req: Parameters<AiSession["send"]>[0],
+  reseed?: Reseed,
+): Promise<AiResponse> {
+  const res = await session.send(req);
+  if (res.error_kind !== "resume_missing" || !reseed) return res;
+  if (!(await reseed())) return res;
+  return session.send(req);
+}
+
+/**
+ * Reload a codebase into a fresh session. `reset()` clears the id, so this goes out as a new
+ * session and the server gives it the generation timeout rather than the follow-up one.
+ * Expensive by nature, which is why it runs only after a resume actually failed.
+ */
+export async function reseedSession(session: AiSession, project: GeneratedProject): Promise<boolean> {
+  session.reset();
+  const res = await session.send({
+    prompt: buildReseedPrompt(project),
+    system: buildReseedSystem(),
+    effort: "medium",
+  });
+  return res.ok;
+}
 
 /**
  * generateProject: one generation call (force_json) into a new session.
@@ -52,11 +94,12 @@ export async function explain(
   session: AiSession,
   req: ExplainRequest,
   fileContent?: string,
+  reseed?: Reseed,
 ): Promise<string> {
-  const res = await session.send({
+  const res = await sendResuming(session, {
     prompt: buildExplainPrompt(req, quotedSelection(req, fileContent)),
     effort: "medium",
-  });
+  }, reseed);
   if (!res.ok) {
     return `설명을 불러오지 못했습니다. (${res.error ?? "알 수 없는 오류"})`;
   }
@@ -71,11 +114,12 @@ export async function ask(
   session: AiSession,
   req: AskRequest,
   fileContent?: string,
+  reseed?: Reseed,
 ): Promise<string> {
-  const res = await session.send({
+  const res = await sendResuming(session, {
     prompt: buildAskPrompt(req, quotedSelection(req, fileContent)),
     effort: "medium",
-  });
+  }, reseed);
   if (!res.ok) {
     return `답변을 불러오지 못했습니다. (${res.error ?? "알 수 없는 오류"})`;
   }
@@ -87,8 +131,9 @@ export async function explainScraps(
   session: AiSession,
   scraps: Scrap[],
   lens: Lens,
+  reseed?: Reseed,
 ): Promise<string> {
-  const res = await session.send({ prompt: buildScrapExplainPrompt(scraps, lens), effort: "medium" });
+  const res = await sendResuming(session, { prompt: buildScrapExplainPrompt(scraps, lens), effort: "medium" }, reseed);
   if (!res.ok) {
     return `설명을 불러오지 못했습니다. (${res.error ?? "알 수 없는 오류"})`;
   }

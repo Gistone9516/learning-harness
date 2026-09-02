@@ -255,7 +255,16 @@ export interface AiPanel {
    * `setContent` takes a rendered element (a composed answer); `setBody` takes plain text, which
    * is what a malformed or degraded answer falls back to.
    */
-  startEntry(title: string): { setBody(text: string): void; setContent(node: HTMLElement): void };
+  startEntry(title: string): {
+    setBody(text: string): void;
+    setContent(node: HTMLElement): void;
+    /**
+     * Replace the pending text and mark it as a long wait. The ordinary 5-13s call keeps the
+     * quiet static line; this is for the rare generation-class wait, where unchanging grey text
+     * beside greyed buttons is indistinguishable from a hang.
+     */
+    setWaiting(text: string): void;
+  };
   notice(text: string): void;
 }
 
@@ -356,12 +365,19 @@ export function createAiPanel(handlers: AiPanelHandlers): AiPanel {
       thread.scrollTop = thread.scrollHeight;
       return {
         setBody(text: string) {
+          body.classList.remove("lh-cp-entry-waiting");
           body.textContent = text;
           thread.scrollTop = thread.scrollHeight;
         },
         setContent(node: HTMLElement) {
+          body.classList.remove("lh-cp-entry-waiting");
           body.textContent = "";
           body.appendChild(node);
+          thread.scrollTop = thread.scrollHeight;
+        },
+        setWaiting(text: string) {
+          body.classList.add("lh-cp-entry-waiting");
+          body.textContent = text;
           thread.scrollTop = thread.scrollHeight;
         },
       };

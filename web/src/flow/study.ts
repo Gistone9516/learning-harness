@@ -6,6 +6,7 @@
 //   projects   generated projects, archived so they can be reopened offline
 //   progress   one record per project holding which files have been read
 //   history    one record per study session: what was read, asked and explained
+//   ai-sessions one record per project: which AI session already holds its codebase
 
 import type { IndexEntry, StoragePort, StorageRecord } from "../storage/port";
 import { makeRecord } from "../storage/port";
@@ -15,6 +16,7 @@ export const COLLECTIONS = {
   projects: "projects",
   progress: "progress",
   history: "history",
+  aiSessions: "ai-sessions",
 } as const;
 
 export type ProposalStatus = "open" | "started" | "archived";
@@ -56,6 +58,22 @@ export interface ArchivedProject {
 export interface ProjectPayload {
   project: { title: string; summary: string; files: { path: string; content: string }[] };
   origin: { proposal_id: string | null; generated_at: number; model?: string };
+}
+
+/**
+ * Which AI session already holds a project's codebase. The id lives here and nowhere else:
+ * putting a copy in the record summary would let the launcher read it from the index and paint
+ * a "resumable" badge, and that badge would lie -- whether the server still holds the session
+ * is not knowable without spending a call.
+ */
+export interface AiSessionData {
+  session_id: string;
+}
+
+/** The subset of `tuning.json` that actually reaches a prompt. */
+export interface TuningDefaults {
+  scale?: "small" | "medium" | "large";
+  stack_hint?: string;
 }
 
 export interface HistoryCounters {
@@ -133,7 +151,6 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
     }): Promise<{ projectId: string; historyId: string }> {
       const stamp = now();
       const projectId = makeId("prj", stamp, token());
-      const historyId = makeId("hist", stamp, token());
 
       await storage.put(
         COLLECTIONS.projects,
@@ -164,13 +181,40 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         ),
       );
 
+      // Same stamp as the two records above: one generation produces one moment, not three.
+      const historyId = await this.beginSession({
+        projectId,
+        topic: input.topic,
+        stack: input.stack,
+        at: stamp,
+      });
+
+      if (input.proposalId) await this.markProposalStarted(input.proposalId, projectId);
+      return { projectId, historyId };
+    },
+
+    /**
+     * Open a study session record for a project that already exists.
+     *
+     * Generation calls this as part of startProject; reopening an archived project calls it
+     * directly. A revisit where questions are possible is a study session too, and without its
+     * own record every exchange in that visit is written to nothing.
+     */
+    async beginSession(input: {
+      projectId: string;
+      topic: string;
+      stack: string;
+      at?: number;
+    }): Promise<string> {
+      const stamp = input.at ?? now();
+      const historyId = makeId("hist", stamp, token());
       await storage.put(
         COLLECTIONS.history,
         makeRecord<HistoryCounters>(
           "history",
           historyId,
           {
-            project_id: projectId,
+            project_id: input.projectId,
             topic: input.topic,
             stack: input.stack,
             started_at: stamp,
@@ -182,9 +226,56 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
           { explains: 0, questions: 0, lens_counts: {}, asked: [] },
         ),
       );
+      return historyId;
+    },
 
-      if (input.proposalId) await this.markProposalStarted(input.proposalId, projectId);
-      return { projectId, historyId };
+    /**
+     * Remember which AI session holds this project's codebase, so a later visit can resume it
+     * instead of paying to send the whole codebase again.
+     *
+     * Kept out of the project record on purpose: `listArchived` sorts by `updated_at`, so writing
+     * to the project record here would push an old project to the top of the archive list every
+     * time its session changed.
+     */
+    async rememberSession(projectId: string, sessionId: string): Promise<void> {
+      await storage.put(
+        COLLECTIONS.aiSessions,
+        makeRecord<AiSessionData>(
+          "ai-session",
+          projectId,
+          { project_id: projectId },
+          { session_id: sessionId },
+        ),
+      );
+    },
+
+    /**
+     * The session id recorded for this project, or null when there is none. Whether the server
+     * still holds that session is not knowable from here; it surfaces on the next call, which is
+     * why nothing may claim in advance that a reopened project can resume.
+     */
+    async recallSession(projectId: string): Promise<string | null> {
+      const record = await storage.get<AiSessionData>(COLLECTIONS.aiSessions, projectId);
+      return record?.data?.session_id ?? null;
+    },
+
+    /**
+     * Operator-set defaults for the generation form.
+     *
+     * Only the two fields that actually reach a prompt are read. `tuning.json` documents more
+     * (output_lang, plan.focus, plan.note, quality_profile), but nothing consumes them, and
+     * reading a field that changes nothing would suggest editing it has an effect.
+     */
+    async readTuning(): Promise<TuningDefaults> {
+      const doc = await storage.getDoc<{ defaults?: Record<string, unknown> }>("tuning");
+      const defaults = doc?.defaults ?? {};
+      const scale = defaults["scale"];
+      const hint = defaults["stack_hint"];
+      return {
+        scale: scale === "small" || scale === "medium" || scale === "large" ? scale : undefined,
+        // An empty hint is the same as no hint; forwarding "" would put a stray clause in the prompt.
+        stack_hint: typeof hint === "string" && hint.trim() ? hint : undefined,
+      };
     },
 
     async markProposalStarted(proposalId: string, projectId: string): Promise<void> {

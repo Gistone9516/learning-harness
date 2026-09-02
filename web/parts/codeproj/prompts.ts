@@ -4,7 +4,7 @@
 // Subject-agnostic: these strings describe software quality and explanation shape only. The topic,
 // stack and constraints always arrive as injected input, never as a literal in this file.
 
-import type { AskRequest, ExplainRequest, GenerateInput, Lens, Scrap } from "./model";
+import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
 import { buildComponentDirective } from "./components/catalog";
 
 export const LENS_LABELS: Record<Lens, string> = {
@@ -81,6 +81,30 @@ export function buildGeneratePrompt(input: GenerateInput): string {
   );
 }
 
+/**
+ * System clause for a reseed: put a codebase back into a fresh session so questions can carry on.
+ *
+ * QUALITY_CLAUSE is deliberately absent. It governs code the model writes, and a reseed writes
+ * none -- handing it over would invite the model to "improve" the project the learner is reading.
+ * That absence is what keeps this path structurally separate from generation.
+ */
+export function buildReseedSystem(): string {
+  return (
+    "You are given an existing codebase to hold in context so you can answer questions about it.\n" +
+    "Do not create, write or edit any file, and do not call tools.\n" +
+    "Do not generate, rewrite, improve or summarise the code.\n" +
+    "Reply with exactly one short line confirming the codebase is loaded."
+  );
+}
+
+/** The whole project as one message. This is the expensive call the resume model exists to avoid. */
+export function buildReseedPrompt(project: GeneratedProject): string {
+  const files = project.files.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+  return (
+    `[코드베이스 적재] ${project.title}\n\n` +
+    `아래가 프로젝트 전체다. 문맥에 담아 두고 다음 질문을 기다려라.\n\n${files}`
+  );
+}
 function describeTarget(target: ExplainRequest["target"], quoted?: string): string {
   let location = `파일: ${target.path}`;
   if (target.symbol) location += `, 심볼: ${target.symbol}`;

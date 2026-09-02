@@ -13,7 +13,7 @@
 import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, explain, explainScraps, ask } from "./session";
+import { generateProject, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
 import { LENS_LABELS } from "./prompts";
 import { createAiPanel, createCodePanel, createFilePanel, el } from "./view";
 import { parseComposed } from "./components/parse";
@@ -51,6 +51,62 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   // Collected regions, possibly from several files. They become the subject of the next request.
   let scraps: Scrap[] = [];
   let scrapSeq = 0;
+
+  // Restoring a lost session re-sends the whole codebase, so it is budgeted at one per mount.
+  // Without the cap a run of failures (rate limit, overload) would pay that cost on every
+  // question and never stop; a second loss is terminal here and the learner reloads.
+  let reseedsLeft = 1;
+
+  // Whether a call is in flight, and whether this mount can ever succeed again. Enablement was
+  // previously set unconditionally from three directions, so the panel's state was whatever ran
+  // last: selecting a file re-armed the buttons in the middle of a request, and a terminal
+  // failure re-armed them for a request that can no longer succeed.
+  let aiBusy = false;
+  let sessionUnrecoverable = false;
+
+  /**
+   * The pending entry is the only honest place to mention this: before a call actually fails
+   * there is nothing true to say, because whether the server still holds the session cannot be
+   * known from here without spending a call.
+   */
+  function reseedFor(entry: { setWaiting(text: string): void }): Reseed {
+    return async () => {
+      if (!session || !currentProject) return false;
+      if (reseedsLeft <= 0) {
+        // Asked to restore a second time in one mount: the first restore worked and was lost
+        // again, so nothing available here will help and the learner needs a reload.
+        sessionUnrecoverable = true;
+        return false;
+      }
+      reseedsLeft -= 1;
+      // Generation-class cost behind an explanation-class click, so it says so and keeps a live
+      // signal: a minutes-long block of unchanging grey text next to greyed buttons reads as a hang.
+      entry.setWaiting("이전 해설 세션이 만료되어 코드베이스를 다시 보내는 중입니다. 잠시 걸립니다...");
+      const ok = await reseedSession(session, currentProject);
+      if (!ok) sessionUnrecoverable = true;
+      return ok;
+    };
+  }
+
+  /** Every AI call starts here, so nothing else has to remember to mark the panel busy. */
+  function beginCall(): void {
+    aiBusy = true;
+    aiPanel.setEnabled(false);
+  }
+
+  /**
+   * ...and ends here. The panel comes back only if this mount can still succeed; leaving the
+   * buttons live after an unrecoverable session hands the learner controls whose only outcome
+   * is failure, styled exactly like working ones.
+   */
+  function endCall(entry: { setBody(text: string): void }): void {
+    aiBusy = false;
+    if (sessionUnrecoverable) {
+      entry.setBody("해설 세션을 복구하지 못했습니다. 페이지를 새로고침한 뒤 다시 열어 주세요.");
+      return;
+    }
+    aiPanel.setEnabled(true);
+  }
 
   // ── shell ───────────────────────────────────────────────────────────────────
 
@@ -261,7 +317,9 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     codePanel.show(file.path, file.content, file.lang);
     // Regions collected in this file stay visible when returning to it.
     codePanel.markScraps(scraps.filter((s) => s.path === path).map((s) => s.lines));
-    if (session) aiPanel.setEnabled(true);
+    // Not while a request is in flight: re-arming here is what let a file click cancel the
+    // lock a running call had taken.
+    if (session && !aiBusy && !sessionUnrecoverable) aiPanel.setEnabled(true);
     updateTargetHint(null);
   }
 
@@ -289,10 +347,10 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     // A filled basket is the subject; otherwise the current file or selection is.
     if (scraps.length) {
       const entry = aiPanel.startEntry(`${LENS_LABELS[lens]} · ${scraps.length}개 구간`);
-      aiPanel.setEnabled(false);
-      const text = await explainScraps(session, scraps, lens);
+      beginCall();
+      const text = await explainScraps(session, scraps, lens, reseedFor(entry));
       showAnswer(entry, text);
-      aiPanel.setEnabled(true);
+      endCall(entry);
       onExchange?.({ kind: "explain", lens, path: scraps[0].path, scrapCount: scraps.length });
       return;
     }
@@ -301,10 +359,10 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     if (!ctx) return;
     const where = ctx.target.lines ? ` (${ctx.target.lines[0]}-${ctx.target.lines[1]}행)` : "";
     const entry = aiPanel.startEntry(`${LENS_LABELS[lens]} · ${ctx.target.path}${where}`);
-    aiPanel.setEnabled(false);
-    const text = await explain(session, { target: ctx.target, lens }, ctx.content);
+    beginCall();
+    const text = await explain(session, { target: ctx.target, lens }, ctx.content, reseedFor(entry));
     showAnswer(entry, text);
-    aiPanel.setEnabled(true);
+    endCall(entry);
     onExchange?.({ kind: "explain", lens, path: ctx.target.path, lines: ctx.target.lines });
   }
 
@@ -313,14 +371,15 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
 
     if (scraps.length) {
       const entry = aiPanel.startEntry(`질문 · ${question}`);
-      aiPanel.setEnabled(false);
-      const text = await ask(session, {
-        target: { path: scraps[0].path },
-        question,
-        scraps,
-      });
+      beginCall();
+      const text = await ask(
+        session,
+        { target: { path: scraps[0].path }, question, scraps },
+        undefined,
+        reseedFor(entry),
+      );
       showAnswer(entry, text);
-      aiPanel.setEnabled(true);
+      endCall(entry);
       onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length });
       return;
     }
@@ -328,10 +387,10 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     const ctx = currentTarget();
     if (!ctx) return;
     const entry = aiPanel.startEntry(`질문 · ${question}`);
-    aiPanel.setEnabled(false);
-    const text = await ask(session, { target: ctx.target, question }, ctx.content);
+    beginCall();
+    const text = await ask(session, { target: ctx.target, question }, ctx.content, reseedFor(entry));
     showAnswer(entry, text);
-    aiPanel.setEnabled(true);
+    endCall(entry);
     onExchange?.({
       kind: "ask",
       path: ctx.target.path,

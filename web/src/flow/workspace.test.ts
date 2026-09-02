@@ -47,7 +47,7 @@ function stubClient() {
   return { client, sent };
 }
 
-async function setup() {
+async function setup(opts: { offline?: boolean } = {}) {
   const store = memStorage();
   const storage: StoragePort = createLocalStorage({ namespace: "ws", store });
   const flow = createStudyFlow({ storage });
@@ -57,7 +57,9 @@ async function setup() {
   const workspace = createWorkspace({
     container,
     flow,
-    newSession: () => new AiSession(client),
+    // offline = an instance with no ai_server at all (NFR-3), which is a different thing from
+    // a project whose session is gone: the first hides the pane, the second reseeds.
+    newSession: () => (opts.offline ? null : new AiSession(client)),
   });
   return { storage, flow, container, workspace, sent };
 }
@@ -159,8 +161,10 @@ describe("propose then start (FR-14)", () => {
 });
 
 describe("archive (FR-7)", () => {
-  it("reopens a stored project for offline reading and keeps its read flags", async () => {
-    const { flow, container, workspace } = await setup();
+  it("reopens a stored project with no ai_server at all and hides the pane", async () => {
+    // NFR-3: an instance without an AI server still reads its archive. The pane is hidden
+    // rather than left as a row of dead buttons.
+    const { flow, container, workspace } = await setup({ offline: true });
     const { projectId } = await flow.startProject({
       project: PROJECT, topic: "t", stack: "FastAPI", scale: "small",
     });
@@ -172,10 +176,57 @@ describe("archive (FR-7)", () => {
     (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
     await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
 
-    // Read-only reopen: files and code render, and the AI pane is hidden rather than dead.
     expect(container.querySelectorAll(".lh-cp-tree-file")).toHaveLength(2);
     expect((container.querySelector(".lh-cp-ai") as HTMLElement).style.display).toBe("none");
     expect(await flow.seenPaths(projectId)).toContain("src/main.py");
+  });
+
+  it("reopens with the AI pane live, and spends nothing to do it (FR-9)", async () => {
+    const { flow, container, workspace, sent } = await setup();
+    const { projectId } = await flow.startProject({
+      project: PROJECT, topic: "t", stack: "FastAPI", scale: "small",
+    });
+    await flow.rememberSession(projectId, "sid-from-last-visit");
+
+    await workspace.showLauncher();
+    (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
+
+    expect((container.querySelector(".lh-cp-ai") as HTMLElement).style.display).not.toBe("none");
+    // The whole point of adopting rather than probing: opening costs no call, even though
+    // loadProject selects the first file on its own.
+    expect(sent).toHaveLength(0);
+
+    // ...and the first question resumes the stored session instead of minting a new one.
+    (container.querySelector(".lh-cp-explain-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].session_id).toBe("sid-from-last-visit");
+  });
+
+  it("counts files read in this visit, not the total on disk", async () => {
+    // endSession stamps this number as the session's files_seen. Seeding it from the persisted
+    // total would report more files read than the project has.
+    const { flow, storage, container, workspace } = await setup();
+    const { projectId } = await flow.startProject({
+      project: PROJECT, topic: "t", stack: "FastAPI", scale: "small",
+    });
+    await flow.recordFileSeen(projectId, "src/main.py");
+    await flow.recordFileSeen(projectId, "src/service.py");
+
+    await workspace.showLauncher();
+    (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
+
+    // loadProject opens the first file; nothing else is touched.
+    await vi.waitFor(async () => {
+      const entries = await storage.list(COLLECTIONS.history);
+      expect(entries).toHaveLength(2);           // the generation's session, plus this revisit
+    });
+    await workspace.showLauncher();
+
+    const entries = await storage.list(COLLECTIONS.history);
+    const revisit = entries.sort((a, b) => b.updated_at - a.updated_at)[0];
+    expect(revisit.summary["files_seen"]).toBe(1);
   });
 
   it("returns to the launcher and closes the session record", async () => {
