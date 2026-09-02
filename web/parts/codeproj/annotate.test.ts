@@ -7,7 +7,15 @@ import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
 import { annotateFile, annotateProject } from "./session";
-import { buildAnnotatePrompt, buildAnnotateSystem, QUALITY_CLAUSE } from "./prompts";
+import {
+  AUDIENCE_CLAUSE,
+  buildAnnotatePrompt,
+  buildAnnotateSystem,
+  buildAskPrompt,
+  buildExplainPrompt,
+  buildScrapExplainPrompt,
+  QUALITY_CLAUSE,
+} from "./prompts";
 
 const PROJECT = {
   title: "도서 관리 API",
@@ -148,5 +156,37 @@ describe("the annotation prompt", () => {
     // project the learner is about to read.
     expect(buildAnnotateSystem()).not.toContain(QUALITY_CLAUSE);
     expect(buildAnnotateSystem()).toMatch(/Do not modify/);
+  });
+});
+
+describe("who the explanation is written for", () => {
+  // The level is stated once and shared. Written into each path separately it drifts, and then
+  // one surface quietly explains at a harder level than the others with nothing to catch it.
+  it("reaches every explaining path", () => {
+    const target = { path: "app/db.py", lines: [1, 2] as [number, number] };
+    const paths = {
+      주석: buildAnnotateSystem(),
+      렌즈: buildExplainPrompt({ target, lens: "flow" }),
+      질문: buildAskPrompt({ target, question: "왜?", depth: "semi" }),
+      스크랩: buildScrapExplainPrompt(
+        [{ id: "s1", path: "app/db.py", lines: [1, 2] as [number, number], code: "x" }],
+        "flow",
+      ),
+    };
+    for (const [name, prompt] of Object.entries(paths)) {
+      expect(prompt, name).toContain(AUDIENCE_CLAUSE);
+    }
+  });
+
+  it("does not reach generation, which writes code rather than explaining it", () => {
+    expect(buildAnnotateSystem()).toContain(AUDIENCE_CLAUSE);
+    expect(QUALITY_CLAUSE).not.toContain(AUDIENCE_CLAUSE);
+  });
+
+  it("asks for terms to be glossed where they appear", () => {
+    // The level is not "say less" but "assume less": a term may be used, it just has to be
+    // explained on the spot.
+    expect(AUDIENCE_CLAUSE).toContain("풀어");
+    expect(AUDIENCE_CLAUSE).toContain("쉽게 쓰되 줄이지 마세요");
   });
 });

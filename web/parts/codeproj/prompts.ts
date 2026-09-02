@@ -69,6 +69,24 @@ const SCALE_GUIDE: Record<string, string> = {
   large: "18-30 files, ~2000 lines total",
 };
 
+/**
+ * Who every explanation is written for.
+ *
+ * Stated once and shared by the annotation pass, the short answer and the full one, because a
+ * level written in three places drifts apart and then nobody can tell which one is the real
+ * one. The reader knows the language's syntax and has not seen these conventions before --
+ * measured against the first real session, where answers leaned on `__exit__`, transaction
+ * semantics and exception propagation as if already shared.
+ */
+export const AUDIENCE_CLAUSE = [
+  "[읽는 사람]",
+  "이 언어로 쓰인 코드는 읽을 수 있지만, 이 코드가 쓰는 관례와 설계 방식은 처음 봅니다.",
+  "- 전문 용어를 쓰려면 그 자리에서 한 마디로 풀어 주세요. 풀지 않을 거면 쓰지 마세요.",
+  "- 무엇을 하는지 먼저, 왜 그렇게 했는지는 그 다음입니다.",
+  "- 다른 파일을 이미 읽었다고 전제하지 마세요. 함수나 클래스 이름을 들면 그것이 무엇인지 한 마디 붙입니다.",
+  "- 한 문장에 개념 하나. 여러 개를 겹치면 이미 아는 사람만 읽힙니다.",
+  "- 쉽게 쓰되 줄이지 마세요. 어려운 것을 생략하는 것이 아니라, 모르는 사람이 따라올 수 있게 적는 것입니다.",
+].join("\n");
 export function buildGenerateSystem(): string {
   return (
     "You are a project generator. Output ONLY valid JSON matching the GeneratedProject schema: " +
@@ -82,14 +100,18 @@ export function buildGenerateSystem(): string {
 }
 
 export function buildGeneratePrompt(input: GenerateInput): string {
+  // The scale was a parenthetical aside and got treated like one: measured 2026-09-02, a
+  // `small` asking for 6-9 files came back with 16. The screen tells the learner that number,
+  // so it has to bind -- it is stated as its own requirement, not as a gloss on a word.
+  const guide = SCALE_GUIDE[input.scale] ?? input.scale;
+  const seed = input.seed ? `\n\nConstraints/stack: ${input.seed}` : "";
   return (
-    `Generate a project: topic="${input.topic}", scale=${input.scale} ` +
-    `(${SCALE_GUIDE[input.scale] ?? input.scale})` +
-    (input.seed ? `, constraints/stack: ${input.seed}` : "") +
-    "."
+    `Generate a project: topic="${input.topic}", scale=${input.scale}.\n\n` +
+    `File count is a hard requirement, not a suggestion: ${guide}. Do not exceed it. ` +
+    "If the design seems to need more files, merge related ones instead." +
+    seed
   );
 }
-
 /**
  * System clause for a reseed: put a codebase back into a fresh session so questions can carry on.
  *
@@ -124,7 +146,9 @@ export function buildAnnotateSystem(): string {
     "You annotate an existing codebase for a learner reading it. Output ONLY valid JSON.\n" +
     "Do not create, write or edit any file, and do not call tools.\n" +
     "Do not modify, rewrite, improve or extend the code.\n" +
-    "Write every sentence in Korean. Leave symbol names, paths and code fragments as they are."
+    "Write every sentence in Korean. Leave symbol names, paths and code fragments as they are." +
+    "\n\n" +
+    AUDIENCE_CLAUSE
   );
 }
 /**
@@ -147,7 +171,9 @@ export function buildAnnotatePrompt(path: string, content: string): string {
     "이 파일에 주석 5~15개를 만들어라. 파일이 짧으면 그에 맞게 줄여라.\n" +
     "대상은 파일 전체 역할 하나, import 묶음 하나, 각 클래스와 함수와 메서드 정의, " +
     "그리고 눈에 띄는 문장(상수, 설정값, 까다로운 한 줄, 예외 처리 지점)이다.\n" +
-    "각 항목은 한 문장이고, 주석 하나의 전체 길이가 두세 문장을 넘지 않는다.\n\n" +
+    "각 항목은 한 문장이고, 주석 하나의 전체 길이가 두세 문장을 넘지 않는다.\n" +
+    "범위는 설명하는 대상만 감싼다. 함수를 설명하면 정의 줄과 핵심 몇 줄이지 본문 전체가 아니다. " +
+    "범위가 넓으면 어느 줄에 주석이 있는지 미리 알 수 없게 된다.\n\n" +
     "JSON만 출력한다. 산문도 마크다운 펜스도 쓰지 마라.\n" +
     `{"file":"${path}","items":[{` +
     '"target":{"lines":[시작,끝],"symbol":"이름 또는 null"},' +
@@ -170,7 +196,7 @@ export function buildExplainPrompt(req: ExplainRequest, quoted?: string): string
     req.lens === "concepts"
       ? CONCEPT_LENS_FORMAT
       : `위 대상에 대해 "${LENS_LABELS[req.lens]}" 관점에서 설명해 주세요.`;
-  return `${head}\n\n${body}\n${buildComponentDirective("full")}`;
+  return `${head}\n\n${body}\n\n${AUDIENCE_CLAUSE}\n${buildComponentDirective("full")}`;
 }
 
 /** Collected regions, each labelled with where it came from so the model can reason across them. */
@@ -197,7 +223,8 @@ export function buildAskPrompt(req: AskRequest, quoted?: string): string {
     `[질문]\n${context}\n\n` +
     grounds +
     `${req.question}\n\n` +
-    "이 프로젝트의 실제 코드를 근거로 답하세요. 확실하지 않은 부분은 추측하지 말고 그렇다고 밝히세요." +
+    "이 프로젝트의 실제 코드를 근거로 답하세요. 확실하지 않은 부분은 추측하지 말고 그렇다고 밝히세요.\n\n" +
+    AUDIENCE_CLAUSE +
     buildComponentDirective(req.depth)
   );
 }
@@ -209,5 +236,5 @@ export function buildScrapExplainPrompt(scraps: Scrap[], lens: Lens): string {
     lens === "concepts"
       ? CONCEPT_LENS_FORMAT
       : `위 구간들을 함께 놓고 "${LENS_LABELS[lens]}" 관점에서 설명해 주세요. 구간 사이의 관계를 밝히세요.`;
-  return `${head}\n\n${body}\n${buildComponentDirective("full")}`;
+  return `${head}\n\n${body}\n\n${AUDIENCE_CLAUSE}\n${buildComponentDirective("full")}`;
 }

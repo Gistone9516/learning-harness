@@ -285,9 +285,11 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
 
     const scaleSelect = el("select", "lh-cp-scale-select");
     for (const [val, label] of [
-      ["small", "소 (3-6 파일)"],
-      ["medium", "중 (7-15 파일)"],
-      ["large", "대 (16-30 파일)"],
+      // These must match SCALE_GUIDE in prompts.ts: the form tells the learner what the
+      // prompt tells the model, and the two drifting apart is a lie the screen tells.
+      ["small", "소 (6-9 파일)"],
+      ["medium", "중 (10-16 파일)"],
+      ["large", "대 (18-30 파일)"],
     ] as const) {
       const o = document.createElement("option");
       o.value = val;
