@@ -13,11 +13,12 @@
 // because that helper collapses both a transport failure and an unparseable body
 // into a bare null and the raw text is exactly what this test exists to capture.
 import { describe, it, expect } from "vitest";
-import { mkdirSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { buildGenerateSystem, buildGeneratePrompt } from "./prompts";
-import { parseProject } from "./model";
-import type { GenerateInput } from "./model";
+import { buildExplainPrompt, buildGenerateSystem, buildGeneratePrompt } from "./prompts";
+import { parseComposed } from "./components/parse";
+import { parseProject, sliceLines } from "./model";
+import type { ExplainRequest, GenerateInput } from "./model";
 
 const LIVE = process.env.LH_LIVE === "1";
 
@@ -144,5 +145,65 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
       expect(((await sess.json()) as { active: number }).active).toBe(0);
     },
     1_900_000,
+  );
+});
+
+// FR-19: do composed answer blocks actually come back from a live model, or does every
+// answer degrade to prose? If the model ignores the block directive, the 24-type catalogue
+// is dead code, which is the most expensive thing this suite can find out.
+//
+// It resumes an existing session instead of generating again, so it costs one small
+// follow-up. Point it at the session id recorded in a previous generation run:
+//
+//   LH_LIVE_SESSION=<id> LH_LIVE_TOKEN=<token> npx vitest run parts/codeproj/codeproj.live.test.ts
+const SESSION = process.env.LH_LIVE_SESSION ?? "";
+
+describe.skipIf(!SESSION)("FR-19 composed answer blocks (live)", () => {
+  it(
+    "parses a lens explanation into typed blocks",
+    async () => {
+      const parsed = JSON.parse(readFileSync(join(OUT, "project.parsed.json"), "utf-8")) as {
+        files: { path: string; content: string }[];
+      };
+      // A file with real branching, so a flow lens has something to describe.
+      const file = parsed.files.find((f) => f.path.endsWith("services.py")) ?? parsed.files[0];
+      const req: ExplainRequest = { target: { path: file.path, lines: [92, 120] }, lens: "flow" };
+
+      const started = Date.now();
+      const res = await fetch(`${SERVER}/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AI-Token": TOKEN },
+        body: JSON.stringify({
+          prompt: buildExplainPrompt(req, sliceLines(file.content, req.target.lines!)),
+          model: MODEL,
+          effort: "medium",
+          session_id: SESSION,
+        }),
+      });
+      const elapsedMs = Date.now() - started;
+      const body = (await res.json()) as { ok: boolean; text: string; error: string | null };
+
+      const composed = body.ok ? parseComposed(body.text) : null;
+      writeFileSync(
+        join(OUT, "measure-C-composed.raw.json"),
+        JSON.stringify(
+          {
+            elapsed_ms: elapsedMs,
+            target: req,
+            parsed_ok: composed !== null,
+            block_types: composed ? composed.blocks.map((b) => b.t) : null,
+            response: body,
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+
+      expect(body.ok, `ok:false — ${body.error}`).toBe(true);
+      expect(composed, "parseComposed returned null — answers degrade to prose").not.toBeNull();
+      expect(composed!.blocks.length).toBeGreaterThan(0);
+    },
+    200_000,
   );
 });
