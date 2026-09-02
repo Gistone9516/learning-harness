@@ -20,6 +20,12 @@ export function createWorkspace(cfg: WorkspaceConfig) {
 
   // Session-scoped ids: set when a project is started or reopened, cleared back at the launcher.
   let projectId: string | null = null;
+
+  // Which visit is on screen. The annotation pass runs for minutes and the topbar's [목록으로]
+  // stays live throughout, so a part can still be emitting long after the learner walked away.
+  // Progress from an abandoned visit must not be recorded, and its writes must never land on
+  // whatever project happens to be current by then.
+  let visit = 0;
   let historyId: string | null = null;
   let seenCount = 0;
 
@@ -47,6 +53,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
       await flow.endSession(historyId, seenCount);
       historyId = null;
     }
+    visit += 1;                           // everything the previous mount still emits is now stale
     sessionReady = Promise.resolve();
     projectId = null;
     seenCount = 0;
@@ -91,6 +98,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
   async function openArchived(project: ArchivedProject): Promise<void> {
     const record = await flow.loadArchived(project.id);
     if (!record) return;
+    const mine = ++visit;
     projectId = project.id;
 
     // Take over the session that already holds this codebase. Nothing is sent here: whether the
@@ -118,8 +126,8 @@ export function createWorkspace(cfg: WorkspaceConfig) {
       session,                              // null on an offline instance; the AI pane hides itself
       project: record.data.project as GeneratedProject,
       annotations: annotations ?? undefined,
-      onFileSeen: (path) => void onFileSeen(path),
-      onExchange: (event: ExchangeEvent) => recordExchange(event),
+      onFileSeen: (path) => void onFileSeen(mine, path),
+      onExchange: (event: ExchangeEvent) => recordExchange(mine, event),
     });
   }
 
@@ -129,6 +137,10 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     stack?: string;
   }): void {
     const session = cfg.newSession();
+    const mine = ++visit;
+    // Captured for this visit alone. The annotation pass finishes minutes later, and by then the
+    // shared projectId may belong to a different project entirely.
+    let myProjectId: string | null = null;
     renderStudyShell();
 
     mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
@@ -144,6 +156,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
             proposalId: opts.proposalId ?? null,
           })
           .then(async (started) => {
+            myProjectId = started.projectId;
             projectId = started.projectId;
             historyId = started.historyId;
             // The id the codebase now lives under, so a later visit can resume instead of re-sending it.
@@ -151,22 +164,35 @@ export function createWorkspace(cfg: WorkspaceConfig) {
             if (sid) await flow.rememberSession(started.projectId, sid);
           });
       },
-      onFileSeen: (path) => void onFileSeen(path),
-      onExchange: (event: ExchangeEvent) => recordExchange(event),
+      onFileSeen: (path) => void onFileSeen(mine, path),
+      onExchange: (event: ExchangeEvent) => recordExchange(mine, event),
+      onAnnotations: (set) => {
+        // Deliberately NOT gated on the visit still being current. The learner may have walked
+        // away, but these annotations were paid for and belong to the project they describe --
+        // throwing them out would waste minutes of calls and leave that project blank forever.
+        // They go to the captured id, never the shared one.
+        void serialize(async () => {
+          await sessionReady;
+          if (myProjectId) await flow.writeAnnotations(myProjectId, set);
+        });
+      },
     });
   }
 
-  function recordExchange(event: ExchangeEvent): void {
+  function recordExchange(mine: number, event: ExchangeEvent): void {
     void serialize(async () => {
       await sessionReady;
-      if (historyId) await flow.recordExchange(historyId, event);
+      if (mine !== visit || !historyId) return;
+      await flow.recordExchange(historyId, event);
     });
   }
 
-  async function onFileSeen(path: string): Promise<void> {
+  async function onFileSeen(mine: number, path: string): Promise<void> {
     await serialize(async () => {
       await sessionReady;
-      if (!projectId) return;
+      // A part the learner has left still opens its first file when its project finally loads.
+      // That is not reading, and counting it would inflate a session the learner never had.
+      if (mine !== visit || !projectId) return;
       seenCount += 1;
       await flow.recordFileSeen(projectId, path);
     });

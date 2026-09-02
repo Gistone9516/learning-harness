@@ -105,6 +105,48 @@ export function buildReseedPrompt(project: GeneratedProject): string {
     `아래가 프로젝트 전체다. 문맥에 담아 두고 다음 질문을 기다려라.\n\n${files}`
   );
 }
+/**
+ * The annotation pass explains code that already exists. QUALITY_CLAUSE is absent for the same
+ * reason as in the reseed: nothing is being written, and offering the clause invites the model
+ * to improve the project the learner is about to read.
+ */
+export function buildAnnotateSystem(): string {
+  return (
+    "You annotate an existing codebase for a learner reading it. Output ONLY valid JSON.\n" +
+    "Do not create, write or edit any file, and do not call tools.\n" +
+    "Do not modify, rewrite, improve or extend the code.\n" +
+    "Write every sentence in Korean. Leave symbol names, paths and code fragments as they are."
+  );
+}
+/**
+ * Ask for one file's annotations, with the source restated and numbered.
+ *
+ * The line numbers are the entire join key between a note and the code, and a model counting
+ * lines out of JSON already in its context is not something to rely on. Measured 2026-09-02:
+ * with the source restated this way, a 61-line file produced 14 notes in 37s with zero ranges
+ * outside the file.
+ */
+export function buildAnnotatePrompt(path: string, content: string): string {
+  const lines = content.split("\n");
+  const numbered = lines
+    .map((line, i) => `${String(i + 1).padStart(3, "0")}| ${line}`)
+    .join("\n");
+  return (
+    `[주석 생성 요청]\n대상 파일: ${path}\n\n` +
+    `아래가 그 파일의 전체 내용이다. 각 줄 앞의 번호가 파일의 실제 줄 번호다.\n\n` +
+    `${numbered}\n\n` +
+    "이 파일에 주석 5~15개를 만들어라. 파일이 짧으면 그에 맞게 줄여라.\n" +
+    "대상은 파일 전체 역할 하나, import 묶음 하나, 각 클래스와 함수와 메서드 정의, " +
+    "그리고 눈에 띄는 문장(상수, 설정값, 까다로운 한 줄, 예외 처리 지점)이다.\n" +
+    "각 항목은 한 문장이고, 주석 하나의 전체 길이가 두세 문장을 넘지 않는다.\n\n" +
+    "JSON만 출력한다. 산문도 마크다운 펜스도 쓰지 마라.\n" +
+    `{"file":"${path}","items":[{` +
+    '"target":{"lines":[시작,끝],"symbol":"이름 또는 null"},' +
+    '"kind":"file|class|function|method|import|statement|config",' +
+    '"what":"한 문장","why":"한 문장(선택)","concept":"낱말(선택)",' +
+    '"watch":"한 문장(선택)","refs":[{"path":"","line":0,"label":""}](선택)}]}'
+  );
+}
 function describeTarget(target: ExplainRequest["target"], quoted?: string): string {
   let location = `파일: ${target.path}`;
   if (target.symbol) location += `, 심볼: ${target.symbol}`;

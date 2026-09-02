@@ -3,6 +3,8 @@
 // so a click costs a small follow-up instead of re-sending the project.
 
 import type { AiResponse, AiSession } from "../../src/ai/client";
+import { parseAnnotations, type AnnotationSet, type FileAnnotations } from "./annotations";
+import { carveJson } from "./components/parse";
 import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
 import { parseProject, sliceLines } from "./model";
 import {
@@ -10,6 +12,8 @@ import {
   buildExplainPrompt,
   buildGeneratePrompt,
   buildGenerateSystem,
+  buildAnnotatePrompt,
+  buildAnnotateSystem,
   buildReseedPrompt,
   buildReseedSystem,
   buildScrapExplainPrompt,
@@ -80,6 +84,59 @@ export async function generateProject(
   return parseProject(res.text);
 }
 
+
+/**
+ * Annotate one file. Failure is contained here: the caller keeps going, because a project with
+ * thirteen annotated files and one that failed is still worth reading.
+ */
+export async function annotateFile(
+  session: AiSession,
+  path: string,
+  content: string,
+): Promise<FileAnnotations> {
+  const res = await session.send({
+    prompt: buildAnnotatePrompt(path, content),
+    system: buildAnnotateSystem(),
+    effort: "medium",
+  });
+  if (!res.ok) return { status: "failed", items: [] };
+  const carved = carveJson(res.text);
+  if (!carved) return { status: "failed", items: [] };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(carved);
+  } catch {
+    return { status: "failed", items: [] };
+  }
+  // The file's own length is what separates a real line range from an invented one.
+  const parsed = parseAnnotations(raw, content.split("\n").length);
+  return { status: parsed.status, items: parsed.items };
+}
+
+/**
+ * Annotate a whole project, one file at a time, on the session that already holds its code.
+ *
+ * One call per file rather than one call for the project: resuming a session puts the request
+ * in the follow-up class, which the server cuts off at 180s, and a whole medium project is far
+ * past that. Sequential by construction, so no separate serialisation is needed.
+ *
+ * This runs before the learner reaches the project (design 08 §3.2), which is why no request
+ * of theirs can queue behind it.
+ */
+export async function annotateProject(
+  session: AiSession,
+  project: GeneratedProject,
+  onProgress?: (done: number, total: number, path: string) => void,
+): Promise<AnnotationSet> {
+  const set: AnnotationSet = { files: {} };
+  for (let i = 0; i < project.files.length; i += 1) {
+    const file = project.files[i];
+    onProgress?.(i, project.files.length, file.path);
+    set.files[file.path] = await annotateFile(session, file.path, file.content);
+  }
+  onProgress?.(project.files.length, project.files.length, "");
+  return set;
+}
 /** Quote the selected lines so the model sees exactly what the learner pointed at. */
 function quotedSelection(req: { target: { lines?: [number, number] } }, content?: string): string | undefined {
   if (!content || !req.target.lines) return undefined;

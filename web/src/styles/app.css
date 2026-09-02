@@ -647,6 +647,24 @@ body {
 .lh-cp-generate-panel label { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); }
 .lh-cp-generate-panel input, .lh-cp-generate-panel select { padding: var(--lh-s2) var(--lh-s3); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs); background: var(--lh-surface); color: var(--lh-ink); font-size: 14px; }
 #app .lh-cp-generate-btn { margin-top: var(--lh-s2); padding: var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
+/* The waiting screen's meta track. Fixed-width digits so a ticking clock does not make the
+   line twitch once a second, and an ellipsis so a long path cannot shove the phase text
+   sideways -- the same treatment the target hint already uses for paths. */
+.lh-cp-generate-meta {
+  margin-left: var(--lh-s2);
+  font-family: var(--lh-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--lh-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Phase one is a single opaque call of several minutes with nothing to count. Reuses the same
+   pulse as the AI panel's long wait rather than inventing a second one. */
+.lh-cp-generate-status.lh-cp-generate-status--waiting .lh-cp-generate-phase {
+  animation: lh-pulse 1.1s ease-in-out infinite;
+}
 .lh-cp-generate-status { font-size: 13px; color: var(--lh-ink-mid); min-height: 1.2em; }
 
 /* Narrow screens: stack the panes instead of squeezing three columns. */

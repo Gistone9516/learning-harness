@@ -3,6 +3,7 @@
 // INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
 // INPUT: `annotations` (AnnotationSet) — the explanation layer, injected; the part renders it and never stores it.
 // EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
+// EVENTS: the freshly built annotation layer via onAnnotations — the part makes it, the owner stores it.
 // AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
 // DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
@@ -14,7 +15,7 @@
 import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
+import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
 import { LENS_LABELS } from "./prompts";
 import { createAiPanel, createCodePanel, createFilePanel, el } from "./view";
@@ -46,11 +47,18 @@ export interface CodeprojProps {
    * flow knows that id.
    */
   annotations?: AnnotationSet;
+  /**
+   * Emitted once, right after generation, with the annotation layer just built for the project.
+   * The part cannot store it: the record is keyed by project id and only the flow has that.
+   */
+  onAnnotations?: (set: AnnotationSet) => void;
 }
 
 export function mountCodeproj(container: HTMLElement, props: CodeprojProps): void {
   const { session, project, initialInput, onFileSeen, onProjectGenerated, onExchange } = props;
-  const annotations = props.annotations ?? { files: {} };
+  // Reassigned once when a generation builds its own layer, so the first file opened after
+  // generating shows notes without waiting for a remount.
+  let annotations = props.annotations ?? { files: {} };
   container.innerHTML = "";
   container.classList.add("lh-codeproj");
 
@@ -266,6 +274,38 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
 
     const startBtn = el("button", "lh-cp-generate-btn", "프로젝트 생성");
     const status = el("div", "lh-cp-generate-status", "");
+    const phaseEl = el("span", "lh-cp-generate-phase", "");
+    // Counts, paths and the clock go in their own span: fixed width digits so the line does not
+    // twitch every second, and an ellipsis so a long path cannot push the phase text around.
+    const metaEl = el("span", "lh-cp-generate-meta", "");
+    status.appendChild(phaseEl);
+    status.appendChild(metaEl);
+
+    let startedAt = 0;
+    let ticker: number | null = null;
+
+    function clock(): string {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    }
+
+    /**
+     * Phase 1 is one opaque call of several minutes with nothing to count, so it pulses and
+     * shows the clock -- the docs call for elapsed time on a generation-class wait, and a line
+     * that does not change for four minutes reads as a hang. Phase 2 counts real files, so it
+     * already moves and does not need the animation on top.
+     */
+    function setPhase(text: string, meta: string, waiting: boolean): void {
+      phaseEl.textContent = text;
+      metaEl.textContent = meta ? `${meta} · ${clock()}` : clock();
+      status.classList.toggle("lh-cp-generate-status--waiting", waiting);
+    }
+
+    let phase: () => void = () => undefined;
+    function stopTicker(): void {
+      if (ticker !== null) window.clearInterval(ticker);
+      ticker = null;
+    }
 
     startBtn.addEventListener("click", async () => {
       const topic = topicInput.value.trim();
@@ -279,20 +319,40 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
         seed: seedInput.value.trim() || undefined,
       };
       startBtn.disabled = true;
-      status.textContent = "프로젝트를 생성하는 중...";
+      startedAt = Date.now();
+      phase = () => setPhase("프로젝트를 생성하는 중...", "", true);
+      phase();
+      // Every exit below clears this: leaving it running would keep writing into an element the
+      // panel is about to remove.
+      ticker = window.setInterval(() => phase(), 1000);
 
       const result = await generateProject(session!, input);
       if (!result) {
-        status.textContent = "프로젝트 생성에 실패했습니다. 다시 시도해 주세요.";
+        stopTicker();
+        status.classList.remove("lh-cp-generate-status--waiting");
+        phaseEl.textContent = "프로젝트 생성에 실패했습니다. 다시 시도해 주세요.";
+        metaEl.textContent = "";
         startBtn.disabled = false;
         return;
       }
 
       currentProject = result;
-      panel.remove();
       // Announce before rendering: loading the project immediately emits its first file-seen
       // event, and the owner has to be able to set up storage for it first.
       onProjectGenerated?.(result, input);
+
+      // The explanation layer is built here, while the learner is still on the waiting screen and
+      // has nothing to click. Doing it after they enter would put their first question behind a
+      // chunk of it, and the wait would look like the tool being slow (design 08 §3.2).
+      annotations = await annotateProject(session!, result, (done, total, path) => {
+        const at = path ? `(${done + 1}/${total}) ${path}` : `(${total}/${total})`;
+        phase = () => setPhase("설명을 다는 중...", at, false);
+        phase();
+      });
+      props.onAnnotations?.(annotations);
+
+      stopTicker();
+      panel.remove();
       loadProject(result);
     });
 
@@ -317,6 +377,21 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     if (proj.files.length > 0) selectFile(proj.files[0].path);
   }
 
+
+  /** Rebuild one file's notes on demand. The pass itself never retries; the learner does. */
+  async function retryAnnotations(path: string, content: string): Promise<void> {
+    if (!session) return;
+    codePanel.offerAnnotationRetry(false, () => undefined);
+    const built = await annotateFile(session, path, content);
+    annotations = { files: { ...annotations.files, [path]: built } };
+    props.onAnnotations?.(annotations);
+    if (selectedPath === path) {
+      codePanel.setAnnotations(built.status === "ok" ? parseAnnotations(built.items, content.split(String.fromCharCode(10)).length).items : []);
+      codePanel.offerAnnotationRetry(built.status === "failed", () => {
+        void retryAnnotations(path, content);
+      });
+    }
+  }
   function selectFile(path: string): void {
     if (!currentProject) return;
     const file = fileByPath(currentProject, path);
@@ -339,6 +414,11 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     codePanel.setAnnotations(
       forFile?.status === "ok" ? parseAnnotations(forFile.items, file.content.split(String.fromCharCode(10)).length).items : [],
     );
+    // Only where a retry could actually run: no session means nothing to ask, and a file that
+    // was never annotated at all is not a failure to recover from.
+    codePanel.offerAnnotationRetry(!!session && forFile?.status === "failed", () => {
+      void retryAnnotations(path, file.content);
+    });
     // Not while a request is in flight: re-arming here is what let a file click cancel the
     // lock a running call had taken.
     if (session && !aiBusy && !sessionUnrecoverable) aiPanel.setEnabled(true);

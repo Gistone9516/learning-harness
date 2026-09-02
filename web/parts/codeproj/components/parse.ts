@@ -16,7 +16,7 @@ function stripFences(text: string): string {
 }
 
 /** Pull the outermost {...} or [...] when the model wraps JSON in a sentence. */
-function carveJson(text: string): string | null {
+export function carveJson(text: string): string | null {
   const s = stripFences(text);
   if (s.startsWith("{") || s.startsWith("[")) return s;
   const first = s.search(/[[{]/);

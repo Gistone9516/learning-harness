@@ -114,6 +114,11 @@ export interface CodePanel {
    * callback slots this panel exposes are single-assignment and both are already taken.
    */
   setAnnotations(items: Annotation[]): void;
+  /**
+   * Offer to build this file's notes again. Shown only when they failed AND something can
+   * actually do it, so the control never appears where pressing it would do nothing.
+   */
+  offerAnnotationRetry(show: boolean, run: () => void): void;
   /** A reference followed from inside a note; the mount owns moving between files. */
   onNoteRef(cb: (path: string, line?: number) => void): void;
   /** Scroll a line into view and select it, for a code reference or a scrap list entry. */
@@ -152,6 +157,7 @@ export function createCodePanel(): CodePanel {
   let lineCount = 0;
   let refListener: ((path: string, line?: number) => void) | null = null;
   let closeTimer: number | null = null;
+  let retry: (() => void) | null = null;
 
   function paint(): void {
     codeArea.querySelectorAll(".lh-cp-code-line").forEach((lineEl) => {
@@ -169,7 +175,16 @@ export function createCodePanel(): CodePanel {
     selectionLabel.textContent = range ? `선택: ${range[0]}-${range[1]}행` : "";
     // The keyboard and touch way in. It is a label rather than a header button because the head
     // is a single nowrap row with overflow hidden, and a fifth control there is simply clipped.
-    noteLink.hidden = selected < 0;
+    // One slot, two states that cannot both hold: a file whose notes failed has none on any line.
+    if (selected >= 0) {
+      noteLink.hidden = false;
+      noteLink.textContent = "주석 보기 (Alt+Enter)";
+    } else if (retry) {
+      noteLink.hidden = false;
+      noteLink.textContent = "설명 다시 만들기";
+    } else {
+      noteLink.hidden = true;
+    }
     scrapBtn.hidden = !range;
     clearBtn.hidden = !range;
     listener?.(range);
@@ -293,7 +308,11 @@ export function createCodePanel(): CodePanel {
   }
 
   noteLink.addEventListener("click", () => {
-    if (range) openNoteAt(range[0]);
+    if (range && noteIndex && noteIndex[range[0]] >= 0) {
+      openNoteAt(range[0]);
+      return;
+    }
+    retry?.();
   });
 
   clearBtn.addEventListener("click", () => {
@@ -358,6 +377,10 @@ export function createCodePanel(): CodePanel {
     },
     onNoteRef(cb) {
       refListener = cb;
+    },
+    offerAnnotationRetry(show, run) {
+      retry = show ? run : null;
+      paint();
     },
     setAnnotations(items) {
       notes = items;

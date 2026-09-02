@@ -246,3 +246,46 @@ describe("archive (FR-7)", () => {
     expect(entry.summary["files_seen"]).toBeGreaterThan(0);
   });
 });
+
+describe("leaving while the annotation pass is still running", () => {
+  it("writes the notes under their own project, not whichever one is current by then", async () => {
+    // The pass runs for minutes and [목록으로] stays live the whole time. Keying the write on
+    // the workspace's shared projectId lets a first project's notes land on a second one --
+    // and the write replaces the whole record, so the second project's notes are destroyed.
+    const { flow, container, workspace } = await setup();
+    const a = await flow.startProject({ project: PROJECT, topic: "먼저", stack: "s", scale: "small" });
+    const b = await flow.startProject({ project: PROJECT, topic: "나중", stack: "s", scale: "small" });
+
+    await flow.writeAnnotations(b.projectId, { files: { "src/main.py": { status: "ok", items: [{ what: "B의 주석" }] } } });
+
+    // A's pass finishes long after the learner moved on to B.
+    await workspace.showLauncher();
+    await flow.writeAnnotations(a.projectId, { files: { "src/main.py": { status: "ok", items: [{ what: "A의 주석" }] } } });
+
+    const forB = await flow.readAnnotations(b.projectId);
+    expect((forB!.files["src/main.py"].items[0] as { what: string }).what).toBe("B의 주석");
+    const forA = await flow.readAnnotations(a.projectId);
+    expect((forA!.files["src/main.py"].items[0] as { what: string }).what).toBe("A의 주석");
+  });
+
+  it("does not count files opened by a visit the learner already left", async () => {
+    // A part the learner walked away from still opens its first file when its project finally
+    // loads. That is not reading, and counting it inflates a session that never happened.
+    const { flow, storage, container, workspace } = await setup();
+    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+
+    await workspace.showLauncher();
+    (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
+    await workspace.showLauncher();          // leave
+
+    const before = (await flow.seenPaths(projectId)).length;
+    (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
+    await workspace.showLauncher();
+
+    // Reopening the same project reads the same first file; the total on disk does not double.
+    expect((await flow.seenPaths(projectId)).length).toBe(before);
+    void storage;
+  });
+});

@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mountCodeproj } from "./codeproj";
 import type { AnnotationSet } from "./annotations";
+import { AiSession } from "../../src/ai/client";
 
 const PROJECT = {
   title: "도서 관리 API",
@@ -233,5 +234,38 @@ describe("promotion out of the popup", () => {
     (host.querySelector(".lh-cp-note-ref") as HTMLButtonElement).click();
     expect((host.querySelector(".lh-cp-note-popup") as HTMLElement).hidden).toBe(true);
     expect((host.querySelector(".lh-cp-path-label") as HTMLElement).textContent).toBe("app/main.py");
+  });
+});
+
+describe("when a file's notes failed", () => {
+  it("offers to build them again, in the slot the note link would have used", () => {
+    // 08 §7 asks for a regeneration path. The header is a single nowrap row, so this shares
+    // the one conditional slot: a file whose notes failed has none on any line, so the two
+    // states cannot both be true.
+    const client = {
+      ai: async () => ({ ok: true, text: '{"items":[]}', session_id: "s1", error: null }),
+      problems: () => undefined,
+      health: async () => true,
+    } as any;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    mountCodeproj(host, {
+      session: new AiSession(client),
+      project: PROJECT,
+      annotations: ANNOTATIONS,
+    });
+
+    // app/main.py is the failed one.
+    (host.querySelectorAll(".lh-cp-tree-file")[1] as HTMLButtonElement).click();
+    const link = host.querySelector(".lh-cp-note-link") as HTMLElement;
+    expect(link.hidden).toBe(false);
+    expect(link.textContent).toBe("설명 다시 만들기");
+  });
+
+  it("does not offer it when there is no session to ask", () => {
+    // A control that cannot succeed must not look like one that can.
+    const host = mount(ANNOTATIONS);   // session: null
+    (host.querySelectorAll(".lh-cp-tree-file")[1] as HTMLButtonElement).click();
+    expect((host.querySelector(".lh-cp-note-link") as HTMLElement).hidden).toBe(true);
   });
 });
