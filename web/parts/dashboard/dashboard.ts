@@ -123,7 +123,10 @@ function formatDate(ms: number): string {
   if (!ms) return "";
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  // With the time dropped, two sessions on one day render as identical rows -- same topic,
+  // same stack, same counts -- and nothing on screen tells them apart. The minute is already
+  // in the record; only the formatter was throwing it away.
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function renderDashboard(container: HTMLElement, stats: DashboardStats): void {

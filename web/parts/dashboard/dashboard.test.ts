@@ -11,10 +11,14 @@ const entry = (id: string, summary: Record<string, unknown>): IndexEntry => ({
   summary,
 });
 
+/** Local time on one day, so the rendered date and the assertion agree in any timezone. */
+const AT = (h: number, m: number) => new Date(2026, 8, 2, h, m).getTime();
 const HISTORY = [
-  entry("h1", { project_id: "p1", topic: "도서 API", stack: "FastAPI", started_at: 200, questions: 2, explains: 3, files_seen: 4 }),
-  entry("h2", { project_id: "p2", topic: "메모 앱", stack: "React", started_at: 100, questions: 1, explains: 1, files_seen: 2 }),
-  entry("h3", { project_id: "p1", topic: "도서 API", stack: "FastAPI", started_at: 300, questions: 0, explains: 5, files_seen: 1 }),
+  // Two of these are the same day, which is the case the date column has to survive: same
+  // topic, same stack, same counts, told apart only by when they started.
+  entry("h1", { project_id: "p1", topic: "도서 API", stack: "FastAPI", started_at: AT(11, 40), questions: 2, explains: 3, files_seen: 4 }),
+  entry("h2", { project_id: "p2", topic: "메모 앱", stack: "React", started_at: AT(9, 15), questions: 1, explains: 1, files_seen: 2 }),
+  entry("h3", { project_id: "p1", topic: "도서 API", stack: "FastAPI", started_at: AT(14, 5), questions: 0, explains: 5, files_seen: 1 }),
 ];
 const PROJECTS = [entry("p1", { title: "도서 관리" }), entry("p2", { title: "메모" })];
 const PROGRESS = [
@@ -44,7 +48,7 @@ describe("aggregate", () => {
 
   it("lists sessions newest first and names projects from their own records", () => {
     const stats = aggregate(HISTORY, PROJECTS, PROGRESS);
-    expect(stats.recent.map((r) => r.started_at)).toEqual([300, 200, 100]);
+    expect(stats.recent.map((r) => r.started_at)).toEqual([AT(14, 5), AT(11, 40), AT(9, 15)]);
     expect(stats.progress.map((p) => p.title)).toContain("도서 관리");
   });
 
@@ -84,6 +88,13 @@ describe("render", () => {
     expect(host.querySelectorAll(".lh-db-chip")[0].textContent).toBe("FastAPI (2)");
     expect(host.querySelectorAll(".lh-db-progress-item")).toHaveLength(2);
     expect(host.querySelectorAll(".lh-db-table tr")).toHaveLength(4);   // header + 3 sessions
+
+    // Two sessions on the same day were rendering as identical rows -- same topic, same
+    // stack, same counts -- with nothing to tell them apart. The minute was in the record
+    // all along; only the formatter dropped it.
+    const dates = [...host.querySelectorAll(".lh-db-table tr td:first-child")].map((c) => c.textContent!);
+    expect(dates.every((d) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(d))).toBe(true);
+    expect(new Set(dates).size).toBe(dates.length);
   });
 
   it("says so plainly when there is nothing recorded yet", async () => {
