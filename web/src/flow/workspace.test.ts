@@ -289,3 +289,45 @@ describe("leaving while the annotation pass is still running", () => {
     void storage;
   });
 });
+
+describe("the transcript (FR-15a)", () => {
+  it("writes both the counter and the words for one exchange", async () => {
+    // The counters answer how much studying happened; only the transcript can answer what
+    // about. Neither replaces the other.
+    const { storage, container, workspace } = await setup();
+    await seedProposal(storage);
+    await workspace.showLauncher();
+    (container.querySelector(".lh-cp-start-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-generate-btn")).toBeTruthy());
+    (container.querySelector(".lh-cp-generate-btn") as HTMLButtonElement).click();
+    // The AI controls exist from mount, so wait for the code itself before asking about it.
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code-line")).toBeTruthy());
+    (container.querySelector(".lh-cp-explain-btn") as HTMLButtonElement).click();
+
+    const day = await vi.waitFor(async () => {
+      const entries = await storage.list(COLLECTIONS.conversations);
+      expect(entries).toHaveLength(1);
+      return entries[0];
+    });
+    expect(day.summary["explains"]).toBe(1);
+
+    const rec = await storage.get<{ entries: { answer: string; kind: string }[] }>(
+      COLLECTIONS.conversations,
+      day.id,
+    );
+    expect(rec!.data.entries[0].kind).toBe("explain");
+    // The answer itself, not a count of it.
+    expect(rec!.data.entries[0].answer).toBe("ANSWER");
+  });
+
+  it("records nothing for a visit the learner already left", async () => {
+    const { flow, storage, container, workspace } = await setup();
+    await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    await workspace.showLauncher();
+    (container.querySelector(".lh-cp-archive-btn") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(container.querySelector(".lh-cp-code")).toBeTruthy());
+    await workspace.showLauncher();
+
+    expect(await storage.list(COLLECTIONS.conversations)).toHaveLength(0);
+  });
+});

@@ -36,6 +36,11 @@ export interface ExchangeEvent {
    * differently, and a history that counts them as one thing cannot tell the operator which.
    */
   depth?: AnswerDepth;
+  /**
+   * The answer itself. Carried because the owner keeps a verbatim record: a history that counts
+   * questions but keeps none of them cannot be looked back on, only tallied.
+   */
+  answer: string;
 }
 
 export interface CodeprojProps {
@@ -476,7 +481,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
       const text = await explainScraps(session, scraps, lens, reseedFor(entry));
       showAnswer(entry, text);
       endCall(entry);
-      onExchange?.({ kind: "explain", lens, path: scraps[0].path, scrapCount: scraps.length });
+      onExchange?.({ kind: "explain", lens, path: scraps[0].path, scrapCount: scraps.length, answer: text });
       return;
     }
 
@@ -488,7 +493,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     const text = await explain(session, { target: ctx.target, lens }, ctx.content, reseedFor(entry));
     showAnswer(entry, text);
     endCall(entry);
-    onExchange?.({ kind: "explain", lens, path: ctx.target.path, lines: ctx.target.lines });
+    onExchange?.({ kind: "explain", lens, path: ctx.target.path, lines: ctx.target.lines, answer: text });
   }
 
   /**
@@ -526,7 +531,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
       showAnswer(entry, text, depth);
       endCall(entry);
       offerPromotion(entry, question, depth);
-      onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length, depth });
+      onExchange?.({ kind: "ask", path: scraps[0].path, question, scrapCount: scraps.length, depth, answer: text });
       return;
     }
 
@@ -549,6 +554,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
       lines: ctx.target.lines,
       question,
       depth,
+      answer: text,
     });
   }
 

@@ -182,8 +182,23 @@ export function createWorkspace(cfg: WorkspaceConfig) {
   function recordExchange(mine: number, event: ExchangeEvent): void {
     void serialize(async () => {
       await sessionReady;
-      if (mine !== visit || !historyId) return;
+      if (mine !== visit || !historyId || !projectId) return;
+      // Two records, one exchange: the session's counters, and the words themselves. The counters
+      // answer "how much studying happened"; only the transcript can answer "what about".
       await flow.recordExchange(historyId, event);
+      await flow.appendConversation({
+        at: Date.now(),
+        kind: event.kind,
+        lens: event.lens,
+        depth: event.depth,
+        project_id: projectId,
+        history_id: historyId,
+        path: event.path,
+        lines: event.lines,
+        scrap_count: event.scrapCount,
+        question: event.question ?? "",
+        answer: event.answer,
+      });
     });
   }
 

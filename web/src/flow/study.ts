@@ -8,6 +8,7 @@
 //   history    one record per study session: what was read, asked and explained
 //   ai-sessions one record per project: which AI session already holds its codebase
 //   annotations one record per project: the explanation layer over its code, keyed by file path
+//   conversations one record per day: every question and answer, kept verbatim on this machine
 
 import type { IndexEntry, StoragePort, StorageRecord } from "../storage/port";
 import { makeRecord } from "../storage/port";
@@ -19,6 +20,7 @@ export const COLLECTIONS = {
   history: "history",
   aiSessions: "ai-sessions",
   annotations: "annotations",
+  conversations: "conversations",
 } as const;
 
 export type ProposalStatus = "open" | "started" | "archived";
@@ -81,6 +83,52 @@ export interface AiSessionData {
  */
 export interface AnnotationSetData {
   files: Record<string, { status: "pending" | "ok" | "failed"; items: unknown[] }>;
+}
+
+/**
+ * One question and its answer, kept whole.
+ *
+ * This is the layer the learner's own words live in, and it never leaves the machine. Nothing
+ * reads it yet -- the point of writing it now is that a summary can only ever be made from
+ * records that were kept, and a day not recorded is a day that can never be looked back on.
+ *
+ * There is deliberately no `ok` field. By the time an exchange reaches here the transport has
+ * already flattened a failed call into a Korean sentence, so the bit is gone before this layer
+ * sees it. Anything that later summarises these must skip entries whose answer begins with that
+ * sentence, or it will summarise "설명을 불러오지 못했습니다" as something the learner studied.
+ */
+export interface ConversationEntry {
+  at: number;
+  kind: "explain" | "ask";
+  lens?: string;
+  depth?: string;
+  project_id: string;
+  history_id: string;
+  path: string;
+  lines?: [number, number];
+  /** How many regions were in the basket, when the question was about one. */
+  scrap_count?: number;
+  question: string;
+  answer: string;
+}
+
+export interface ConversationDay {
+  entries: ConversationEntry[];
+}
+
+/**
+ * Per-entry size caps. The offline buffer is browser storage with a hard quota, and the write
+ * path discards the boolean that would have reported the overflow -- so without a cap the day a
+ * record grows too large is the day writing silently stops.
+ */
+export const CONVERSATION_MAX_QUESTION = 1000;
+export const CONVERSATION_MAX_ANSWER = 4000;
+
+/** `YYYY-MM-DD`, which is both a legal record id and sorts the same as time. */
+export function conversationDayId(at: number): string {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /** The subset of `tuning.json` that actually reaches a prompt. */
@@ -309,6 +357,40 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
             items: Object.values(set.files).reduce((n, f) => n + f.items.length, 0),
           },
           set,
+        ),
+      );
+    },
+
+    /**
+     * Append one exchange to today's conversation record.
+     *
+     * A day is the file boundary, which keeps the record bounded without an append-only log and
+     * makes a date directly addressable. Read-modify-write, so callers must serialise it with
+     * their other record writes.
+     */
+    async appendConversation(entry: ConversationEntry): Promise<void> {
+      const id = conversationDayId(entry.at);
+      const record = await storage.get<ConversationDay>(COLLECTIONS.conversations, id);
+      const entries = [
+        ...(record?.data?.entries ?? []),
+        {
+          ...entry,
+          question: entry.question.slice(0, CONVERSATION_MAX_QUESTION),
+          answer: entry.answer.slice(0, CONVERSATION_MAX_ANSWER),
+        },
+      ];
+      await storage.put(
+        COLLECTIONS.conversations,
+        makeRecord<ConversationDay>(
+          "conversations",
+          id,
+          {
+            date: id,
+            entries: entries.length,
+            questions: entries.filter((e) => e.kind === "ask").length,
+            explains: entries.filter((e) => e.kind === "explain").length,
+          },
+          { entries },
         ),
       );
     },
