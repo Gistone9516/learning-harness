@@ -31,9 +31,18 @@ export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
 /** Per-file state. `pending` is a file whose annotations were asked for but have not arrived. */
 export type FileAnnotationStatus = "pending" | "ok" | "failed";
 
+/**
+ * Why a file has no usable notes. A bare "failed" leaves both the learner and the operator with
+ * nothing to act on but a retry, and the three causes want different responses: `call` is worth
+ * retrying, `parse` means the model answered in prose, `dropped` means it answered about lines
+ * this file does not have.
+ */
+export type AnnotationFailure = "call" | "parse" | "dropped";
+
 export interface FileAnnotations {
   status: FileAnnotationStatus;
   items: Annotation[];
+  reason?: AnnotationFailure;
 }
 
 /** Everything known about one project, keyed by file path. */

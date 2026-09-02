@@ -53,13 +53,15 @@ describe("annotateFile", () => {
   it("fails the file rather than inventing notes when the reply is unparseable", async () => {
     const { client } = scripted(() => ({ text: "주석을 만들지 못했습니다." }));
     const out = await annotateFile(new AiSession(client), "app/db.py", "one\ntwo");
-    expect(out).toEqual({ status: "failed", items: [] });
+    // The reason matters: prose back is a different problem from a call that never landed,
+    // and a bare "failed" leaves nothing to act on but a blind retry.
+    expect(out).toEqual({ status: "failed", items: [], reason: "parse" });
   });
 
   it("fails the file when the call itself failed", async () => {
     const { client } = scripted(() => ({ ok: false, error: "Timeout after 180s" }));
     const out = await annotateFile(new AiSession(client), "app/db.py", "one\ntwo");
-    expect(out).toEqual({ status: "failed", items: [] });
+    expect(out).toEqual({ status: "failed", items: [], reason: "call" });
   });
 
   it("drops a range the file cannot contain", async () => {
@@ -68,6 +70,9 @@ describe("annotateFile", () => {
     const out = await annotateFile(new AiSession(client), "app/db.py", "one\ntwo");
     expect(out.status).toBe("failed");
     expect(out.items).toHaveLength(0);
+    // Answering about lines the file does not have is not the same failure as answering in
+    // prose, and only one of the two is worth spending another call on.
+    expect(out.reason).toBe("dropped");
   });
 });
 

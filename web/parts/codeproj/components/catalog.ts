@@ -54,7 +54,7 @@ const RULES_FULL = [
 
 const RULES_SEMI = [
   "부품 3개 이내로 짧게 답하세요. answer를 반드시 포함하세요.",
-  "쓸 수 있는 부품: answer, text, flow, tag, why, ref, signature, related, caution, uncertain.",
+  "쓸 수 있는 부품: answer, text, flow, tag, terms, why, ref, focus, signature, related, caution, uncertain.",
   "코드 위치는 ref 부품으로 넣으세요. 확인되지 않은 내용은 uncertain으로 표시하세요.",
 ];
 
@@ -65,7 +65,23 @@ const RULES_SEMI = [
 export function buildComponentDirective(kind: AnswerKind = "full"): string {
   const parts =
     kind === "semi"
-      ? [...SKELETON.slice(0, 3), ...CODE_LINKED.slice(0, 2), CODE_LINKED[2], CODE_LINKED[5], CONCEPTS[1], CONCEPTS[4], CONCEPTS[5], LEARNING[3], TRUST[1]]
+      ? [
+          // No `lead`: a semi answer opens with the answer itself. An opening sentence in front
+          // of it is the one thing a read-at-a-glance format cannot afford.
+          SKELETON[1],
+          SKELETON[2],
+          ...CODE_LINKED.slice(0, 2),
+          CODE_LINKED[2],
+          CODE_LINKED[5],
+          CONCEPTS[1],
+          // `tag` carries names only. The design asks a semi answer to give a concept's name AND
+          // a one-line meaning, and `terms` is the block shaped for that.
+          CONCEPTS[2],
+          CONCEPTS[4],
+          CONCEPTS[5],
+          LEARNING[3],
+          TRUST[1],
+        ]
       : [...SKELETON, ...CODE_LINKED, ...CONCEPTS, ...LEARNING, ...TRUST];
   const rules = kind === "semi" ? RULES_SEMI : RULES_FULL;
 

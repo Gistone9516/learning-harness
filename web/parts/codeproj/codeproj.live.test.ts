@@ -15,9 +15,11 @@
 import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { buildExplainPrompt, buildGenerateSystem, buildGeneratePrompt } from "./prompts";
+import { buildAnnotatePrompt, buildAnnotateSystem, buildExplainPrompt, buildGenerateSystem, buildGeneratePrompt } from "./prompts";
 import { parseComposed } from "./components/parse";
 import { parseProject, sliceLines } from "./model";
+import { annotateFile, annotateProject } from "./session";
+import { AiSession, createAiClient } from "../../src/ai/client";
 import type { ExplainRequest, GenerateInput } from "./model";
 
 const LIVE = process.env.LH_LIVE === "1";
@@ -205,5 +207,121 @@ describe.skipIf(!SESSION)("FR-19 composed answer blocks (live)", () => {
       expect(composed!.blocks.length).toBeGreaterThan(0);
     },
     200_000,
+  );
+});
+
+// FR-20: the annotation pass at real scale, against a project that already exists.
+//
+// The per-file cost was measured once (37.1s for 61 lines). What was never run is the whole
+// sequential pass — the thing the chosen design stands on, since annotations must finish before
+// the learner is let in. This resumes the generation's own session rather than paying for a
+// second generation.
+//
+//   LH_LIVE_PASS=1 LH_LIVE_SESSION=<id> LH_LIVE_TOKEN=<token> npx vitest run parts/codeproj/codeproj.live.test.ts
+const PASS = process.env.LH_LIVE_PASS === "1";
+
+describe.skipIf(!PASS || !SESSION)("FR-20 annotation pass (live, whole project)", () => {
+  it(
+    "annotates every file, and reports how long the learner actually waits",
+    async () => {
+      const project = JSON.parse(readFileSync(join(OUT, "project.parsed.json"), "utf-8")) as {
+        files: { path: string; content: string }[];
+      };
+
+      const client = createAiClient({ baseUrl: SERVER, token: TOKEN, model: MODEL });
+      const session = new AiSession(client);
+      session.adopt(SESSION);
+
+      // Timings only. The set is not in scope yet while this runs, and per-file outcomes are
+      // read back afterwards anyway.
+      const marks: { path: string; ms: number }[] = [];
+      const started = Date.now();
+      let last = started;
+
+      const set = await annotateProject(session, project as never, (done, total, path) => {
+        if (done > 0) {
+          const now = Date.now();
+          marks.push({ path: project.files[done - 1].path, ms: now - last });
+          last = now;
+        }
+        void total;
+        void path;
+      });
+      const totalMs = Date.now() - started;
+
+      // Recompute per-file results after the fact: the progress callback fires before the file
+      // it reports on has finished, so the statuses above are one step behind.
+      const perFile = project.files.map((f) => ({
+        path: f.path,
+        lines: f.content.split(/\r?\n/).length,
+        status: set.files[f.path]?.status,
+        items: set.files[f.path]?.items.length ?? 0,
+      }));
+
+      writeFileSync(
+        join(OUT, "measure-D-pass.json"),
+        JSON.stringify(
+          {
+            total_ms: totalMs,
+            files: project.files.length,
+            ok: perFile.filter((f) => f.status === "ok").length,
+            failed: perFile.filter((f) => f.status === "failed").length,
+            items: perFile.reduce((n, f) => n + f.items, 0),
+            per_file: perFile,
+            timings_ms: marks,
+            set,
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+
+      expect(Object.keys(set.files)).toHaveLength(project.files.length);
+      // Not "every file succeeded" — one failure is a legitimate outcome the design absorbs.
+      // What must hold is that the pass ran to the end and produced something usable.
+      expect(perFile.filter((f) => f.status === "ok").length).toBeGreaterThan(0);
+    },
+    3_000_000,
+  );
+});
+
+// Diagnose a single file that the whole-project pass could not annotate. One call, so it is
+// cheap enough to ask why rather than guess.
+//
+//   LH_LIVE_ONE=app/logging_setup.py LH_LIVE_SESSION=<id> LH_LIVE_TOKEN=<token> npx vitest run ...
+const ONE = process.env.LH_LIVE_ONE ?? "";
+
+describe.skipIf(!ONE || !SESSION)("FR-20 one file (live)", () => {
+  it(
+    "reports what went wrong, not just that it did",
+    async () => {
+      const project = JSON.parse(readFileSync(join(OUT, "project.parsed.json"), "utf-8")) as {
+        files: { path: string; content: string }[];
+      };
+      const file = project.files.find((f) => f.path === ONE);
+      expect(file, `no such file: ${ONE}`).toBeTruthy();
+
+      const client = createAiClient({ baseUrl: SERVER, token: TOKEN, model: MODEL });
+      const session = new AiSession(client);
+      session.adopt(SESSION);
+
+      // Capture the raw reply as well as the parsed outcome: the reason field says which of
+      // the three failure shapes it was, the raw text says what the model actually sent.
+      const raw = await session.send({
+        prompt: buildAnnotatePrompt(file!.path, file!.content),
+        system: buildAnnotateSystem(),
+        effort: "medium",
+      });
+      const out = await annotateFile(new AiSession(client), file!.path, file!.content);
+
+      writeFileSync(
+        join(OUT, "measure-E-onefile.json"),
+        JSON.stringify({ path: ONE, first_reply: raw, second_attempt: out }, null, 2),
+        "utf-8",
+      );
+      expect(out.status === "ok" || !!out.reason).toBe(true);
+    },
+    400_000,
   );
 });

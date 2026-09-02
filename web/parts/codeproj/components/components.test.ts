@@ -154,3 +154,37 @@ describe("prompt directive", () => {
     expect(semi.length).toBeLessThan(buildComponentDirective("full").length);
   });
 });
+
+describe("the semi answer catalogue", () => {
+  it("offers exactly the blocks its own rule sentence permits", () => {
+    // These two drifted apart once already: the menu handed the model twelve kinds while the
+    // rule beside it named ten. The model is told both, so whichever it follows, the other is
+    // a lie — and nothing fails when they disagree.
+    const directive = buildComponentDirective("semi");
+    const permitted = directive
+      .split(String.fromCharCode(10))
+      .find((l) => l.startsWith("쓸 수 있는 부품:"))!
+      .replace("쓸 수 있는 부품:", "")
+      .replace(".", "")
+      .split(",")
+      .map((t) => t.trim())
+      .sort();
+
+    const offered = [...directive.matchAll(/\{"t":"([a-z]+)"/g)].map((m) => m[1]).sort();
+    expect([...new Set(offered)]).toEqual(permitted);
+  });
+
+  it("gives a concept its meaning, not just its name", () => {
+    // The design asks a semi answer for a concept's name AND a one-line meaning. `tag` carries
+    // names only; `terms` is the block shaped for both.
+    const directive = buildComponentDirective("semi");
+    expect(directive).toContain('"t":"terms"');
+  });
+
+  it("does not open with a lead-in", () => {
+    // A sentence in front of the answer is the one thing a read-at-a-glance format cannot
+    // afford; the full answer keeps it.
+    expect(buildComponentDirective("semi")).not.toContain('"t":"lead"');
+    expect(buildComponentDirective("full")).toContain('"t":"lead"');
+  });
+});

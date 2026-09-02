@@ -99,17 +99,21 @@ export async function annotateFile(
     system: buildAnnotateSystem(),
     effort: "medium",
   });
-  if (!res.ok) return { status: "failed", items: [] };
+  if (!res.ok) return { status: "failed", items: [], reason: "call" };
   const carved = carveJson(res.text);
-  if (!carved) return { status: "failed", items: [] };
+  if (!carved) return { status: "failed", items: [], reason: "parse" };
   let raw: unknown;
   try {
     raw = JSON.parse(carved);
   } catch {
-    return { status: "failed", items: [] };
+    return { status: "failed", items: [], reason: "parse" };
   }
   // The file's own length is what separates a real line range from an invented one.
   const parsed = parseAnnotations(raw, content.split("\n").length);
+  if (parsed.status === "failed") {
+    // Nothing survived, or too much was thrown away for what is left to be worth showing.
+    return { status: "failed", items: [], reason: parsed.total === 0 ? "parse" : "dropped" };
+  }
   return { status: parsed.status, items: parsed.items };
 }
 
