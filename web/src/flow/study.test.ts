@@ -176,4 +176,62 @@ describe("session history (FR-8)", () => {
     );
     expect(totals).toEqual({ questions: 1, files: 2 });
   });
+  it("remembers and recalls the session that holds a project's codebase", async () => {
+    const { flow } = setup();
+    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+
+    expect(await flow.recallSession(projectId)).toBeNull();
+    await flow.rememberSession(projectId, "sid-9");
+    expect(await flow.recallSession(projectId)).toBe("sid-9");
+  });
+
+  it("does not touch the project record when remembering a session", async () => {
+    // listArchived sorts by updated_at, so writing the session id onto the project record
+    // would lift an old project to the top of the archive every time its session changed.
+    const { storage, flow } = setup();
+    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const before = await storage.get(COLLECTIONS.projects, projectId);
+
+    await flow.rememberSession(projectId, "sid-9");
+
+    expect(await storage.get(COLLECTIONS.projects, projectId)).toEqual(before);
+    expect(await storage.list(COLLECTIONS.aiSessions)).toHaveLength(1);
+  });
+
+  it("stores an annotation layer and reports its coverage from the index alone", async () => {
+    const { storage, flow } = setup();
+    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+
+    expect(await flow.readAnnotations(projectId)).toBeNull();
+    await flow.writeAnnotations(projectId, {
+      files: {
+        "src/main.py": { status: "ok", items: [{ what: "a" }, { what: "b" }] },
+        "src/service.py": { status: "failed", items: [] },
+      },
+    });
+
+    const back = await flow.readAnnotations(projectId);
+    expect(back!.files["src/main.py"].items).toHaveLength(2);
+
+    // An operator can see how well a project is annotated without opening the record.
+    const [entry] = await storage.list(COLLECTIONS.annotations);
+    expect(entry.summary).toMatchObject({ files_ok: 1, files_failed: 1, items: 2 });
+  });
+
+  it("reads only the tuning fields that reach a prompt", async () => {
+    const { storage, flow } = setup();
+    await storage.putDoc("tuning", {
+      defaults: { scale: "large", stack_hint: "  ", output_lang: "ko" },
+      generation: { quality_profile: "production" },
+    });
+
+    // An empty hint is the same as no hint; forwarding it would put a stray clause in the prompt.
+    expect(await flow.readTuning()).toEqual({ scale: "large", stack_hint: undefined });
+  });
+
+  it("ignores a tuning scale that is not one of the three", async () => {
+    const { storage, flow } = setup();
+    await storage.putDoc("tuning", { defaults: { scale: "enormous" } });
+    expect((await flow.readTuning()).scale).toBeUndefined();
+  });
 });

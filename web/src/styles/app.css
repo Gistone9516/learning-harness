@@ -342,7 +342,11 @@ body {
 #app .lh-cp-ai-tab { position: fixed; right: 0; top: 104px; z-index: 25; padding: 12px 10px; background: var(--lh-primary); color: #fff; border: none; border-radius: 12px 0 0 12px; font-size: 13px; font-weight: 800; letter-spacing: .04em; cursor: pointer; box-shadow: -4px 6px 20px rgba(20,30,50,0.12); }
 #app .lh-cp-ai-tab:hover { background: var(--lh-primary-strong); }
 .lh-cp-ai-tab--hidden { display: none !important; }
-.lh-cp-ai { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 88vw; background: var(--lh-surface); border-left: 1px solid var(--lh-line); box-shadow: -12px 0 40px rgba(20,30,50,0.10); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .32s cubic-bezier(.4,0,.2,1), width .1s ease; z-index: 40; }
+/* conceptprob's slide-in AI drawer.
+   codeproj's AI pane is a column inside its own grid and carries `lh-cp-panel` as well, so it
+   must not pick these up -- it did, and rendered entirely off the screen: measured 2026-09-02,
+   left = 1440px in a 1440px viewport, which is why that panel had never once been seen. */
+.lh-cp-ai:not(.lh-cp-panel) { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 88vw; background: var(--lh-surface); border-left: 1px solid var(--lh-line); box-shadow: -12px 0 40px rgba(20,30,50,0.10); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .32s cubic-bezier(.4,0,.2,1), width .1s ease; z-index: 40; }
 .lh-cp-ai--open { transform: none; }
 /* Expanded: panel widens over a blurred body, leaving ~460px on the left for the sub panel. */
 .lh-cp-ai--expanded { width: max(380px, calc(100vw - 460px)); max-width: none; }

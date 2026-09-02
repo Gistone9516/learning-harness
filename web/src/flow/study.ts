@@ -7,6 +7,7 @@
 //   progress   one record per project holding which files have been read
 //   history    one record per study session: what was read, asked and explained
 //   ai-sessions one record per project: which AI session already holds its codebase
+//   annotations one record per project: the explanation layer over its code, keyed by file path
 
 import type { IndexEntry, StoragePort, StorageRecord } from "../storage/port";
 import { makeRecord } from "../storage/port";
@@ -17,6 +18,7 @@ export const COLLECTIONS = {
   progress: "progress",
   history: "history",
   aiSessions: "ai-sessions",
+  annotations: "annotations",
 } as const;
 
 export type ProposalStatus = "open" | "started" | "archived";
@@ -68,6 +70,17 @@ export interface ProjectPayload {
  */
 export interface AiSessionData {
   session_id: string;
+}
+
+/**
+ * The annotation layer for one project, keyed by file path.
+ *
+ * Kept as one record per project rather than per file because the id would otherwise have to be
+ * derived from a path, and record ids may not contain slashes, dots, uppercase or underscores.
+ * A project-sized record is also what the popup needs: opening a file wants the whole set.
+ */
+export interface AnnotationSetData {
+  files: Record<string, { status: "pending" | "ok" | "failed"; items: unknown[] }>;
 }
 
 /** The subset of `tuning.json` that actually reaches a prompt. */
@@ -257,6 +270,42 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
     async recallSession(projectId: string): Promise<string | null> {
       const record = await storage.get<AiSessionData>(COLLECTIONS.aiSessions, projectId);
       return record?.data?.session_id ?? null;
+    },
+
+    /**
+     * The annotation layer for a project, or null when none was ever built.
+     *
+     * Items come back unparsed: the flow moves records, and deciding which of them survive is
+     * the part's job, which is the only place that knows how long each file actually is.
+     */
+    async readAnnotations(projectId: string): Promise<AnnotationSetData | null> {
+      const record = await storage.get<AnnotationSetData>(COLLECTIONS.annotations, projectId);
+      return record?.data ?? null;
+    },
+
+    /**
+     * Replace a project's annotation layer. Whole-set writes only: there is no append here, so
+     * the record never grows without bound and the file stays the unit it is generated in.
+     *
+     * The summary carries coverage counts so an operator can see how well a project is annotated
+     * from the index alone, without opening any record.
+     */
+    async writeAnnotations(projectId: string, set: AnnotationSetData): Promise<void> {
+      const statuses = Object.values(set.files).map((f) => f.status);
+      await storage.put(
+        COLLECTIONS.annotations,
+        makeRecord<AnnotationSetData>(
+          "annotations",
+          projectId,
+          {
+            project_id: projectId,
+            files_ok: statuses.filter((v) => v === "ok").length,
+            files_failed: statuses.filter((v) => v === "failed").length,
+            items: Object.values(set.files).reduce((n, f) => n + f.items.length, 0),
+          },
+          set,
+        ),
+      );
     },
 
     /**
