@@ -21,7 +21,7 @@ Discord 네이티브 봇이 못 덮는 영역을 웹으로 보완한다. 연속 
 - **스택**: Vite + vanilla TS(경량 빌드). 풀 프레임워크 미사용. 코드 뷰어는 CodeMirror를 파츠로 흡수(읽기 위주).
 - **호스팅**: 로컬 우선(내 PC), 외부에서 볼 때만 터널(cloudflared). 공개 정적 호스팅은 백로그.
 - **AI 경로(실측 완료)**: 웹은 claude를 직접 못 부르므로 `bot/ai_server.py`(게이티드 로컬 HTTP)를 경유해 `claude -p`(구독)를 돌린다. 별도 API 키·추가 과금 없음. 인터넷 왕복 검증됨.
-- **모델**: `claude-opus-4-8[1m]`(opus 4.8, 1M 컨텍스트), effort `medium`. 1M 컨텍스트라 코드베이스를 세션에 통째 적재해도 여유.
+- **모델**: `claude-opus-5[1m]`(opus 5, 1M 컨텍스트), effort `medium`. 1M 컨텍스트라 코드베이스를 세션에 통째 적재해도 여유.
 - **진도**: v1은 브라우저 `localStorage` 단독(봇/engine과 디커플링). 하이브리드 공유는 백로그.
 - **frontend-design 스킬**: 시각 디자인 단계에서 로드(지금은 아키텍처·파츠·표준 기획).
 

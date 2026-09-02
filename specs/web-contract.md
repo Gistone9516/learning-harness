@@ -60,7 +60,7 @@ The web reaches the claude subscription only through `bot/ai_server.py` (built a
 type AiRequest = {
   prompt: string;                 // required, non-empty
   system?: string;                // optional preamble
-  model?: string;                 // default = server/ctx model (claude-opus-4-8[1m])
+  model?: string;                 // default = server/ctx model (claude-opus-5[1m])
   effort?: "low"|"medium"|"high"; // default "low"; web modules pass "medium"
   session_id?: string|null;       // null/absent = new session; a prior id = --resume
 };
@@ -179,7 +179,7 @@ type ProgressRecord = {
 
 ## 6. AI generation contract (shared shape)
 
-Modules that generate content do one `POST /ai` with `effort:"medium"`, model `claude-opus-4-8[1m]`, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
+Modules that generate content do one `POST /ai` with `effort:"medium"`, model `claude-opus-5[1m]`, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
 
 ### 6.1 Intent-first generation (operating rule)
 

@@ -180,13 +180,28 @@ cd bot    && python -m pytest tests/ -q      # 368 headless tests (boot/session,
   layer with a mocked `invoke`). Discord I/O and live AI are exercised only against a running bot.
 
 ```bash
-cd web && npm install && npm test     # 105 headless web tests (grade parity, parts, ai client, pre-baked offline mount, subject-agnostic guard)
+cd web && npm install && npm test     # 239 headless web tests (grade parity, parts, ai client, pre-baked offline mount, subject-agnostic guard)
 cd web && npm run build               # tsc --noEmit + vite production build
 ```
 - The web kit is verified headless with vitest (the TS grader is checked against engine-generated golden
   vectors for parity; the AI client runs against a mock `/ai`, no live claude; a jsdom gate mounts a
   pre-baked concept with no session and grades it with zero AI). For a local visual check,
   `cd web && npm run dev` serves a dev fixture at `localhost:5173` (`#conceptprob` for the offline module).
+
+One test is opt-in because it spends money: `parts/codeproj/codeproj.live.test.ts` calls a running
+`ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`. There is no
+vitest config in this repo, so the default include glob picks the file up and the gate lives inside it —
+without `LH_LIVE` the suite is skipped and `npm test` stays at 239 green.
+
+```bash
+cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/codeproj.live.test.ts
+```
+- Env: `LH_LIVE_URL` (default `http://127.0.0.1:8765`), `LH_LIVE_MODEL` (default `claude-opus-5[1m]`),
+  `LH_LIVE_OUT` (where the raw response is written), `LH_LIVE_WATCH` (tree checked for stray writes).
+  It writes the raw response before parsing it, because the response body is the whole point of the run:
+  a generation failure is reported as HTTP 200 with `ok:false`, and the helper that production uses
+  collapses that and an unparseable body into the same bare `null`. Measured 2026-09-02: 279s, 14 files,
+  1158 lines, no fabricated tool-call blocks, nothing written to disk.
 
 ## 6. Current status
 
@@ -216,7 +231,12 @@ cd web && npm run build               # tsc --noEmit + vite production build
 - Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with four
   parts (sheet, codeproj, dashboard, conceptprob), a shared engine grader port (golden-vector parity with the
   Python engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
-  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 239 web tests green plus a clean `tsc --noEmit` (measured 2026-09-01).
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 239 web tests green plus a clean `tsc --noEmit` (measured 2026-09-02).
+  Project generation is now proven end to end against a live CLI, not just against a mock: one opt-in run
+  (§5) returned a 14-file, 1158-line FastAPI project in 279s with no fabricated tool-call blocks and no
+  stray writes. That run also showed `SCALE_GUIDE` is miscalibrated — its `medium` line budget does not
+  count the README, tests, error hierarchy and schemas that `QUALITY_CLAUSE` requires in the same breath,
+  so the two clauses contradict each other and the file-count half is the one models obey.
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
   with no Discord dependency. **AI is optional**: the AI parts also run from **pre-baked verified content**
   injected by the instance (`concepts` / `project`) — mounting with no `ai_server` and grading fully

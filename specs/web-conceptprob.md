@@ -10,7 +10,7 @@
 - **Concept → problem flow** in a three-level hierarchy: **area → concept → problem**.
 - **Concept = pre-baked or AI-generated.** A concept can be **injected pre-baked** (a verified `GeneratedConcept`, rendered and graded with zero AI) or, when a session is present, **generated live** (session-loaded; reading deepened on click via `--resume`). **Problems = deterministically graded** by the engine grader port (Web SoT §3), token 0 at grade time, in both modes.
 - **AI is optional.** With every needed concept pre-baked, the part runs **fully offline** (no `ai_server`); deepen (live-only) is hidden. This is the graceful-degradation contract (Web SoT §7) and the deterministic = token 0 invariant.
-- Model `claude-opus-4-8[1m]`, effort `medium` (live mode only). Subject-agnostic: the area taxonomy and any concept outline are injected (Web SoT §4); the part carries no subject literal.
+- Model `claude-opus-5[1m]`, effort `medium` (live mode only). Subject-agnostic: the area taxonomy and any concept outline are injected (Web SoT §4); the part carries no subject literal.
 
 ---
 

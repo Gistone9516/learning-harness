@@ -24,7 +24,7 @@ export interface AiResponse {
 export interface AiClientConfig {
   baseUrl: string;          // e.g. http://localhost:8765 or a tunnel URL
   token: string;            // AI_SERVER_TOKEN, obtained out-of-band; never bundled
-  model?: string;           // default model for this client (e.g. claude-opus-4-8[1m])
+  model?: string;           // default model for this client (e.g. claude-opus-5[1m])
   fetchImpl?: typeof fetch; // injectable for tests
 }
 

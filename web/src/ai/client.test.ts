@@ -18,14 +18,14 @@ function mockFetch(handler: (url: string, init?: RequestInit) => { status: numbe
 describe("ai client", () => {
   it("POSTs /ai with token header, effort, and model", async () => {
     const { f, calls } = mockFetch(() => ({ status: 200, json: { ok: true, text: "hi", session_id: "s1", error: null } }));
-    const client = createAiClient({ baseUrl: "http://x:8765", token: "tok", model: "claude-opus-4-8[1m]", fetchImpl: f });
+    const client = createAiClient({ baseUrl: "http://x:8765", token: "tok", model: "claude-opus-5[1m]", fetchImpl: f });
     const res = await client.ai({ prompt: "hello" });
     expect(res).toEqual({ ok: true, text: "hi", session_id: "s1", error: null } satisfies AiResponse);
     expect(calls[0].url).toBe("http://x:8765/ai");
     expect((calls[0].init as any).method).toBe("POST");
     expect((calls[0].init as any).headers["X-AI-Token"]).toBe("tok");
     const body = JSON.parse((calls[0].init as any).body);
-    expect(body).toMatchObject({ prompt: "hello", effort: "medium", model: "claude-opus-4-8[1m]" });
+    expect(body).toMatchObject({ prompt: "hello", effort: "medium", model: "claude-opus-5[1m]" });
   });
 
   it("returns ok:false on non-2xx", async () => {
