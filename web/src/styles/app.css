@@ -79,6 +79,11 @@ body {
 .lh-cp-header { padding: var(--lh-s4) var(--lh-s5); border-bottom: 1px solid var(--lh-line); }
 .lh-cp-title { margin: 0; font-family: var(--lh-font-display); font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .lh-cp-summary-x { margin: var(--lh-s2) 0 0; color: var(--lh-ink-mid); font-size: 14px; }
+/* Title and the summary toggle share one row so the toggle costs no vertical space. Scoped,
+   unlike its neighbours above: `lh-cp-` is shared with conceptprob, which owns a bare
+   `.lh-cp-title-row` of its own, and the two must not meet. */
+.lh-codeproj .lh-cp-head-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--lh-s4); }
+.lh-codeproj .lh-cp-summary-toggle { flex-shrink: 0; }
 .lh-cp-tree-list { list-style: none; margin: 0; padding: 0; }
 .lh-cp-tree-item { padding: var(--lh-s1) var(--lh-s2); border-radius: var(--lh-r-xs); font-family: var(--lh-font-mono); font-size: 13px; color: var(--lh-ink-mid); cursor: pointer; }
 .lh-cp-code-area { background: var(--lh-code-bg); border: 1px solid var(--lh-code-border); border-radius: var(--lh-r-sm); overflow: auto; }
@@ -773,7 +778,9 @@ body {
 }
 .lh-codeproj .lh-cp-entry-title { display: flex; align-items: baseline; gap: var(--lh-s2); }
 .lh-codeproj .lh-cp-entry-foot { margin-top: var(--lh-s2); display: flex; justify-content: flex-end; }
-#app .lh-codeproj .lh-cp-entry-promote, #app .lh-codeproj .lh-cp-note-expand {
+#app .lh-codeproj .lh-cp-entry-promote,
+#app .lh-codeproj .lh-cp-note-expand,
+#app .lh-codeproj .lh-cp-summary-toggle {
   background: transparent;
   border: 1px solid var(--lh-line-strong);
   color: var(--lh-ink-mid);
@@ -782,7 +789,9 @@ body {
   border-radius: var(--lh-r-xs);
   cursor: pointer;
 }
-#app .lh-codeproj .lh-cp-entry-promote:hover, #app .lh-codeproj .lh-cp-note-expand:hover {
+#app .lh-codeproj .lh-cp-entry-promote:hover,
+#app .lh-codeproj .lh-cp-note-expand:hover,
+#app .lh-codeproj .lh-cp-summary-toggle:hover {
   color: var(--lh-ink);
   border-color: var(--lh-primary);
 }

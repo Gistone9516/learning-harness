@@ -24,6 +24,14 @@ import { parseComposed } from "./components/parse";
 import { normalizeSemi } from "./components/semi";
 import { renderComposed, type RenderContext } from "./components/render";
 
+/*
+ * Labels for the summary toggle. Deliberately not 자세히 or 더 알아보기: both already name an AI
+ * call on this same screen — the answer-depth pair and the annotation popup's promotion — and a
+ * word that means "wait for the model" elsewhere must not mean "expand some text" here.
+ */
+const SUMMARY_MORE = "더 보기";
+const SUMMARY_LESS = "접기";
+
 export interface ExchangeEvent {
   kind: "explain" | "ask";
   lens?: Lens;
@@ -140,11 +148,75 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   // ── shell ───────────────────────────────────────────────────────────────────
 
   const header = el("div", "lh-cp-header");
+  /*
+   * The toggle sits at the right end of the title's own row rather than under the summary, so
+   * the collapsed state costs no extra line. This header's vertical budget is the whole reason
+   * an instance clamps the summary in the first place; a control that spends a row to reveal
+   * two would be taking back most of what the clamp bought.
+   *
+   * Its own class, not conceptprob's `.lh-cp-title-row`: that one is unscoped, and a bare
+   * `lh-cp-` class claimed by the other part is what put this part's AI pane off-screen once.
+   */
+  const headRow = el("div", "lh-cp-head-row");
   const titleEl = el("h2", "lh-cp-title", "코드 프로젝트 탐색");
   const summaryEl = el("p", "lh-cp-summary", "");
-  header.appendChild(titleEl);
+  summaryEl.id = "lh-cp-summary-body";
+  const summaryToggle = el("button", "lh-cp-summary-toggle", SUMMARY_MORE);
+  summaryToggle.type = "button";
+  summaryToggle.hidden = true;
+  summaryToggle.setAttribute("aria-expanded", "false");
+  summaryToggle.setAttribute("aria-controls", summaryEl.id);
+  summaryToggle.addEventListener("click", () => setSummaryOpen(!summaryOpen));
+  headRow.appendChild(titleEl);
+  headRow.appendChild(summaryToggle);
+  header.appendChild(headRow);
   header.appendChild(summaryEl);
   container.appendChild(header);
+
+  /*
+   * The kit does not clamp the summary, so nothing overflows and the toggle stays hidden here.
+   * It appears exactly where an instance decided to clamp — which is also why the measurement
+   * has to be a measurement and not a character count: only the stylesheet knows the budget.
+   */
+  let summaryOpen = false;
+
+  function setSummaryOpen(open: boolean): void {
+    summaryOpen = open;
+    summaryEl.classList.toggle("lh-cp-summary--open", open);
+    summaryToggle.textContent = open ? SUMMARY_LESS : SUMMARY_MORE;
+    summaryToggle.setAttribute("aria-expanded", String(open));
+  }
+
+  /**
+   * Show the toggle only where there is something hidden to show.
+   *
+   * Measured while collapsed and never while open, because an expanded paragraph reports no
+   * overflow — recomputing then would hide the button and strand the learner in the open state
+   * with no way back.
+   */
+  function syncSummaryToggle(): void {
+    if (summaryOpen) return;
+    summaryToggle.hidden = summaryEl.scrollHeight <= summaryEl.clientHeight + 1;
+  }
+
+  /**
+   * Re-measure on resize: the clamp is a line count, so the same text overflows at one width and
+   * fits at another, and an instance may change the clamp itself at a breakpoint.
+   *
+   * An observer on the element rather than a `window` listener. `mountCodeproj` has no teardown
+   * and remounts into the same container, so a global listener would hold this closure alive for
+   * the life of the page and stack up one copy per mount; the observer dies with the closure.
+   */
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => syncSummaryToggle()).observe(summaryEl);
+  }
+
+  /** Both writers of the summary go through here: the text changed, so the measurement is stale. */
+  function setSummary(text: string): void {
+    summaryEl.textContent = text;
+    setSummaryOpen(false);
+    syncSummaryToggle();
+  }
 
   const panes = el("div", "lh-cp-panes");
   const filePanel = createFilePanel((path) => selectFile(path));
@@ -271,7 +343,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
   if (!currentProject && session) {
     container.insertBefore(buildGeneratePanel(), panes);
   } else if (!currentProject) {
-    summaryEl.textContent = "표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).";
+    setSummary("표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).");
   } else {
     loadProject(currentProject);
   }
@@ -402,7 +474,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
 
   function loadProject(proj: GeneratedProject): void {
     titleEl.textContent = proj.title;
-    summaryEl.textContent = proj.summary;
+    setSummary(proj.summary);
     filePanel.render(proj, buildTree(proj.files));
     filePanel.markSeen(seenPaths);
     if (proj.files.length > 0) selectFile(proj.files[0].path);
