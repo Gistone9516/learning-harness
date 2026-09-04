@@ -30,6 +30,11 @@
   --lh-ink-faint-2: #a6adb8;
 
   /* The accent: a calm indigo-blue. */
+  /* Text drawn ON an accent fill. A token because the right answer flips with the palette: a
+     light theme's accent is dark enough for white, a dark theme's accent is bright enough that
+     white sits at 2.7:1 and near-black is the legible choice. Defaults to what every accent-filled
+     rule hardcoded before it existed, so no consumer changes appearance by gaining the token. */
+  --lh-on-primary: #ffffff;
   --lh-primary: #2a6fdb;
   --lh-primary-strong: #1f5bbf;
   --lh-primary-soft: #eaf2fd;

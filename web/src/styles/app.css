@@ -45,7 +45,7 @@ body {
   font-family: inherit;
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--lh-on-primary);
   background: var(--lh-primary);
   border: none;
   border-radius: var(--lh-r-sm);
@@ -98,12 +98,18 @@ body {
   background: transparent; border: none; border-radius: var(--lh-r-xs);
   font-size: 13px; font-weight: 500; color: var(--lh-ink-mid); cursor: pointer;
 }
+/* A written concept is the content, so it gets full ink; one not written yet steps down to the
+   mid tier. Both are legible -- the title is how the learner knows the concept is coming at all --
+   and one clear ladder step apart, which reads better than the faintest grey did and no longer
+   asks the learner to make out 2.5:1 text.
+
+   These sit ABOVE hover and selection deliberately: an attribute selector weighs the same as a
+   class, so placed after them they would win the tie and a selected row would lose its colour. */
+#app .lh-codeproj .lh-cp-concept-row[data-state="ok"] { color: var(--lh-ink); }
+#app .lh-codeproj .lh-cp-concept-row[data-state="pending"],
+#app .lh-codeproj .lh-cp-concept-row[data-state="writing"] { color: var(--lh-ink-mid); }
 #app .lh-codeproj .lh-cp-concept-row:hover { background: var(--lh-surface-sunk); color: var(--lh-ink); }
 #app .lh-codeproj .lh-cp-concept-row--on { background: var(--lh-primary-soft); color: var(--lh-primary-strong); }
-/* Not written yet: quieter, but still openable -- opening one is how the learner finds out it
-   is coming, and the reading column says so in words. */
-#app .lh-codeproj .lh-cp-concept-row[data-state="pending"],
-#app .lh-codeproj .lh-cp-concept-row[data-state="writing"] { color: var(--lh-ink-faint-2); }
 .lh-codeproj .lh-cp-concept-row-title { flex: 1; min-width: 0; }
 .lh-codeproj .lh-cp-concept-row-tag { flex-shrink: 0; font-size: 10.5px; color: var(--lh-ink-faint); }
 
@@ -293,7 +299,7 @@ body {
 .lh-cp-subsec { border: 1px solid var(--lh-line-strong); border-radius: 12px; overflow: hidden; background: var(--lh-surface); box-shadow: var(--lh-shadow-sm); }
 .lh-cp-subsec-head { display: flex; align-items: center; gap: 9px; padding: 10px 15px; font-size: 13.5px; font-weight: 700; color: var(--lh-primary-strong); background: var(--lh-primary-soft); border-bottom: 1px solid var(--lh-primary-line); }
 .lh-cp-subsec-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--lh-primary); flex: 0 0 auto; }
-.lh-cp-subsec-num { flex: 0 0 auto; min-width: 30px; height: 20px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; background: var(--lh-primary); color: #fff; border-radius: 6px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lh-cp-subsec-num { flex: 0 0 auto; min-width: 30px; height: 20px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; background: var(--lh-primary); color: var(--lh-on-primary); border-radius: 6px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .lh-cp-subsec-title { flex: 1; min-width: 0; }
 .lh-cp-subsec-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .lh-cp-subsec-body .lh-cp-step-body { font-size: 14.5px; }
@@ -345,7 +351,7 @@ body {
 .lh-cp-choice-glyph { width: 23px; height: 23px; border-radius: 7px; border: 1.5px solid var(--lh-ink-faint); color: var(--lh-ink-faint); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; background: var(--lh-surface); }
 .lh-cp-choice-text { flex: 1; font-size: 14.5px; line-height: 1.5; color: var(--lh-ink-soft); }
 #app .lh-cp-choice--sel { border-color: var(--lh-primary); background: var(--lh-primary-soft); }
-.lh-cp-choice--sel .lh-cp-choice-glyph { border-color: var(--lh-primary); background: var(--lh-primary); color: #fff; }
+.lh-cp-choice--sel .lh-cp-choice-glyph { border-color: var(--lh-primary); background: var(--lh-primary); color: var(--lh-on-primary); }
 #app .lh-cp-choice--correct { border-color: var(--lh-ok); background: var(--lh-ok-soft); }
 .lh-cp-choice--correct .lh-cp-choice-glyph { border-color: var(--lh-ok); background: var(--lh-ok); color: #fff; }
 .lh-cp-choice--correct .lh-cp-choice-text { color: var(--lh-ok-strong); font-weight: 600; }
@@ -355,7 +361,7 @@ body {
 .lh-cp-short { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
 #app .lh-cp-input { flex: 1; min-width: 220px; padding: 12px 15px; border: 1.5px solid var(--lh-line-strong); border-radius: 11px; font-size: 14.5px; color: var(--lh-ink); background: var(--lh-surface); }
 #app .lh-cp-input--cloze { flex: 0 1 auto; min-width: 140px; }
-#app .lh-cp-check2 { flex-shrink: 0; padding: 0 22px; background: var(--lh-primary); color: #fff; border: none; border-radius: 11px; cursor: pointer; font-size: 14px; font-weight: 700; }
+#app .lh-cp-check2 { flex-shrink: 0; padding: 0 22px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 11px; cursor: pointer; font-size: 14px; font-weight: 700; }
 #app .lh-cp-check2--block { display: inline-flex; margin-top: 14px; padding: 11px 22px; }
 
 .lh-cp-verdict { margin-top: 14px; display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; }
@@ -377,13 +383,13 @@ body {
 #app button.lh-cp-reveal-link:hover { color: var(--lh-primary-strong); border-bottom-color: var(--lh-primary); }
 
 /* "문제로 돌아가기" floating button — bottom-right, clears the AI tab (top-right). */
-#app .lh-cp-backprob { position: fixed; right: 22px; bottom: 22px; z-index: 32; display: inline-flex; align-items: center; gap: 7px; padding: 11px 18px; background: var(--lh-primary); color: #fff; border: none; border-radius: 12px; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(20,30,50,0.18); }
+#app .lh-cp-backprob { position: fixed; right: 22px; bottom: 22px; z-index: 32; display: inline-flex; align-items: center; gap: 7px; padding: 11px 18px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 12px; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(20,30,50,0.18); }
 #app .lh-cp-backprob:hover { background: var(--lh-primary-strong); }
 .lh-cp-backprob-ico { font-size: 12px; }
 .lh-cp-status { color: var(--lh-ink-mid); font-size: 14px; padding: 40px 4px; }
 
 /* AI 도우미 side panel. */
-#app .lh-cp-ai-tab { position: fixed; right: 0; top: 104px; z-index: 25; padding: 12px 10px; background: var(--lh-primary); color: #fff; border: none; border-radius: 12px 0 0 12px; font-size: 13px; font-weight: 800; letter-spacing: .04em; cursor: pointer; box-shadow: -4px 6px 20px rgba(20,30,50,0.12); }
+#app .lh-cp-ai-tab { position: fixed; right: 0; top: 104px; z-index: 25; padding: 12px 10px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 12px 0 0 12px; font-size: 13px; font-weight: 800; letter-spacing: .04em; cursor: pointer; box-shadow: -4px 6px 20px rgba(20,30,50,0.12); }
 #app .lh-cp-ai-tab:hover { background: var(--lh-primary-strong); }
 .lh-cp-ai-tab--hidden { display: none !important; }
 /* conceptprob's slide-in AI drawer.
@@ -413,14 +419,14 @@ body {
 .lh-cp-ai-msg { display: flex; }
 .lh-cp-ai-msg--user { justify-content: flex-end; }
 .lh-cp-ai-bubble { max-width: 86%; padding: 10px 13px; border-radius: 13px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
-.lh-cp-ai-msg--user .lh-cp-ai-bubble { background: var(--lh-primary); color: #fff; border-bottom-right-radius: 4px; }
+.lh-cp-ai-msg--user .lh-cp-ai-bubble { background: var(--lh-primary); color: var(--lh-on-primary); border-bottom-right-radius: 4px; }
 .lh-cp-ai-msg--assistant .lh-cp-ai-bubble { background: var(--lh-surface-sunk); color: var(--lh-ink); border: 1px solid var(--lh-line); border-bottom-left-radius: 4px; }
 .lh-cp-ai-inputrow { display: flex; gap: 8px; align-items: flex-end; padding: 12px 14px 14px; border-top: 1px solid var(--lh-line); }
 #app .lh-cp-ai-input { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px; border: 1.5px solid var(--lh-line-strong); border-radius: 10px; font-size: 14px; line-height: 1.5; background: var(--lh-surface); }
 #app .lh-cp-ai-send { flex-shrink: 0; padding: 10px 16px; border-radius: 10px; }
 
 /* Selection popup: "AI 질문" button above a drag-selection. */
-#app .lh-cp-askbtn { position: fixed; z-index: 60; padding: 7px 13px; background: var(--lh-primary); color: #fff; border: none; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 20px rgba(20,30,50,0.20); }
+#app .lh-cp-askbtn { position: fixed; z-index: 60; padding: 7px 13px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 20px rgba(20,30,50,0.20); }
 #app .lh-cp-askbtn:hover { background: var(--lh-primary-strong); }
 #app .lh-cp-askbtn::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--lh-primary); }
 /* "Sub 질문" button — green to distinguish it from the blue "AI 질문". */
@@ -487,14 +493,14 @@ body {
 /* View toggle (floating segmented control, top center). */
 .lh-cp-vtabs { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; gap: 4px; padding: 4px; background: var(--lh-surface); border: 1px solid var(--lh-line-strong); border-radius: 12px; box-shadow: 0 6px 20px rgba(20,30,50,0.10); }
 #app .lh-cp-vtab { padding: 8px 18px; border: none; background: transparent; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--lh-ink-mid); }
-#app .lh-cp-vtab--on { background: var(--lh-primary); color: #fff; }
+#app .lh-cp-vtab--on { background: var(--lh-primary); color: var(--lh-on-primary); }
 
 .lh-cp-probmain { max-width: 900px; }
 
 /* Exam toolbar. */
 .lh-cp-exam-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 22px; }
 #app .lh-cp-btn-ghost { padding: 9px 16px; border: 1px solid var(--lh-line-strong); background: var(--lh-surface); border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--lh-ink-mid); }
-#app .lh-cp-btn-primary { padding: 9px 20px; border: none; background: var(--lh-primary); color: #fff; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 700; }
+#app .lh-cp-btn-primary { padding: 9px 20px; border: none; background: var(--lh-primary); color: var(--lh-on-primary); border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 700; }
 
 /* Subject list with per-subject dropdown of concepts. */
 .lh-cp-subjs { display: flex; flex-direction: column; gap: 10px; }
@@ -522,7 +528,7 @@ body {
 .lh-cp-kich-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 22px; }
 #app .lh-cp-kich-chip { padding: 7px 13px; border: 1px solid var(--lh-line-strong); background: var(--lh-surface); border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--lh-ink-mid); font-variant-numeric: tabular-nums; }
 #app .lh-cp-kich-chip:hover { border-color: var(--lh-primary-line); color: var(--lh-ink); }
-#app .lh-cp-kich-chip--on { background: var(--lh-primary); border-color: var(--lh-primary); color: #fff; }
+#app .lh-cp-kich-chip--on { background: var(--lh-primary); border-color: var(--lh-primary); color: var(--lh-on-primary); }
 
 /* Generate-more row under the concept-page problem list. */
 .lh-cp-genrow { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
@@ -655,19 +661,19 @@ body {
 .lh-cp-code-line.lh-cp-line-selected .lh-cp-line-num { color: var(--lh-primary); font-weight: 700; }
 
 .lh-cp-ai .lh-cp-target-hint {
-  padding: var(--lh-s2) var(--lh-s4); font-size: 12px; color: var(--lh-ink-faint);
+  padding: var(--lh-s2) var(--lh-s4); font-size: 12px; color: var(--lh-ink-mid);
   font-family: var(--lh-font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .lh-cp-lens-bar { display: flex; gap: var(--lh-s2); padding: 0 var(--lh-s4) var(--lh-s3); }
 .lh-cp-lens-select { flex: 1; min-width: 0; padding: var(--lh-s2); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs); background: var(--lh-surface); color: var(--lh-ink); font-size: 13px; }
 #app .lh-cp-explain-btn, #app .lh-cp-ask-btn {
   padding: var(--lh-s2) var(--lh-s3); background: var(--lh-primary); border: none;
-  border-radius: var(--lh-r-xs); color: #fff; font-size: 13px; font-weight: 700; cursor: pointer;
+  border-radius: var(--lh-r-xs); color: var(--lh-on-primary); font-size: 13px; font-weight: 700; cursor: pointer;
 }
 #app .lh-cp-explain-btn:disabled, #app .lh-cp-ask-btn:disabled { background: var(--lh-line-strong); color: var(--lh-ink-faint); cursor: default; }
 
 .lh-cp-thread { flex: 1; overflow: auto; padding: 0 var(--lh-s4) var(--lh-s3); display: flex; flex-direction: column; gap: var(--lh-s3); }
-.lh-cp-thread-empty { color: var(--lh-ink-faint); font-size: 13px; }
+.lh-cp-thread-empty { color: var(--lh-ink-mid); font-size: 13px; }
 .lh-cp-entry { border-left: 3px solid var(--lh-primary-line); padding-left: var(--lh-s3); }
 .lh-cp-entry-title { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); margin-bottom: var(--lh-s1); }
 /* A wait long enough that stillness reads as breakage. Reuses the pulse conceptprob already
@@ -690,7 +696,7 @@ body {
 }
 .lh-cp-generate-panel label { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); }
 .lh-cp-generate-panel input, .lh-cp-generate-panel select { padding: var(--lh-s2) var(--lh-s3); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs); background: var(--lh-surface); color: var(--lh-ink); font-size: 14px; }
-#app .lh-cp-generate-btn { margin-top: var(--lh-s2); padding: var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
+#app .lh-cp-generate-btn { margin-top: var(--lh-s2); padding: var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 14px; font-weight: 700; cursor: pointer; }
 /* The waiting screen's meta track. Fixed-width digits so a ticking clock does not make the
    line twitch once a second, and an ellipsis so a long path cannot shove the phase text
    sideways -- the same treatment the target hint already uses for paths. */
@@ -732,7 +738,7 @@ body {
 .lh-cp-proposal-why { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--lh-ink-mid); }
 .lh-cp-proposal-points { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--lh-ink-soft); }
 .lh-cp-proposal-prereq { margin: 0; font-size: 12px; color: var(--lh-ink-faint); }
-#app .lh-cp-start-btn { margin-top: auto; padding: var(--lh-s2) var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+#app .lh-cp-start-btn { margin-top: auto; padding: var(--lh-s2) var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 13.5px; font-weight: 700; cursor: pointer; }
 #app .lh-cp-free-start { margin-top: var(--lh-s3); padding: var(--lh-s2) var(--lh-s4); background: transparent; border: 1px dashed var(--lh-line-strong); border-radius: var(--lh-r-sm); color: var(--lh-ink-mid); font-size: 13px; cursor: pointer; }
 
 .lh-cp-archive-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--lh-s2); }
@@ -791,13 +797,13 @@ body {
 /* Scrap basket: regions collected across files, shown in the AI panel and marked in the code. */
 #app .lh-cp-scrap-btn {
   padding: 2px 10px; background: var(--lh-primary); border: none;
-  border-radius: var(--lh-r-pill); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer;
+  border-radius: var(--lh-r-pill); color: var(--lh-on-primary); font-size: 11px; font-weight: 700; cursor: pointer;
 }
 /* ── 짧은 답 (FR-22) ─────────────────────────────────────────────────────────
    All scoped under .lh-codeproj: the lh-cp- prefix is shared with conceptprob and both
    instances load one compiled stylesheet, so a bare rule here ships into the other product. */
 .lh-codeproj .lh-cp-depth { display: flex; align-items: center; gap: var(--lh-s2); padding: 0 var(--lh-s4) var(--lh-s2); }
-.lh-codeproj .lh-cp-depth-label { font-size: 11px; color: var(--lh-ink-faint); letter-spacing: 0.02em; }
+.lh-codeproj .lh-cp-depth-label { font-size: 11px; color: var(--lh-ink-mid); letter-spacing: 0.02em; }
 /* A quiet state pair, not a third filled button: 설명 요청 and 질문 are the primary actions
    on this panel and a fourth solid control would flatten that. */
 #app .lh-codeproj .lh-cp-depth-btn {
