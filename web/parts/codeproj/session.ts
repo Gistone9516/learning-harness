@@ -17,7 +17,12 @@ import {
   buildReseedPrompt,
   buildReseedSystem,
   buildScrapExplainPrompt,
+  buildConceptOutlineSystem,
+  buildConceptOutlinePrompt,
+  buildConceptDocSystem,
+  buildConceptDocPrompt,
 } from "./prompts";
+import { parseDoc, parseSeeds, seedSet, type ConceptSeed, type ConceptSet } from "./concepts";
 
 /**
  * Put the codebase back and report whether it worked. Supplied by the mount, which owns the
@@ -199,4 +204,69 @@ export async function explainScraps(
     return `설명을 불러오지 못했습니다. (${res.error ?? "알 수 없는 오류"})`;
   }
   return res.text;
+}
+
+
+// ── 개념 문서 생성 (FR-23) ───────────────────────────────────────────────────
+
+/** Ask the session what its own codebase teaches. Cheap: measured 12.2s for 8 concepts. */
+export async function outlineConcepts(session: AiSession, reseed?: Reseed): Promise<ConceptSeed[]> {
+  const res = await sendResuming(
+    session,
+    { prompt: buildConceptOutlinePrompt(), system: buildConceptOutlineSystem(), effort: "medium" },
+    reseed,
+  );
+  return res.ok ? parseSeeds(res.text) : [];
+}
+
+/** Write one concept up. Measured 33.0s for a 2,088-character document. */
+export async function writeConcept(
+  session: AiSession,
+  seed: ConceptSeed,
+  reseed?: Reseed,
+): Promise<{ doc: ReturnType<typeof parseDoc>; reason?: "call" | "parse" }> {
+  const res = await sendResuming(
+    session,
+    { prompt: buildConceptDocPrompt(seed), system: buildConceptDocSystem(), effort: "medium" },
+    reseed,
+  );
+  if (!res.ok) return { doc: null, reason: "call" };
+  const doc = parseDoc(res.text, seed);
+  return doc ? { doc } : { doc: null, reason: "parse" };
+}
+
+/**
+ * Write every concept, one at a time, reporting the set after each one.
+ *
+ * Unlike the annotation pass this runs while the learner is already reading, so two things follow.
+ * The set is handed back after every document rather than at the end, so closing the tab mid-pass
+ * still leaves everything written so far on disk. And nothing here serialises against the
+ * learner's own requests: two concurrent resumes of one session were measured on 2026-09-03 and
+ * both returned, in 36.9s wall against 71.3s serial. That was one trial and it proves only that
+ * the calls complete -- not that the session's context is unaffected -- so this pass keeps itself
+ * to one document at a time, and the only overlap it ever allows is the learner's single request.
+ *
+ * `onStep` fires before each call too, so the list can show which concept is being written now.
+ */
+export async function writeConcepts(
+  session: AiSession,
+  seeds: ConceptSeed[],
+  onStep: (set: ConceptSet) => void,
+  reseed?: Reseed,
+): Promise<ConceptSet> {
+  const set = seedSet(seeds);
+  for (const entry of set.entries) {
+    entry.status = "writing";
+    onStep(set);
+    const { doc, reason } = await writeConcept(session, entry.seed, reseed);
+    if (doc) {
+      entry.doc = doc;
+      entry.status = "ok";
+    } else {
+      entry.status = "failed";
+      entry.reason = reason;
+    }
+    onStep(set);
+  }
+  return set;
 }

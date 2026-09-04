@@ -20,6 +20,7 @@ export const COLLECTIONS = {
   history: "history",
   aiSessions: "ai-sessions",
   annotations: "annotations",
+  concepts: "concepts",
   conversations: "conversations",
 } as const;
 
@@ -83,6 +84,18 @@ export interface AiSessionData {
  */
 export interface AnnotationSetData {
   files: Record<string, { status: "pending" | "ok" | "failed"; items: unknown[] }>;
+}
+
+/**
+ * The concept layer for one project: what the generated codebase teaches, written out.
+ *
+ * Same record shape as the annotation layer and for the same reason -- one project, one record,
+ * replaced whole. Unlike annotations it is written more than once per project: the documents
+ * arrive one at a time in the background, and each arrival replaces the set, so a learner who
+ * closes the tab mid-pass keeps everything written so far.
+ */
+export interface ConceptSetData {
+  entries: unknown[];
 }
 
 /**
@@ -355,6 +368,37 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
             files_ok: statuses.filter((v) => v === "ok").length,
             files_failed: statuses.filter((v) => v === "failed").length,
             items: Object.values(set.files).reduce((n, f) => n + f.items.length, 0),
+          },
+          set,
+        ),
+      );
+    },
+
+    async readConcepts(projectId: string): Promise<ConceptSetData | null> {
+      const record = await storage.get<ConceptSetData>(COLLECTIONS.concepts, projectId);
+      return record?.data ?? null;
+    },
+
+    /**
+     * Replace a project's concept layer.
+     *
+     * Called once per document as the background pass lands them, not once at the end. The write
+     * is a whole-set replace either way; what changes is that an interrupted pass leaves a usable
+     * partial set on disk instead of nothing.
+     */
+    async writeConcepts(projectId: string, set: ConceptSetData): Promise<void> {
+      const status = (e: unknown): string =>
+        (e as { status?: string } | null)?.status ?? "pending";
+      await storage.put(
+        COLLECTIONS.concepts,
+        makeRecord<ConceptSetData>(
+          "concepts",
+          projectId,
+          {
+            project_id: projectId,
+            concepts: set.entries.length,
+            written: set.entries.filter((e) => status(e) === "ok").length,
+            failed: set.entries.filter((e) => status(e) === "failed").length,
           },
           set,
         ),

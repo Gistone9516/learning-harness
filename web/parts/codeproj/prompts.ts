@@ -4,6 +4,8 @@
 // Subject-agnostic: these strings describe software quality and explanation shape only. The topic,
 // stack and constraints always arrive as injected input, never as a literal in this file.
 
+import { DOC_DIALECT } from "../../src/doc/doc";
+import { CONCEPT_MAX, CONCEPT_MIN } from "./concepts";
 import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
 import { buildComponentDirective } from "./components/catalog";
 
@@ -237,4 +239,67 @@ export function buildScrapExplainPrompt(scraps: Scrap[], lens: Lens): string {
       ? CONCEPT_LENS_FORMAT
       : `위 구간들을 함께 놓고 "${LENS_LABELS[lens]}" 관점에서 설명해 주세요. 구간 사이의 관계를 밝히세요.`;
   return `${head}\n\n${body}\n\n${AUDIENCE_CLAUSE}\n${buildComponentDirective("full")}`;
+}
+
+
+// ── 개념 문서 (FR-23) ────────────────────────────────────────────────────────
+//
+// Two calls, not one. The outline is cheap and has to exist before anything can show a list;
+// each document is its own resumed call because a whole set is far past the 180s follow-up cap.
+// Measured 2026-09-03 on a 9-file project: outline 12.2s / 8 concepts, one document 33.0s /
+// 2,088 chars.
+
+/** Ask what this codebase teaches. Returns seeds only -- no prose, so it stays cheap. */
+export function buildConceptOutlineSystem(): string {
+  return [
+    "너는 방금 이 세션에서 만든 코드베이스를 읽고, 그 코드가 실제로 쓰는 개념의 목록을 뽑는다.",
+    "",
+    "[무엇을 뽑는가]",
+    "- 이 코드베이스가 실제로 쓰는 것만 뽑는다. 쓰지 않은 일반론은 넣지 않는다.",
+    "- 파일 하나에만 있는 세부가 아니라, 이 코드를 읽어 내는 데 필요한 개념을 고른다.",
+    "- 서로 겹치지 않게 나눈다. 같은 것을 두 이름으로 부르지 않는다.",
+    "- 관련된 것끼리 이웃하게 늘어놓는다. 이 순서가 곧 읽는 순서가 된다.",
+    "",
+    "[출력]",
+    'JSON 하나만 출력한다. {"concepts": [{"area": ..., "concept_id": ..., "title": ...}]}',
+    "- concept_id: 소문자·숫자·하이픈만. 정규식 ^[a-z0-9][a-z0-9-]{0,63}$ 을 반드시 만족한다.",
+    "- area: 개념을 묶는 갈래의 소문자 영문 키(예: structure, storage, errors).",
+    "- title: 한국어 이름. 짧게.",
+    "- " + String(CONCEPT_MIN) + "개 이상 " + String(CONCEPT_MAX) + "개 이하.",
+    "설명 문장이나 코드펜스 없이 JSON만 출력한다.",
+  ].join("\n");
+}
+
+export function buildConceptOutlinePrompt(): string {
+  return "이 프로젝트의 개념 목록을 뽑아라.";
+}
+
+/**
+ * Write one concept up.
+ *
+ * The audience clause is the same one the annotations and the answers use: a reader who can read
+ * the language but has not met these conventions. A concept page that assumes more than the notes
+ * beside the code would be the one place in the product that talks down to nobody in particular.
+ */
+export function buildConceptDocSystem(): string {
+  return [
+    "너는 방금 이 세션에서 만든 코드베이스를 근거로, 요청받은 개념 하나에 대한 해설 문서를 쓴다.",
+    "",
+    "[무엇을 쓰는가]",
+    "- 이 코드베이스에서 그 개념이 실제로 어떻게 쓰였는지를 중심에 둔다. 파일과 함수 이름을 든다.",
+    "- 일반론은 그 코드를 이해하는 데 필요한 만큼만 곁들인다.",
+    "- 분량은 1,000~2,000자.",
+    "",
+    AUDIENCE_CLAUSE,
+    "",
+    DOC_DIALECT,
+    "",
+    "[출력]",
+    'JSON 하나만 출력한다. {"area":..., "concept_id":..., "title":..., "body":...}',
+    "body는 위 표기를 쓴 마크다운 문자열이다. 설명 문장이나 코드펜스 없이 JSON만 출력한다.",
+  ].join("\n");
+}
+
+export function buildConceptDocPrompt(seed: { area: string; concept_id: string; title: string }): string {
+  return JSON.stringify({ area: seed.area, concept_id: seed.concept_id, title: seed.title });
 }
