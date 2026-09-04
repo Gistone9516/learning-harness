@@ -125,7 +125,7 @@ body {
   background: transparent; border: 1px solid var(--lh-line-strong); color: var(--lh-ink-mid);
   font-size: 11px; padding: 2px 8px; border-radius: var(--lh-r-xs); cursor: pointer;
 }
-#app .lh-codeproj .lh-cp-concept-retry:hover { color: var(--lh-ink); border-color: var(--lh-primary); }
+#app .lh-codeproj .lh-cp-concept-retry:hover { color: var(--lh-ink); border-color: var(--lh-primary); background: transparent; }
 .lh-cp-tree-list { list-style: none; margin: 0; padding: 0; }
 .lh-cp-tree-item { padding: var(--lh-s1) var(--lh-s2); border-radius: var(--lh-r-xs); font-family: var(--lh-font-mono); font-size: 13px; color: var(--lh-ink-mid); cursor: pointer; }
 .lh-cp-code-area { background: var(--lh-code-bg); border: 1px solid var(--lh-code-border); border-radius: var(--lh-r-sm); overflow: auto; }
@@ -749,6 +749,8 @@ body {
    whole row. Hidden until hover or focus: this is the first screen, the action is rare and
    irreversible, and a permanent column of destructive icons is the opposite of a quiet list. */
 .lh-cp-archive-item { position: relative; }
+/* The open button keeps being the whole row, but its text stops short of the icon's lane. */
+#app .lh-cp-archive-btn { padding-right: 48px; }
 #app .lh-cp-archive-del {
   position: absolute; top: 50%; right: var(--lh-s2); transform: translateY(-50%); z-index: 1;
   width: 32px; height: 32px;
@@ -760,8 +762,13 @@ body {
      meta text would swallow clicks meant for the project. */
   opacity: 0; pointer-events: none; cursor: pointer;
 }
-.lh-cp-archive-item:hover .lh-cp-archive-del,
-.lh-cp-archive-item:focus-within .lh-cp-archive-del { opacity: 1; pointer-events: auto; }
+/* `#app` on these too, not just on the resting rule. The base sits under `#app` because it has to
+   outrank `#app button`; a reveal written with classes alone then loses to it and the control stays
+   invisible and unclickable forever. Measured 2026-09-04: the row reported :hover while the icon
+   held opacity 0 and pointer-events none. */
+#app .lh-cp-archive-item:hover .lh-cp-archive-del,
+#app .lh-cp-archive-item:focus-within .lh-cp-archive-del,
+#app .lh-cp-archive-del:focus-visible { opacity: 1; pointer-events: auto; }
 /* Appearing and "this is the dangerous one" are two signals: fading in is neutral ink, and only
    pointing at this button turns it red. */
 #app .lh-cp-archive-del:hover,
@@ -809,9 +816,16 @@ body {
 }
 /* Opacity rather than a darker fill: there is no --lh-bad-strong, and one hover state is a poor
    reason to add a palette entry. */
-#app .lh-cp-confirm-delete:hover { opacity: 0.88; }
-#app .lh-cp-confirm-delete:active { opacity: 0.78; }
-#app .lh-cp-archive-btn:hover { border-color: var(--lh-primary-line); }
+/* The fill has to be restated on every state. Opacity alone leaves `background` to fall through
+   to the generic `#app button:hover`, which turns the destructive button accent-blue under the
+   pointer -- measured 2026-09-04 on this very button. */
+#app .lh-cp-confirm-delete:hover { background: var(--lh-bad); opacity: 0.88; }
+#app .lh-cp-confirm-delete:active { background: var(--lh-bad); opacity: 0.78; }
+/* `background` has to be restated, not just the border. Without it this falls through to the
+   generic `#app button:hover`, which fills with the accent -- measured 2026-09-04: the row's
+   title landed at 1.89:1 and the delete icon at 1.33:1 the instant the pointer arrived, which
+   is exactly when the icon is supposed to become visible. */
+#app .lh-cp-archive-btn:hover { border-color: var(--lh-primary-line); background: var(--lh-surface); }
 .lh-cp-archive-title { font-size: 14px; font-weight: 700; color: var(--lh-ink); }
 .lh-cp-archive-meta { margin-left: auto; font-size: 12px; color: var(--lh-ink-faint); }
 
@@ -907,6 +921,7 @@ body {
 #app .lh-codeproj .lh-cp-summary-toggle:hover {
   color: var(--lh-ink);
   border-color: var(--lh-primary);
+  background: transparent;
 }
 /* ── 주석 레이어 (FR-21) ─────────────────────────────────────────────────────
    Three channels have to be readable on one line at once: selection owns the row
@@ -949,7 +964,7 @@ body {
   background: none; border: none; padding: 0; text-align: left;
   font-family: var(--lh-font-mono); font-size: 11.5px; color: var(--lh-ink-mid); cursor: pointer;
 }
-#app .lh-codeproj .lh-cp-note-ref:hover { color: var(--lh-primary); text-decoration: underline; }
+#app .lh-codeproj .lh-cp-note-ref:hover { color: var(--lh-primary); text-decoration: underline; background: none; }
 /* Two actions of different cost: collecting the region is free, asking for more is a call.
    They sit at opposite ends so a mis-click cannot spend one while reaching for the other. */
 .lh-codeproj .lh-cp-note-foot { margin-top: 10px; display: flex; justify-content: space-between; gap: var(--lh-s2); }
@@ -966,7 +981,7 @@ body {
   background: transparent; border: 1px solid var(--lh-line-strong); color: var(--lh-ink-mid);
   font-size: 11px; letter-spacing: 0.02em; border-radius: var(--lh-r-xs); padding: 2px 8px; cursor: pointer;
 }
-#app .lh-cp-note-link:hover, #app .lh-codeproj .lh-cp-note-scrap:hover { color: var(--lh-ink); border-color: var(--lh-primary); }
+#app .lh-cp-note-link:hover, #app .lh-codeproj .lh-cp-note-scrap:hover { color: var(--lh-ink); border-color: var(--lh-primary); background: none; }
 
 .lh-cp-code-line.lh-cp-line-scrapped { box-shadow: inset 2px 0 0 var(--lh-primary-line); background: var(--lh-surface-soft); }
 .lh-cp-code-line.lh-cp-line-scrapped.lh-cp-line-selected { background: var(--lh-primary-soft); }
@@ -975,7 +990,7 @@ body {
 .lh-cp-scrap-bar { display: flex; align-items: baseline; gap: var(--lh-s2); }
 .lh-cp-scrap-count { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); }
 #app .lh-cp-scrap-clear { margin-left: auto; padding: 0; background: none; border: none; color: var(--lh-ink-faint); font-size: 11.5px; cursor: pointer; }
-#app .lh-cp-scrap-clear:hover { color: var(--lh-primary); }
+#app .lh-cp-scrap-clear:hover { color: var(--lh-primary); background: none; }
 .lh-cp-scrap-item { display: flex; align-items: stretch; gap: var(--lh-s1); }
 #app .lh-cp-scrap-go {
   flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--lh-s2);
@@ -983,11 +998,11 @@ body {
   border: 1px solid var(--lh-line); border-radius: var(--lh-r-xs);
   text-align: left; cursor: pointer;
 }
-#app .lh-cp-scrap-go:hover { border-color: var(--lh-primary-line); }
+#app .lh-cp-scrap-go:hover { border-color: var(--lh-primary-line); background: var(--lh-surface-sunk); }
 .lh-cp-scrap-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--lh-font-mono); font-size: 12px; color: var(--lh-ink); }
 .lh-cp-scrap-lines { flex: none; font-size: 11px; color: var(--lh-ink-faint); font-variant-numeric: tabular-nums; }
 #app .lh-cp-scrap-drop { flex: none; width: 26px; background: none; border: 1px solid var(--lh-line); border-radius: var(--lh-r-xs); color: var(--lh-ink-faint); cursor: pointer; }
-#app .lh-cp-scrap-drop:hover { color: var(--lh-bad); border-color: var(--lh-bad-line); }
+#app .lh-cp-scrap-drop:hover { color: var(--lh-bad); border-color: var(--lh-bad-line); background: none; }
 
 /* ── explanation components ─────────────────────────────────────────────────
    Spacing carries the hierarchy. Only the concept card, code reference, caution

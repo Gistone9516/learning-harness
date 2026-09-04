@@ -57,3 +57,48 @@ describe("known gaps, recorded rather than implied", () => {
     expect(status.length).toBeGreaterThan(0);
   });
 });
+
+describe("a restyled button restates its background on every state", () => {
+  // `#app button:hover { background: var(--lh-primary-strong) }` is the kit's default. A rule that
+  // repaints a button at rest but changes only the border or the opacity on :hover leaves the
+  // background to fall through to that default, and the control floods with the accent under the
+  // pointer. Measured 2026-09-04: the archive row's title hit 1.89:1 and its delete icon 1.33:1
+  // exactly when the pointer arrived — which is when that icon is supposed to become visible.
+  /** Only the part this instance mounts. See the recorded gap below for why the rest is not swept. */
+  const CODEPROJ = /lh-codeproj|archive|scrap|note-|confirm-|summary-toggle|depth-|entry-|concept-|generate-|start-btn|free-start|cp-back|head-row/;
+
+  it("has no :hover rule that repaints a codeproj button without setting its background", () => {
+    const all = rules(CSS).filter((r) => CODEPROJ.test(r.selector));
+    const painted = new Set(
+      all
+        .filter((r) => /background(-color)?:/.test(r.body) && !/:hover|:active|:focus/.test(r.selector))
+        .flatMap((r) => r.selector.split(",").map((s) => s.trim())),
+    );
+    const leaks = all
+      .filter((r) => /:hover/.test(r.selector))
+      .filter((r) => !/background(-color)?:/.test(r.body))
+      .flatMap((r) => r.selector.split(",").map((s) => s.trim()))
+      .filter((s) => s.includes(":hover"))
+      .filter((s) => painted.has(s.replace(/:hover/g, "").trim()));
+    expect(leaks).toEqual([]);
+  });
+
+  it("still leaks on conceptprob's own controls, and says so", () => {
+    // Ten of them. Fixing those changes how the sibling instance looks on hover, which is not a
+    // thing to do quietly inside a round about this instance's delete button. Recorded so a green
+    // suite is not read as "no button floods anywhere".
+    const all = rules(CSS).filter((r) => !CODEPROJ.test(r.selector));
+    const painted = new Set(
+      all
+        .filter((r) => /background(-color)?:/.test(r.body) && !/:hover|:active|:focus/.test(r.selector))
+        .flatMap((r) => r.selector.split(",").map((s) => s.trim())),
+    );
+    const leaks = all
+      .filter((r) => /:hover/.test(r.selector))
+      .filter((r) => !/background(-color)?:/.test(r.body))
+      .flatMap((r) => r.selector.split(",").map((s) => s.trim()))
+      .filter((s) => s.includes(":hover"))
+      .filter((s) => painted.has(s.replace(/:hover/g, "").trim()));
+    expect(leaks.length).toBeGreaterThan(0);
+  });
+});
