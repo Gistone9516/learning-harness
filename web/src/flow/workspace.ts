@@ -3,6 +3,7 @@
 // (it moves records), and the sequencing lives here.
 
 import { mountCodeproj, type ExchangeEvent, type GeneratedProject } from "../../parts/codeproj/codeproj";
+import type { CodeprojHandle, CodeprojView, ConceptSet } from "../../parts/codeproj/codeproj";
 import type { AnnotationSet } from "../../parts/codeproj/annotations";
 import { renderLauncher } from "../../parts/codeproj/launcher";
 import type { AiSession } from "../ai/client";
@@ -28,6 +29,9 @@ export function createWorkspace(cfg: WorkspaceConfig) {
   let visit = 0;
   let historyId: string | null = null;
   let seenCount = 0;
+  // Chrome the flow owns: the tab strip and which view it currently shows.
+  let tabs: HTMLElement | null = null;
+  let activeView: CodeprojView = "code";
 
   // The part emits its first events (the opening file, an early explain) synchronously as soon as
   // a project loads, while archiving it is still in flight. Handlers await this gate so those
@@ -120,14 +124,34 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     // The explanation layer is a plain read: it works with no session at all, which is why the
     // popup keeps working on an instance that has no ai_server.
     const annotations = (await flow.readAnnotations(project.id)) as AnnotationSet | null;
+    // Same plain read, same reason: the concepts written for this project belong to it, and
+    // reopening one must not spend a call to see them again.
+    const concepts = (await flow.readConcepts(project.id)) as ConceptSet | null;
 
     renderStudyShell();
-    mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
+    activeView = "code";
+    const handle = mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
       session,                              // null on an offline instance; the AI pane hides itself
       project: record.data.project as GeneratedProject,
       annotations: annotations ?? undefined,
+      concepts: concepts ?? undefined,
       onFileSeen: (path) => void onFileSeen(mine, path),
       onExchange: (event: ExchangeEvent) => recordExchange(mine, event),
+      onConcepts: (set) => writeConceptSet(project.id, set),
+      onConceptProgress: (done, total) => renderTabs(handle, done, total),
+    });
+    const n = concepts?.entries.length ?? 0;
+    renderTabs(handle, concepts?.entries.filter((e: { status: string }) => e.status === "ok").length ?? 0, n);
+  }
+
+  /**
+   * Store the concept layer. Not gated on the visit still being current, for the same reason the
+   * annotation write is not: these documents were paid for and belong to the project they describe.
+   */
+  function writeConceptSet(id: string, set: ConceptSet): void {
+    void serialize(async () => {
+      await sessionReady;
+      await flow.writeConcepts(id, set);
     });
   }
 
@@ -143,7 +167,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     let myProjectId: string | null = null;
     renderStudyShell();
 
-    mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
+    const handle: CodeprojHandle = mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
       session,
       initialInput: opts.initialInput,
       onProjectGenerated: (project, input) => {
@@ -176,6 +200,15 @@ export function createWorkspace(cfg: WorkspaceConfig) {
           if (myProjectId) await flow.writeAnnotations(myProjectId, set);
         });
       },
+      onConcepts: (set) => {
+        // Same rule as the annotations above, and it matters more here: this pass runs while the
+        // learner is on the screen, so "they walked away mid-pass" is the ordinary case.
+        void serialize(async () => {
+          await sessionReady;
+          if (myProjectId) await flow.writeConcepts(myProjectId, set);
+        });
+      },
+      onConceptProgress: (done, total) => renderTabs(handle, done, total),
     });
   }
 
@@ -213,6 +246,14 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     });
   }
 
+  /**
+   * The study shell: a top bar the flow owns, and a host the part mounts into.
+   *
+   * The tab strip goes in this bar rather than inside the part because the bar is already there
+   * and holds one small button -- the collapsed view costs no vertical space at all, and this
+   * screen's height is rationed enough that a new row would be the most expensive thing on it.
+   * The part is driven through the handle it returns; the flow never reaches into its DOM.
+   */
   function renderStudyShell(): void {
     container.innerHTML = "";
     const bar = document.createElement("div");
@@ -222,10 +263,51 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     back.textContent = "목록으로";
     back.addEventListener("click", () => void showLauncher());
     bar.appendChild(back);
+    tabs = document.createElement("div");
+    tabs.className = "cg-cp-tabs";
+    tabs.hidden = true;
+    bar.appendChild(tabs);
     const host = document.createElement("div");
     host.className = "lh-cp-host";
     container.appendChild(bar);
     container.appendChild(host);
+  }
+
+  /**
+   * Draw the code/concept tabs, or nothing at all when there are no concepts to read.
+   *
+   * A tab onto an empty page is worse than no tab: it says there is something there. So the strip
+   * stays hidden until the outline lands, and on an archived project with no stored concepts it
+   * never appears.
+   */
+  function renderTabs(handle: CodeprojHandle, done: number, total: number): void {
+    if (!tabs) return;
+    if (!total) {
+      tabs.hidden = true;
+      return;
+    }
+    tabs.hidden = false;
+    tabs.innerHTML = "";
+    for (const [id, label] of [["code", "코드"], ["concepts", "개념"]] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cg-cp-tab";
+      b.setAttribute("aria-selected", String(id === activeView));
+      b.textContent = label;
+      if (id === "concepts" && done < total) {
+        // The same count track the file panel uses. A real 0/8 is shown, not hidden.
+        const n = document.createElement("span");
+        n.className = "lh-cp-progress";
+        n.textContent = `${done}/${total}`;
+        b.appendChild(n);
+      }
+      b.addEventListener("click", () => {
+        activeView = id;
+        handle.setView(id);
+        renderTabs(handle, done, total);
+      });
+      tabs.appendChild(b);
+    }
   }
 
   return { showLauncher };

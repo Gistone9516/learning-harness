@@ -16,8 +16,10 @@
 import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, type Reseed } from "./session";
+import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, type Reseed } from "./session";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
+import { conceptProgress, type ConceptEntry, type ConceptSet } from "./concepts";
+import { createConceptView } from "./conceptview";
 import { LENS_LABELS } from "./prompts";
 import { createAiPanel, createCodePanel, createFilePanel, el, type AnswerDepth } from "./view";
 import { parseComposed } from "./components/parse";
@@ -72,13 +74,46 @@ export interface CodeprojProps {
    * The part cannot store it: the record is keyed by project id and only the flow has that.
    */
   onAnnotations?: (set: AnnotationSet) => void;
+  /**
+   * The concept layer for this project. Same snapshot rule as `annotations`: rendered, never
+   * stored here. Present with no session at all -- reopening an archived project reads it from
+   * the record and costs nothing.
+   */
+  concepts?: ConceptSet;
+  /**
+   * Emitted after every document the background pass lands, not once at the end. The learner is
+   * already reading by then, so a set that only arrived at the end would be lost if they left.
+   */
+  onConcepts?: (set: ConceptSet) => void;
+  /** Progress of that pass, for chrome the flow owns -- the tab strip lives in its top bar. */
+  onConceptProgress?: (done: number, total: number) => void;
 }
 
-export function mountCodeproj(container: HTMLElement, props: CodeprojProps): void {
+/**
+ * What the flow can do to a mounted part.
+ *
+ * It exists for one reason: the tab strip belongs in the study screen's top bar, which is the
+ * flow's element and a sibling of this part's root, while the panes it switches are the part's.
+ * Returning a handle keeps that boundary honest -- the flow owns chrome, the part owns content.
+ */
+export interface CodeprojHandle {
+  setView(view: CodeprojView): void;
+  /** True when there is a concepts view worth offering at all. */
+  hasConcepts(): boolean;
+}
+
+export type CodeprojView = "code" | "concepts";
+
+export function mountCodeproj(container: HTMLElement, props: CodeprojProps): CodeprojHandle {
   const { session, project, initialInput, onFileSeen, onProjectGenerated, onExchange } = props;
   // Reassigned once when a generation builds its own layer, so the first file opened after
   // generating shows notes without waiting for a remount.
   let annotations = props.annotations ?? { files: {} };
+  // The concept layer, replaced wholesale as the background pass lands each document.
+  let concepts: ConceptSet | null = props.concepts ?? null;
+  // Which concept is open, so the AI panel's target line can name it instead of a file.
+  let openConcept: ConceptEntry | null = null;
+  let view: CodeprojView = "code";
   container.innerHTML = "";
   container.classList.add("lh-codeproj");
 
@@ -240,10 +275,27 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     },
   });
 
+  /*
+   * Both views live in the grid at once and are swapped by `display`, which is what keeps the
+   * code panel's scroll position, the file selection and the answer thread alive across a switch.
+   * The AI panel belongs to neither view: it is one thread, so a question about a concept and a
+   * question about a line land in the same place.
+   */
+  const conceptView = createConceptView({
+    onOpen: (entry) => {
+      openConcept = entry;
+      updateTargetHint(codePanel.selection());
+    },
+    onRetry: session ? (entry) => void retryConcept(entry) : undefined,
+  });
   panes.appendChild(filePanel.root);
   panes.appendChild(codePanel.root);
+  panes.appendChild(conceptView.rail);
+  panes.appendChild(conceptView.reading);
   panes.appendChild(aiPanel.root);
   container.appendChild(panes);
+  conceptView.render(concepts);
+  setView("code");
 
   aiPanel.setEnabled(false);
   codePanel.onSelectionChange(updateTargetHint);
@@ -457,6 +509,9 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
       stopTicker();
       panel.remove();
       loadProject(result);
+
+      // Deliberately not awaited: the learner enters now and the concepts fill in behind them.
+      void buildConcepts(result);
     });
 
     panel.appendChild(el("label", "", "주제"));
@@ -528,7 +583,67 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
     updateTargetHint(null);
   }
 
+  /**
+   * Swap which pair of panels the grid shows. `display` rather than mount/unmount, so nothing
+   * the learner built up -- scroll, selection, the thread -- is thrown away by a tab click.
+   */
+  function setView(next: CodeprojView): void {
+    view = next;
+    const code = next === "code";
+    filePanel.root.style.display = code ? "" : "none";
+    codePanel.root.style.display = code ? "" : "none";
+    conceptView.rail.style.display = code ? "none" : "";
+    conceptView.reading.style.display = code ? "none" : "";
+    updateTargetHint(codePanel.selection());
+  }
+
+  /** Rebuild one failed document on demand. The pass itself never retries; the learner does. */
+  async function retryConcept(entry: ConceptEntry): Promise<void> {
+    if (!session || !concepts) return;
+    entry.status = "writing";
+    entry.reason = undefined;
+    conceptView.render(concepts);
+    const { doc, reason } = await writeConcept(session, entry.seed);
+    if (doc) {
+      entry.doc = doc;
+      entry.status = "ok";
+    } else {
+      entry.status = "failed";
+      entry.reason = reason;
+    }
+    publishConcepts(concepts);
+  }
+
+  function publishConcepts(set: ConceptSet): void {
+    concepts = set;
+    conceptView.render(set);
+    const p = conceptProgress(set);
+    props.onConceptProgress?.(p.done, p.total);
+    props.onConcepts?.(set);
+  }
+
+  /**
+   * Write the concept layer in the background, after the learner is already reading.
+   *
+   * Unlike the annotation pass this does not gate entry. Annotations attach to the code being read
+   * and are needed at minute zero; a concept page is somewhere else on the screen, so it can fill
+   * in while the learner works, and the outline arrives fast enough (measured 12.2s) that the list
+   * is populated almost immediately.
+   */
+  async function buildConcepts(proj: GeneratedProject): Promise<void> {
+    if (!session || !proj.files.length) return;
+    const seeds = await outlineConcepts(session);
+    if (!seeds.length) return;
+    publishConcepts({ entries: seeds.map((seed) => ({ seed, status: "pending" as const })) });
+    await writeConcepts(session, seeds, (set) => publishConcepts(set));
+  }
+
   function updateTargetHint(range: [number, number] | null): void {
+    // In the concepts view the subject of a question is the open concept, not the selected line.
+    if (view === "concepts") {
+      aiPanel.setTargetHint(openConcept ? `대상: 개념 · ${openConcept.seed.title}` : "");
+      return;
+    }
     if (!selectedPath) {
       aiPanel.setTargetHint("");
       return;
@@ -647,6 +762,13 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
       void runAsk(question, "full");
     });
   }
+
+  return {
+    setView,
+    // Offered when there is something to read, or something on its way. An offline instance with
+    // no stored concepts gets no tab at all rather than a tab onto an empty page.
+    hasConcepts: () => (concepts?.entries.length ?? 0) > 0,
+  };
 }
 
 // Public surface: the pure model, the prompt builders and the session calls are re-exported so
@@ -654,5 +776,6 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): voi
 export * from "./model";
 export { LENS_LABELS, LENS_ORDER, QUALITY_CLAUSE } from "./prompts";
 export { generateProject, explain, ask } from "./session";
+export type { ConceptDoc, ConceptEntry, ConceptSeed, ConceptSet } from "./concepts";
 export { AiSession };
 export { createAiClient } from "../../src/ai/client";

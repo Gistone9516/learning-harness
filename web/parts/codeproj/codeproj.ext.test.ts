@@ -148,13 +148,51 @@ describe("three-pane layout (NFR-8)", () => {
     return host;
   }
 
+  /**
+   * The grid holds both views at once and swaps them with `display`, so the DOM has five panels
+   * and the layout has three. What NFR-8 is about is the three the learner sees.
+   */
+  function visibleOrder(host: HTMLElement): string[] {
+    const panes = host.querySelector(".lh-cp-panes")!;
+    return Array.from(panes.children)
+      .filter((c) => (c as HTMLElement).style.display !== "none")
+      .map((c) => c.className);
+  }
+
   it("renders files, code and AI panes in that order", () => {
     const host = mount(new AiSession(stubClient().client));
-    const panes = host.querySelector(".lh-cp-panes")!;
-    const order = Array.from(panes.children).map((c) => c.className);
+    const order = visibleOrder(host);
+    expect(order).toHaveLength(3);
     expect(order[0]).toContain("lh-cp-files");
     expect(order[1]).toContain("lh-cp-code-panel");
     expect(order[2]).toContain("lh-cp-ai");
+  });
+
+  it("keeps three panes and the same AI pane when the concepts view is shown", () => {
+    // The AI panel belongs to neither view: one thread answers about a line and about a concept.
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const handle = mountCodeproj(host, {
+      session: new AiSession(stubClient().client),
+      project: PROJECT,
+      concepts: { entries: [{ seed: { area: "a", concept_id: "c-one", title: "개념" }, status: "pending" }] },
+    });
+    const ai = host.querySelector(".lh-cp-ai");
+    handle.setView("concepts");
+    const order = visibleOrder(host);
+    expect(order).toHaveLength(3);
+    expect(order[0]).toContain("lh-cp-concept-rail");
+    expect(order[1]).toContain("lh-cp-concept-reading");
+    expect(order[2]).toContain("lh-cp-ai");
+    expect(host.querySelector(".lh-cp-ai")).toBe(ai);
+  });
+
+  it("offers no concepts view when there are none", () => {
+    // A tab onto an empty page claims there is something there.
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const handle = mountCodeproj(host, { session: null, project: PROJECT });
+    expect(handle.hasConcepts()).toBe(false);
   });
 
   it("hides the AI pane when there is no session, keeping reading usable", () => {

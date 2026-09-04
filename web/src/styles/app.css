@@ -84,6 +84,42 @@ body {
    `.lh-cp-title-row` of its own, and the two must not meet. */
 .lh-codeproj .lh-cp-head-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--lh-s4); }
 .lh-codeproj .lh-cp-summary-toggle { flex-shrink: 0; }
+
+/* ── 개념 탭 (FR-23) ─────────────────────────────────────────────────────────
+   The concepts view reuses the code view's grid, so the file rail and the AI panel keep their
+   widths across a tab switch. All scoped: conceptprob owns bare `lh-cp-` names and both parts
+   ship in one stylesheet. */
+.lh-codeproj .lh-cp-concept-rail { display: flex; flex-direction: column; overflow: hidden; }
+.lh-codeproj .lh-cp-concept-list { flex: 1; overflow-y: auto; padding: var(--lh-s2); display: flex; flex-direction: column; gap: 2px; }
+#app .lh-codeproj .lh-cp-concept-row {
+  display: flex; align-items: baseline; gap: var(--lh-s2);
+  width: 100%; text-align: left;
+  padding: var(--lh-s2) var(--lh-s3);
+  background: transparent; border: none; border-radius: var(--lh-r-xs);
+  font-size: 13px; font-weight: 500; color: var(--lh-ink-mid); cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-concept-row:hover { background: var(--lh-surface-sunk); color: var(--lh-ink); }
+#app .lh-codeproj .lh-cp-concept-row--on { background: var(--lh-primary-soft); color: var(--lh-primary-strong); }
+/* Not written yet: quieter, but still openable -- opening one is how the learner finds out it
+   is coming, and the reading column says so in words. */
+#app .lh-codeproj .lh-cp-concept-row[data-state="pending"],
+#app .lh-codeproj .lh-cp-concept-row[data-state="writing"] { color: var(--lh-ink-faint-2); }
+.lh-codeproj .lh-cp-concept-row-title { flex: 1; min-width: 0; }
+.lh-codeproj .lh-cp-concept-row-tag { flex-shrink: 0; font-size: 10.5px; color: var(--lh-ink-faint); }
+
+.lh-codeproj .lh-cp-concept-reading { display: flex; flex-direction: column; overflow: hidden; }
+.lh-codeproj .lh-cp-concept-scroll { flex: 1; overflow-y: auto; padding: var(--lh-s4) var(--lh-s5); }
+/* The panel keeps filling its column so the surface reads as one sheet; only the line length is
+   capped, because a 1,200px measure is not a reading measure. */
+.lh-codeproj .lh-cp-concept-body { max-width: 680px; margin: 0 auto; }
+.lh-codeproj .lh-cp-concept-lead { margin: 0 0 var(--lh-s4); color: var(--lh-ink-mid); font-size: 14px; line-height: 1.7; }
+.lh-codeproj .lh-cp-concept-empty { color: var(--lh-ink-faint); font-size: 13px; line-height: 1.7; }
+#app .lh-codeproj .lh-cp-concept-retry {
+  margin-top: var(--lh-s3);
+  background: transparent; border: 1px solid var(--lh-line-strong); color: var(--lh-ink-mid);
+  font-size: 11px; padding: 2px 8px; border-radius: var(--lh-r-xs); cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-concept-retry:hover { color: var(--lh-ink); border-color: var(--lh-primary); }
 .lh-cp-tree-list { list-style: none; margin: 0; padding: 0; }
 .lh-cp-tree-item { padding: var(--lh-s1) var(--lh-s2); border-radius: var(--lh-r-xs); font-family: var(--lh-font-mono); font-size: 13px; color: var(--lh-ink-mid); cursor: pointer; }
 .lh-cp-code-area { background: var(--lh-code-bg); border: 1px solid var(--lh-code-border); border-radius: var(--lh-r-sm); overflow: auto; }
@@ -195,8 +231,11 @@ body {
 .lh-cp-terms-cap::before, .lh-cp-vtable-cap::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--lh-primary); flex: 0 0 auto; }
 .lh-cp-term { display: grid; grid-template-columns: minmax(112px, 188px) 1fr; column-gap: 16px; padding: 13px 16px; border-top: 1px solid var(--lh-line-soft); }
 .lh-cp-term:first-child, .lh-cp-terms-cap + .lh-cp-term { border-top: none; }
-.lh-cp-term-k { font-size: 14px; font-weight: 700; color: var(--lh-primary); line-height: 1.55; }
-.lh-cp-term-d { font-size: 14px; color: var(--lh-ink-mid); line-height: 1.65; }
+/* min-width:0 because a grid item defaults to min-width:auto and will not shrink below its
+   content: a term like `src/services/dashboardService.js` then overruns the 188px column and
+   prints on top of its own definition. Long identifiers wrap instead. */
+.lh-cp-term-k { font-size: 14px; font-weight: 700; color: var(--lh-primary); line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+.lh-cp-term-d { font-size: 14px; color: var(--lh-ink-mid); line-height: 1.65; min-width: 0; overflow-wrap: anywhere; }
 
 /* Bullet points — wrapped in a card (consistent with the term/table cards); the introducing
    caption ("…:") becomes the card's blue header bar. */
