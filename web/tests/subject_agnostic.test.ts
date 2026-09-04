@@ -7,6 +7,15 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const WEB_ROOT = join(import.meta.dirname, "..");
+// This list is vocabulary for ONE sibling subject (an English exam). It is not a general guard,
+// and it is worth saying plainly what it does not catch: `conceptprob.ts` currently hardcodes
+// 필기 / 실기 / 기출 / 회차 -- a written-vs-practical exam split with no equivalent in a
+// code-comprehension subject -- and this test passes anyway, because nobody added those words.
+//
+// Adding them is the right fix and it is NOT free: the guard would then fail on real behaviour
+// (a 필기 전용 badge, a 기출 page) that has to become config-driven first. Left as its own piece
+// of work rather than smuggled into an unrelated round. Until then, read a green result here as
+// "no ENGLISH-exam literal", not as "subject-agnostic".
 const DENY = ["영어", "영작", "토익", "토플", "단어", "문법", "숙어"];
 const SCAN = ["src", "parts"];
 const SKIP = new Set(["node_modules", "dist", "examples"]);

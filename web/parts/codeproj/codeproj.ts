@@ -2,14 +2,19 @@
 // DEPS: web/src/ai (ai_server client). No npm UI libs; tree, code panel and AI panel are hand-rolled DOM.
 // INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
 // INPUT: `annotations` (AnnotationSet) — the explanation layer, injected; the part renders it and never stores it.
+// INPUT: `concepts` (ConceptSet) — the concept documents for the project, injected the same way.
 // EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
 // EVENTS: the freshly built annotation layer via onAnnotations — the part makes it, the owner stores it.
+// EVENTS: the concept layer via onConcepts, once per document as the background pass lands them.
+// EVENTS: that pass's progress via onConceptProgress, for chrome the owner draws (the view tabs).
 // AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
 // CONSTRAINTS: generation is the only xhigh call; annotations, explanations and questions are medium.
+// RETURNS: a handle { setView, hasConcepts } — the owner draws the code/concept tabs in its own top bar.
 // DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
 //
-// Layout is the three-pane IDE shape: files left, code centre, AI right. This file only assembles
+// Layout is the three-pane IDE shape: files left, code centre, AI right — and a second pair of
+// panels for the concepts view, held in the same grid and swapped by display. This file only assembles
 // the panels and routes events; the pure model, the prompts, the AI calls and the DOM panels each
 // live in their own module beside it.
 

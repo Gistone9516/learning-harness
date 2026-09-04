@@ -14,8 +14,8 @@
       "id": "codeproj",
       "dir": "parts/codeproj",
       "entry": "parts/codeproj/codeproj.ts",
-      "what": "AI-generated project, IDE-shaped read-only comprehension with session-based explanations and questions.",
-      "deps": [],
+      "what": "AI-generated project, IDE-shaped read-only comprehension with session-based explanations, questions and concept documents.",
+      "deps": ["src/doc"],
       "ai": true,
       "constraints": ["subject-agnostic", "secrets-gated", "session-resume"]
     },
@@ -33,7 +33,7 @@
       "dir": "parts/conceptprob",
       "entry": "parts/conceptprob/conceptprob.ts",
       "what": "area->concept->problem study: AI concept reading + deterministically graded linked problems.",
-      "deps": [],
+      "deps": ["src/doc"],
       "ai": true,
       "constraints": ["subject-agnostic", "secrets-gated", "token0-grading", "binary"]
     }

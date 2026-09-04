@@ -134,3 +134,26 @@ Add the matching `web/parts/index.json` row (`ai: true`).
 - `explain_request` — `ExplainRequest` → request shape carries `session_id` and lens; resume path asserted against a mock `/ai` (no live claude).
 - `subject_agnostic` — no subject literal in `parts/codeproj/`.
 - Generation/explanation quality is live-smoke only (needs the real model), not a unit gate.
+
+## 개념 문서 (FR-23)
+
+The part carries a second AI-written layer beside the annotations: concept documents about what
+the generated codebase teaches, read in a `개념` view that shares the study grid.
+
+- **Two calls.** An outline (`buildConceptOutlineSystem`) returns seeds only; each document is its
+  own resumed call (`buildConceptDocSystem`). One call for a whole set is far past the 180s
+  follow-up cap. Measured 2026-09-03 on a 9-file project: outline 12.2s for 8 concepts, one
+  document 33.0s for 2,088 characters.
+- **Background, after entry.** Unlike the annotation pass this does not gate the learner. Notes
+  attach to the code being read and are needed immediately; a concept page is elsewhere on screen.
+- **`effort: "medium"`**, like every other resumed call. Generation stays the only `xhigh` one.
+- **The document dialect is `src/doc`**, shared verbatim with conceptprob — same `DOC_DIALECT` in
+  the prompt, same `parseBody`, same `renderBlock`. What is not shared: `problems`, grading, tiers,
+  and every exam literal. A subject with no exam behind it must not carry that structure.
+- **Ids are content, not storage.** `concept_id` must satisfy `^[a-z0-9][a-z0-9-]{0,63}$`; a seed
+  that fails it is dropped rather than repaired, because a repaired id no longer matches the one
+  the model uses when it writes that document.
+- **The set is emitted per document**, not once at the end, and the record is replaced whole each
+  time. Reopening an archived project reads it and makes no call.
+- **`mountCodeproj` returns a handle** (`setView`, `hasConcepts`). The view tabs belong to whoever
+  owns the surrounding chrome; the part owns only the panels.

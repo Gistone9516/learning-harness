@@ -11,7 +11,7 @@
 
 Inherits the core SoT §7 invariants. Restated for the web layer (machine-checkable where possible):
 
-1. **Subject-agnostic** — zero subject literal in `web/` code (areas, persona, task wording, UI copy, content all injected via subject config). Guarded by a test (`web/tests/subject_agnostic`, §8).
+1. **Subject-agnostic** — zero subject literal in `web/` code (areas, persona, task wording, UI copy, content all injected via subject config). Guarded by a test (`web/tests/subject_agnostic`, §8). **The guard is a deny-list of one sibling subject's vocabulary and is currently asleep for others**: `conceptprob` hardcodes 필기/실기/기출/회차 and the test passes. Read a green result as "no English-exam literal", not as conformance.
 2. **Canonical kit (§7.11)** — one web code copy; subjects differ only by injected data/config. No per-subject fork.
 3. **Secrets and gating (§7.12)** — no secret in the web bundle. AI only via `ai_server` with a token the bundle never embeds. Personal use.
 4. **Deterministic = token 0 (§8)** — sheet formula evaluation, code-structure navigation, and answer grading run client-side with zero AI calls. AI (generation, explanation, open-ended) is opt-in and goes through `ai_server`.
@@ -172,6 +172,18 @@ type ProgressRecord = {
 ### 5.1 Shell flows and the history dashboard
 
 `web/src/flow` holds the two flows the shell mounts around the parts; keeping them out of the parts is what lets a part stay a working unit on its own (§1).
+
+`web/src/doc` holds the concept-document dialect — its parse tree, its DOM rendering, and the
+`DOC_DIALECT` text a prompt hands the model. Two parts read the same documents (`conceptprob`
+renders a subject's pre-baked concepts, `codeproj` renders the ones an AI wrote about a generated
+codebase), so it lives outside `parts/` for the same reason the flows do. Two consequences bind:
+
+- **A dialect described in two prompts drifts in one of them**, and then the parser agrees with
+  neither. There is one `DOC_DIALECT`; anything about a particular screen (how wide it is, whether
+  it wants figures) belongs to that screen's own prompt.
+- **Nothing in `src/doc` may know its subject.** Badges, tiers, exam vocabulary and progress stay
+  in the part that owns them. The deny-list guard (§8) does not catch this on its own — see the
+  note there.
 
 - `flow/study.ts` — **proposal → launch → generated project**. Proposals are records the operator AI writes; the learner picks one (or names a topic) and the generation form opens pre-filled. **Generation starts only on the learner's own action** — the operator's autonomy ends at writing a proposal, so nothing may auto-generate on load.
 - `flow/workspace.ts` — the archive: a generated project is stored as a record at generation time and reopened from there. Reopening **resumes the session that already holds the codebase** (the id is kept in its own record), so explanation and questions carry on. Adopting costs no call; whether the server still holds the session only surfaces on the first request, and a lost one is reseeded once per mount.
