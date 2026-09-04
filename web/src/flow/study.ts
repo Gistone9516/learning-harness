@@ -561,6 +561,58 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
     async loadArchived(projectId: string): Promise<StorageRecord<ProjectPayload> | null> {
       return storage.get<ProjectPayload>(COLLECTIONS.projects, projectId);
     },
+
+    /**
+     * Delete an archived project and everything that only existed to serve it.
+     *
+     * What goes: the project, its reading progress, the id of the AI session that held its code,
+     * its annotation layer, its concept documents. Each of those is keyed by the project id, so
+     * each is one lookup.
+     *
+     * What stays, deliberately:
+     *
+     * - **The study history.** A session record says the learner studied on a day, and that
+     *   happened whether or not the material still exists. Throwing away the material is not the
+     *   same act as throwing away the record of having worked. Its topic and stack were copied
+     *   into the record when the session started, so those rows keep rendering correctly.
+     * - **The conversation log.** A day is the record boundary and one day mixes projects, so
+     *   there is no per-project unit to remove -- and the design treats the originals as the thing
+     *   a failed summary falls back on, never as something to prune.
+     *
+     * A proposal that was started on this project is walked back to `open` rather than left
+     * pointing at a corpse. Nothing else ever writes that status back, so without this the
+     * proposal would be permanently invisible: `openProposals` only offers `open` ones.
+     *
+     * The project record is deleted FIRST and a failure there aborts the rest. The offline buffer
+     * has no tombstone for a delete, so when the server is unreachable `remove` returns false and
+     * the record survives the source of truth; carrying on would strip a live project of its notes
+     * and leave it in the list.
+     */
+    async deleteProject(projectId: string): Promise<boolean> {
+      if (!(await storage.remove(COLLECTIONS.projects, projectId))) return false;
+
+      for (const collection of [
+        COLLECTIONS.progress,
+        COLLECTIONS.aiSessions,
+        COLLECTIONS.annotations,
+        COLLECTIONS.concepts,
+      ]) {
+        await storage.remove(collection, projectId);
+      }
+
+      // Index summaries only -- the payloads are never opened to find this.
+      for (const entry of await storage.list(COLLECTIONS.proposals)) {
+        if (str(entry.summary["status"]) !== "started") continue;
+        const record = await storage.get<ProposalData>(COLLECTIONS.proposals, entry.id);
+        if (record?.data?.started_project_id !== projectId) continue;
+        await storage.put(COLLECTIONS.proposals, {
+          ...record,
+          summary: { ...record.summary, status: "open" },
+          data: { ...record.data, started_project_id: null },
+        });
+      }
+      return true;
+    },
   };
 }
 

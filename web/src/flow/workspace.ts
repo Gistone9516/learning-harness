@@ -70,8 +70,28 @@ export function createWorkspace(cfg: WorkspaceConfig) {
         onStartProposal: (proposal) => void startFromProposal(proposal),
         onOpenArchived: (project) => void openArchived(project),
         onFreeStart: () => void startFree(),
+        onDeleteArchived: (project) => void removeArchived(project),
       },
     );
+  }
+
+  /**
+   * Delete a project the learner has already confirmed, then redraw the launcher.
+   *
+   * The redraw is a full `showLauncher`, not a spliced-out row: a delete also reopens whichever
+   * proposal had been started on that project, and that list is on the same screen.
+   *
+   * A failure is reported rather than swallowed. The offline buffer has no tombstone for a delete,
+   * so with the server unreachable the record outlives the call and would simply reappear -- a row
+   * that silently comes back is worse than being told it did not go.
+   */
+  async function removeArchived(project: ArchivedProject): Promise<void> {
+    const done = await serialize(() => flow.deleteProject(project.id));
+    if (!done) {
+      window.alert("삭제하지 못했습니다. 기록 서버에 연결되어 있는지 확인해 주세요.");
+      return;
+    }
+    await showLauncher();
   }
 
   /**

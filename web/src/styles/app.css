@@ -743,6 +743,74 @@ body {
 
 .lh-cp-archive-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--lh-s2); }
 #app .lh-cp-archive-btn { display: flex; align-items: baseline; gap: var(--lh-s3); width: 100%; padding: var(--lh-s3) var(--lh-s4); background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r-sm); text-align: left; cursor: pointer; }
+
+/* ── 보관 프로젝트 삭제 ──────────────────────────────────────────────────────
+   The row is the anchor; the control is absolutely placed so the open-button keeps being the
+   whole row. Hidden until hover or focus: this is the first screen, the action is rare and
+   irreversible, and a permanent column of destructive icons is the opposite of a quiet list. */
+.lh-cp-archive-item { position: relative; }
+#app .lh-cp-archive-del {
+  position: absolute; top: 50%; right: var(--lh-s2); transform: translateY(-50%); z-index: 1;
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: transparent; border: 1px solid transparent; border-radius: var(--lh-r-xs);
+  color: var(--lh-ink-mid);
+  /* pointer-events rides on the same condition as opacity: an invisible but live button over the
+     meta text would swallow clicks meant for the project. */
+  opacity: 0; pointer-events: none; cursor: pointer;
+}
+.lh-cp-archive-item:hover .lh-cp-archive-del,
+.lh-cp-archive-item:focus-within .lh-cp-archive-del { opacity: 1; pointer-events: auto; }
+/* Appearing and "this is the dangerous one" are two signals: fading in is neutral ink, and only
+   pointing at this button turns it red. */
+#app .lh-cp-archive-del:hover,
+#app .lh-cp-archive-del:focus-visible {
+  color: var(--lh-bad); background: var(--lh-bad-soft); border-color: var(--lh-bad-line);
+}
+/* Hover is not a thing on touch, so there the control is simply always there. */
+@media (hover: none) {
+  #app .lh-cp-archive-del { opacity: 1; pointer-events: auto; }
+}
+.lh-cp-archive-del-icon {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* The confirmation. Its own names, not the `.lh-cp-del-*` family -- those already dress
+   conceptprob's inline problem-delete box, and reshaping them for a modal would rebuild that
+   feature by accident in every instance that ships this stylesheet. */
+.lh-cp-confirm-dialog {
+  padding: var(--lh-s5);
+  border: 1px solid var(--lh-line); border-radius: var(--lh-r);
+  background: var(--lh-surface); box-shadow: var(--lh-shadow);
+  color: var(--lh-ink);
+  max-width: 380px; width: calc(100vw - 48px);
+  margin: auto;
+}
+/* Not themed. A scrim's job is to push the page back whichever palette is under it, and the one
+   other overlay in this kit uses a fixed dark rgba for the same reason. No blur: that one is a
+   focus-mode veil, this is a stop for a yes/no question. */
+.lh-cp-confirm-dialog::backdrop { background: rgba(8, 10, 14, 0.5); }
+.lh-cp-confirm-title { margin: 0 0 var(--lh-s3); font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--lh-ink); }
+.lh-cp-confirm-body { margin: 0 0 var(--lh-s5); font-size: 13.5px; line-height: 1.6; color: var(--lh-ink-mid); }
+.lh-cp-confirm-body strong { color: var(--lh-ink); font-weight: 600; }
+.lh-cp-confirm-actions { display: flex; justify-content: flex-end; gap: var(--lh-s2); }
+#app .lh-cp-confirm-cancel {
+  padding: 8px 16px; border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-sm);
+  background: transparent; color: var(--lh-ink-soft); font-weight: 600; font-size: 13px; cursor: pointer;
+}
+#app .lh-cp-confirm-cancel:hover { color: var(--lh-ink); background: var(--lh-bg-2); }
+/* --lh-on-primary, not a literal: --lh-bad needs the same flip --lh-primary does, and that token
+   already carries both values. A red fill with fixed white text fails in the dark palette. */
+#app .lh-cp-confirm-delete {
+  padding: 8px 16px; border: 1px solid transparent; border-radius: var(--lh-r-sm);
+  background: var(--lh-bad); color: var(--lh-on-primary); font-weight: 600; font-size: 13px; cursor: pointer;
+}
+/* Opacity rather than a darker fill: there is no --lh-bad-strong, and one hover state is a poor
+   reason to add a palette entry. */
+#app .lh-cp-confirm-delete:hover { opacity: 0.88; }
+#app .lh-cp-confirm-delete:active { opacity: 0.78; }
 #app .lh-cp-archive-btn:hover { border-color: var(--lh-primary-line); }
 .lh-cp-archive-title { font-size: 14px; font-weight: 700; color: var(--lh-ink); }
 .lh-cp-archive-meta { margin-left: auto; font-size: 12px; color: var(--lh-ink-faint); }
