@@ -3,9 +3,11 @@
 // INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
 // INPUT: `annotations` (AnnotationSet) — the explanation layer, injected; the part renders it and never stores it.
 // INPUT: `concepts` (ConceptSet) — the concept documents for the project, injected the same way.
+// INPUT: `traces` (TraceSet) — debug walkthroughs already built for this project, keyed by entry point.
 // EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
 // EVENTS: the freshly built annotation layer via onAnnotations — the part makes it, the owner stores it.
 // EVENTS: the concept layer via onConcepts, once per document as the background pass lands them.
+// EVENTS: the trace layer via onTraces, once per leg as a run is built — including on a reopened project.
 // EVENTS: that pass's progress via onConceptProgress, for chrome the owner draws (the view tabs).
 // AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
@@ -21,9 +23,10 @@
 import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, type Reseed } from "./session";
+import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, traceRun, type Reseed } from "./session";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
 import { conceptProgress, type ConceptEntry, type ConceptSet } from "./concepts";
+import { changedSince, traceKey, varKey, type TraceRun, type TraceSet } from "./trace";
 import { createConceptView } from "./conceptview";
 import { LENS_LABELS } from "./prompts";
 import { createAiPanel, createCodePanel, createFilePanel, el, type AnswerDepth } from "./view";
@@ -92,6 +95,19 @@ export interface CodeprojProps {
   onConcepts?: (set: ConceptSet) => void;
   /** Progress of that pass, for chrome the flow owns -- the tab strip lives in its top bar. */
   onConceptProgress?: (done: number, total: number) => void;
+  /**
+   * Debug walkthroughs already built for this project. Same snapshot rule as the other two
+   * layers, and the same reason it is worth carrying: a run costs a real call to make.
+   */
+  traces?: TraceSet;
+  /**
+   * Emitted after every leg of a run, not once when it finishes.
+   *
+   * Unlike the other two layers this also fires on a REOPENED project: a run is the learner's to
+   * start, from any line, at any time, so the owner's reopen path needs a write-back where it
+   * previously had none.
+   */
+  onTraces?: (set: TraceSet) => void;
 }
 
 /**
@@ -116,6 +132,20 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
   let annotations = props.annotations ?? { files: {} };
   // The concept layer, replaced wholesale as the background pass lands each document.
   let concepts: ConceptSet | null = props.concepts ?? null;
+  // The debug layer. Replaced the same way, one leg at a time, and unlike the other two it can
+  // grow on a project the learner reopened long after it was generated.
+  let traces: TraceSet = props.traces ?? { runs: {} };
+  /*
+   * Where a debug run stands. `stepAt` indexes `run.steps`, or -1 for no run.
+   *
+   * Declared here with the rest of the mount's state rather than beside the functions that use
+   * it: `setView` reads `run` and is called during mount, which puts a later `let` in its
+   * temporal dead zone. A function hoists, a `let` does not.
+   */
+  let run: TraceRun | null = null;
+  let stepAt = -1;
+  /** True from the first leg's request until the last leg resolves, so the end can say which. */
+  let runLoading = false;
   // Which concept is open, so the AI panel's target line can name it instead of a file.
   let openConcept: ConceptEntry | null = null;
   let view: CodeprojView = "code";
@@ -322,6 +352,146 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     selectFile(path);
     if (line) codePanel.reveal([line, line]);
   });
+
+  // ── debug run (FR-24) ───────────────────────────────────────────────────────
+  //
+  // The run lives here rather than in the code panel because it spans files, and `show()` clears
+  // the panel's own state on every switch. The panel is told only where the run stands in the
+  // file currently on screen, exactly as it is told which scraps are in that file.
+
+  codePanel.onStepKey((dir) => stepDebug(dir));
+
+  function publishTraces(key: string, value: TraceRun): void {
+    traces = { runs: { ...traces.runs, [key]: value } };
+    props.onTraces?.(traces);
+  }
+
+  /**
+   * Start a walkthrough from the selected line.
+   *
+   * A cached run starts instantly; a new one costs one call before anything can be shown, and
+   * then plays while the rest is still being written. Nothing is ever generated without this
+   * being pressed -- opening a project, or a file, sends nothing.
+   */
+  async function startDebug(): Promise<void> {
+    const selection = codePanel.selection();
+    if (!session || !currentProject || !selectedPath || !selection || run || runLoading) return;
+    const entry = { path: selectedPath, line: selection[0] };
+    const key = traceKey(entry.path, entry.line);
+
+    const cached = traces.runs[key];
+    if (cached?.status === "ok" && cached.steps.length) {
+      beginRun(cached);
+      return;
+    }
+
+    runLoading = true;
+    codePanel.setDebugControl("loading", () => undefined);
+    const built = await traceRun(
+      session,
+      currentProject,
+      entry,
+      (partial) => {
+        publishTraces(key, partial);
+        // The first leg with steps starts the walkthrough; later legs extend the same array in
+        // place, so the learner's position is untouched by one arriving.
+        if (!run && partial.steps.length) beginRun(partial);
+        else if (run) paintDebug();
+      },
+      reseedFor({ setWaiting: (text) => aiPanel.notice(text) }),
+    );
+    runLoading = false;
+    if (built.status === "failed") {
+      stopDebug();
+      aiPanel.notice("실행 흐름을 만들지 못했습니다. 다시 시도해 주세요.");
+      return;
+    }
+    paintDebug();
+  }
+
+  function beginRun(next: TraceRun): void {
+    run = next;
+    stepAt = 0;
+    codePanel.setDebugActive(true);
+    paintDebug();
+  }
+
+  function stopDebug(): void {
+    run = null;
+    stepAt = -1;
+    codePanel.setDebugActive(false);
+    codePanel.markDebug(null, null);
+    codePanel.showDebug(0, null);
+    updateDebugControl();
+  }
+
+  function stepDebug(dir: 1 | -1): void {
+    if (!run) return;
+    const next = stepAt + dir;
+    if (next < 0) return;
+    if (next >= run.steps.length) {
+      // Either the end of the walkthrough or the moment before the next file's steps land. The
+      // popup says which, because they look identical from here and mean different things.
+      paintDebug();
+      return;
+    }
+    stepAt = next;
+    paintDebug();
+  }
+
+  /**
+   * Repaint the markers for the file on screen.
+   *
+   * Split out from `paintDebug` because `selectFile` calls it too: `show()` rebuilds every line,
+   * so a run that crossed into a file, or a learner who wandered off and came back, would
+   * otherwise find the red dot gone.
+   */
+  function applyDebugMarks(): void {
+    const step = run && stepAt >= 0 ? run.steps[stepAt] : null;
+    codePanel.markDebug(
+      run && run.entry.path === selectedPath ? run.entry.line : null,
+      step && step.path === selectedPath ? step.line : null,
+    );
+  }
+
+  function paintDebug(): void {
+    updateDebugControl();
+    const step = run && stepAt >= 0 ? run.steps[stepAt] : null;
+    if (!run || !step) {
+      applyDebugMarks();
+      codePanel.showDebug(0, null);
+      return;
+    }
+    // Stepping into a call opens that file and carries on there. selectFile reapplies the marks.
+    if (step.path !== selectedPath) selectFile(step.path);
+    else applyDebugMarks();
+
+    const changed = changedSince(stepAt > 0 ? run.steps[stepAt - 1].vars : undefined, step.vars);
+    codePanel.showDebug(step.line, {
+      at: stepAt + 1,
+      total: run.steps.length,
+      line: step.line,
+      explain: step.explain,
+      vars: step.vars.map((v) => ({ ...v, changed: changed.has(varKey(v)) })),
+      truncated: !!run.truncated,
+      pending: runLoading && stepAt === run.steps.length - 1,
+    });
+  }
+
+  /**
+   * One control, four states. The head is a single row and a run needs both a way in and a way
+   * out, so the two share a slot the way the note link already shares one with its retry.
+   */
+  function updateDebugControl(): void {
+    if (!session || view !== "code") {
+      codePanel.setDebugControl("hidden", () => undefined);
+      return;
+    }
+    if (run) codePanel.setDebugControl("running", () => stopDebug());
+    else if (runLoading) codePanel.setDebugControl("loading", () => undefined);
+    else if (codePanel.selection()) codePanel.setDebugControl("ready", () => void startDebug());
+    else codePanel.setDebugControl("hidden", () => undefined);
+  }
 
   function addScrap(lines: [number, number]): void {
     if (!currentProject || !selectedPath) return;
@@ -582,6 +752,9 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     codePanel.offerAnnotationRetry(!!session && forFile?.status === "failed", () => {
       void retryAnnotations(path, file.content);
     });
+    // A run in progress outlives a file switch -- including the switch the run itself caused.
+    // `show()` has just rebuilt every line, so the markers have to be put back.
+    applyDebugMarks();
     // Not while a request is in flight: re-arming here is what let a file click cancel the
     // lock a running call had taken.
     if (session && !aiBusy && !sessionUnrecoverable) aiPanel.setEnabled(true);
@@ -599,6 +772,12 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     codePanel.root.style.display = code ? "" : "none";
     conceptView.rail.style.display = code ? "none" : "";
     conceptView.reading.style.display = code ? "none" : "";
+    // A run is paused, not ended, by reading a concept: the panels are only hidden, so the
+    // markers and the position survive and Space picks up where it left off. Space is released
+    // while away so the concepts view keeps ordinary page scrolling.
+    codePanel.setDebugActive(code && !!run);
+    if (!code) codePanel.showDebug(0, null);
+    else if (run) paintDebug();
     updateTargetHint(codePanel.selection());
   }
 
@@ -644,6 +823,9 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
   }
 
   function updateTargetHint(range: [number, number] | null): void {
+    // The debug control is offered by the same thing that makes a question possible -- a chosen
+    // line -- so it is refreshed from the same place rather than needing a slot of its own.
+    updateDebugControl();
     // In the concepts view the subject of a question is the open concept, not the selected line.
     if (view === "concepts") {
       aiPanel.setTargetHint(openConcept ? `대상: 개념 · ${openConcept.seed.title}` : "");

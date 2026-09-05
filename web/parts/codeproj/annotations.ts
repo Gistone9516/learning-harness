@@ -198,34 +198,72 @@ export interface Placement {
   top: number;
   /** Whether the popup ended up above the anchor; the caller flips the pointer accordingly. */
   above: boolean;
+  /** Whether it ended up beside the code rather than under it. Styling differs; see below. */
+  beside: boolean;
 }
 
 export const POPUP_GAP = 8;
 export const POPUP_MARGIN = 12;
 
 /**
- * Where to put the popup so it does not cover the line it explains and does not leave the
- * viewport. Below the anchor by default; above when there is no room below but there is above.
+ * How far past the end of the code the popup starts.
+ *
+ * Wider than POPUP_GAP on purpose. Under the line, eight pixels reads as "attached to that row";
+ * beside it, the same eight would read as a continuation of the code itself, because both are on
+ * the same baseline. The gap is what separates the explanation from the thing explained.
+ */
+export const POPUP_SIDE_GAP = 20;
+
+/**
+ * Where to put the popup so it does not cover the code it explains and does not leave the
+ * viewport.
+ *
+ * BESIDE the code by default, starting just past where that line's text ends -- the semicolon,
+ * for a language that has one. Under a line the popup covers whatever follows, which on this
+ * screen is the rest of the function the learner is in the middle of reading; beside it, nothing
+ * is hidden at all, because the space to the right of a line of code is empty by construction.
+ *
+ * The old below-or-above rule is the fallback, for a line too long to leave room and for the
+ * single-column layout under 900px. `anchor.width` is therefore the width of the CODE, not of the
+ * row: a row is as wide as the panel and would push every popup into the fallback.
  */
 export function placePopup(
   anchor: Rect,
   popup: { width: number; height: number },
   viewport: { width: number; height: number },
 ): Placement {
+  const clampTop = (top: number): number =>
+    Math.min(
+      Math.max(POPUP_MARGIN, top),
+      Math.max(POPUP_MARGIN, viewport.height - popup.height - POPUP_MARGIN),
+    );
+
+  const codeEnd = anchor.left + anchor.width;
+  if (viewport.width - codeEnd - POPUP_SIDE_GAP - POPUP_MARGIN >= popup.width) {
+    // Top-aligned rather than centred: the explanation starts level with the line it is about,
+    // and a tall popup then grows downward instead of straddling the line.
+    //
+    // Left is clamped like every other branch, because a line scrolled partly off the left edge
+    // has a negative `left` and would otherwise put the popup off screen entirely.
+    return {
+      left: Math.max(POPUP_MARGIN, codeEnd + POPUP_SIDE_GAP),
+      top: clampTop(anchor.top),
+      above: false,
+      beside: true,
+    };
+  }
+
   const roomBelow = viewport.height - (anchor.top + anchor.height);
   const roomAbove = anchor.top;
   const above = roomBelow < popup.height + POPUP_GAP && roomAbove > roomBelow;
 
   const top = above
     ? Math.max(POPUP_MARGIN, anchor.top - popup.height - POPUP_GAP)
-    : Math.min(
-        anchor.top + anchor.height + POPUP_GAP,
-        Math.max(POPUP_MARGIN, viewport.height - popup.height - POPUP_MARGIN),
-      );
+    : clampTop(anchor.top + anchor.height + POPUP_GAP);
 
   const left = Math.min(
     Math.max(POPUP_MARGIN, anchor.left),
     Math.max(POPUP_MARGIN, viewport.width - popup.width - POPUP_MARGIN),
   );
-  return { left, top, above };
+  return { left, top, above, beside: false };
 }

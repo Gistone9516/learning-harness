@@ -46,6 +46,9 @@ async function seed(flow: ReturnType<typeof createStudyFlow>, storage: StoragePo
   await flow.rememberSession(id, "sid-1");
   await flow.writeAnnotations(id, { files: { "a.py": { status: "ok", items: [{}] } } });
   await flow.writeConcepts(id, { entries: [{ seed: { area: "a", concept_id: "c-one", title: "개념" }, status: "ok" }] });
+  await flow.writeTraces(id, {
+    runs: { "a.py:1": { status: "ok", steps: [{ index: 1, path: "a.py", line: 1, explain: "시작", vars: [] }] } },
+  });
   const historyId = await flow.beginSession({ projectId: id, topic: "도서 대출", stack: "FastAPI" });
   await flow.appendConversation({
     at: Date.UTC(2026, 8, 4, 12), kind: "ask", project_id: id, history_id: historyId,
@@ -60,7 +63,7 @@ describe("deleteProject", () => {
     const { id } = await seed(flow, storage);
 
     expect(await flow.deleteProject(id)).toBe(true);
-    for (const c of [COLLECTIONS.projects, COLLECTIONS.progress, COLLECTIONS.aiSessions, COLLECTIONS.annotations, COLLECTIONS.concepts]) {
+    for (const c of [COLLECTIONS.projects, COLLECTIONS.progress, COLLECTIONS.aiSessions, COLLECTIONS.annotations, COLLECTIONS.concepts, COLLECTIONS.traces]) {
       expect(await storage.get(c, id)).toBeNull();
     }
     expect(await flow.listArchived()).toEqual([]);
@@ -135,6 +138,7 @@ describe("deleteProject", () => {
     expect(await offline.deleteProject(id)).toBe(false);
     expect(await storage.get(COLLECTIONS.annotations, id)).not.toBeNull();
     expect(await storage.get(COLLECTIONS.concepts, id)).not.toBeNull();
+    expect(await storage.get(COLLECTIONS.traces, id)).not.toBeNull();
     expect(await storage.get(COLLECTIONS.progress, id)).not.toBeNull();
   });
 

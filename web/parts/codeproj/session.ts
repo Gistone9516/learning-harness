@@ -21,8 +21,21 @@ import {
   buildConceptOutlinePrompt,
   buildConceptDocSystem,
   buildConceptDocPrompt,
+  buildTraceSystem,
+  buildTraceLegPrompt,
 } from "./prompts";
 import { parseDoc, parseSeeds, seedSet, type ConceptSeed, type ConceptSet } from "./concepts";
+import {
+  parseTraceLeg,
+  TRACE_LEG_STEPS,
+  TRACE_MAX_LEGS,
+  TRACE_MIN_STEPS,
+  TRACE_STEP_CAP,
+  type LegResult,
+  type TraceFailure,
+  type TraceJump,
+  type TraceRun,
+} from "./trace";
 
 /**
  * Put the codebase back and report whether it worked. Supplied by the mount, which owns the
@@ -269,4 +282,156 @@ export async function writeConcepts(
     onStep(set);
   }
   return set;
+}
+
+
+// ── 디버그 트레이스 (FR-24) ──────────────────────────────────────────────────
+
+/**
+ * One leg: one file's worth of steps, on the session that already holds the codebase.
+ *
+ * A leg rather than a whole run per call, for the reason the annotation pass splits per file: a
+ * resumed call is in the follow-up class and the server cuts it at 180s, and a timeout returns
+ * nothing at all rather than a partial answer. Legs turn "the whole walkthrough is lost" into
+ * "the walkthrough stops one file early", which the run says out loud via `truncated`.
+ */
+async function traceLeg(
+  session: AiSession,
+  leg: {
+    path: string;
+    content: string;
+    lineCount: number;
+    startLine: number;
+    startIndex: number;
+    budget: number;
+    carried: TraceRun["steps"][number]["vars"];
+    paths: string[];
+  },
+  files: ReadonlyMap<string, number>,
+  reseed?: Reseed,
+): Promise<{ result: LegResult | null; reason?: TraceFailure }> {
+  const res = await sendResuming(
+    session,
+    {
+      prompt: buildTraceLegPrompt({
+        path: leg.path,
+        content: leg.content,
+        startLine: leg.startLine,
+        carried: leg.carried,
+        steps: leg.budget,
+        paths: leg.paths,
+      }),
+      system: buildTraceSystem(),
+      effort: "medium",
+    },
+    reseed,
+  );
+  if (!res.ok) return { result: null, reason: "call" };
+  const carved = carveJson(res.text);
+  if (!carved) return { result: null, reason: "parse" };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(carved);
+  } catch {
+    return { result: null, reason: "parse" };
+  }
+  return { result: parseTraceLeg(raw, leg, files) };
+}
+
+/**
+ * Walk one entry point, leg by leg, until the model says the program stops or a budget runs out.
+ *
+ * `onLeg` fires after every leg with the run as it stands, which is what makes the wait bearable:
+ * the mount starts playing the first leg's steps while the next one is still being written, so a
+ * file boundary does not stall the learner mid-step. Same shape as `writeConcepts`' `onStep`,
+ * and for the same reason -- walking away mid-pass still leaves what already arrived.
+ *
+ * Failure is asymmetric on purpose. The first leg failing leaves nothing to walk, so the run is
+ * `failed` and a retry is offered. A later leg failing leaves a real, shorter walkthrough, which
+ * is worth reading as long as the screen admits it is short.
+ */
+export async function traceRun(
+  session: AiSession,
+  project: GeneratedProject,
+  entry: { path: string; line: number },
+  onLeg: (run: TraceRun) => void,
+  reseed?: Reseed,
+): Promise<TraceRun> {
+  const content = new Map(project.files.map((f) => [f.path, f.content]));
+  const files = new Map(project.files.map((f) => [f.path, f.content.split("\n").length]));
+  const paths = project.files.map((f) => f.path);
+
+  const run: TraceRun = { status: "running", entry, steps: [] };
+  let at: TraceJump | null = { path: entry.path, line: entry.line };
+
+  for (let legIndex = 0; legIndex < TRACE_MAX_LEGS && at; legIndex += 1) {
+    const source = content.get(at.path);
+    const lineCount = files.get(at.path);
+    if (source === undefined || lineCount === undefined) {
+      run.truncated = true;
+      break;
+    }
+    const budget = Math.min(TRACE_LEG_STEPS, TRACE_STEP_CAP - run.steps.length);
+    if (budget <= 0) {
+      run.truncated = true;
+      break;
+    }
+    // The previous leg's ending state crosses the boundary, so a variable set in the caller is
+    // still on screen inside the callee. Empty on the first leg, which is correct: nothing has
+    // been established yet.
+    const carried = run.steps.length ? run.steps[run.steps.length - 1].vars : [];
+
+    const { result, reason } = await traceLeg(
+      session,
+      {
+        path: at.path,
+        content: source,
+        lineCount,
+        startLine: at.line,
+        startIndex: run.steps.length,
+        budget,
+        carried,
+        paths,
+      },
+      files,
+      reseed,
+    );
+
+    if (!result) {
+      if (run.steps.length === 0) {
+        run.status = "failed";
+        run.reason = reason;
+        onLeg(run);
+        return run;
+      }
+      run.truncated = true;
+      break;
+    }
+
+    run.steps.push(...result.steps);
+    if (result.truncated) run.truncated = true;
+    onLeg(run);
+
+    // A leg that says neither "done" nor "the next file is here" has more to say in the file it
+    // is already in, and no way to be asked for it: the next leg is addressed by file, and this
+    // is the same file it just finished. The walkthrough therefore stops in the middle of
+    // something, which the screen has to admit -- measured 2026-09-05, a run ended on a `select`
+    // being assembled and the popup called it the last step.
+    if (!result.done && !result.leavesTo) run.truncated = true;
+    at = result.done || result.truncated ? null : result.leavesTo;
+  }
+
+  // Somewhere left to go and no legs left to go there with.
+  if (at) run.truncated = true;
+
+  if (run.steps.length < TRACE_MIN_STEPS) {
+    // A one-step walkthrough is not one, however well-formed the reply was.
+    run.status = "failed";
+    run.reason = run.steps.length === 0 ? "parse" : "dropped";
+    run.steps = [];
+  } else {
+    run.status = "ok";
+  }
+  onLeg(run);
+  return run;
 }

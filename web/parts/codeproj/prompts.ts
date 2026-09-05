@@ -303,3 +303,78 @@ export function buildConceptDocSystem(): string {
 export function buildConceptDocPrompt(seed: { area: string; concept_id: string; title: string }): string {
   return JSON.stringify({ area: seed.area, concept_id: seed.concept_id, title: seed.title });
 }
+
+
+// ── 디버그 트레이스 (FR-24) ──────────────────────────────────────────────────
+//
+// One leg is one file. The model is never asked for a path per step -- inside a leg it only names
+// a line in a file it was just handed, numbered. A path can therefore be invented in exactly one
+// place, `leaves_to`, which is the one place the parser checks. Asking for a path on every step
+// would open the same hallucination surface once per step and give the parser nothing better to
+// check it against.
+
+/**
+ * The trace pass predicts an order of execution over code that already exists, so QUALITY_CLAUSE
+ * is absent for the same reason as in the reseed and the annotation pass: nothing is being
+ * written, and offering it invites the model to improve the project instead of walking it.
+ */
+export function buildTraceSystem(): string {
+  return (
+    "너는 코드가 특정 지점부터 어떻게 실행될지 예측해 한 단계씩 서술한다. Output ONLY valid JSON.\n" +
+    "이것은 실제 실행이 아니라 코드를 근거로 한 너의 예측이다.\n" +
+    "Do not create, write or edit any file, and do not call tools.\n" +
+    "Do not modify, rewrite, improve or extend the code.\n" +
+    "표준 라이브러리와 프레임워크 내부로는 들어가지 마라. 그런 호출은 한 단계로 요약하고, " +
+    "이 프로젝트에 실제로 있는 파일일 때만 그 파일로 넘어가라.\n" +
+    "각 단계는 그 줄에서 일어나는 일 한 문장과, 그 시점에 살아 있는 변수와 상태의 전체 목록이다.\n" +
+    "매 단계 전체 목록을 다시 적어라. 바뀐 것만 적지 마라. 값이 그대로인 변수도 다시 적는다.\n" +
+    "Write every sentence in Korean. Leave symbol names, paths and code fragments as they are." +
+    "\n\n" +
+    AUDIENCE_CLAUSE
+  );
+}
+
+/**
+ * Ask for one file's steps, with the source restated and numbered.
+ *
+ * Same join-key reasoning as `buildAnnotatePrompt`: the line number is the entire link between a
+ * step and the code, and a model counting lines out of JSON already in its context is not
+ * something to rely on. The project's paths are listed verbatim so `leaves_to.path` can be
+ * compared as a string rather than guessed at.
+ */
+export function buildTraceLegPrompt(leg: {
+  path: string;
+  content: string;
+  startLine: number;
+  /** The variable set the previous leg ended with, so state survives a file boundary. */
+  carried: { name: string; value: string; scope?: string }[];
+  steps: number;
+  paths: string[];
+}): string {
+  const numbered = leg.content
+    .split("\n")
+    .map((line, i) => `${String(i + 1).padStart(3, "0")}| ${line}`)
+    .join("\n");
+  // The previous leg's ending state, offered as a prior. It is a generated artifact too, so it
+  // loses to the code -- the same clause the ask path uses for annotation grounds.
+  const carried = leg.carried.length
+    ? `[이 지점까지의 변수 상태]\n${JSON.stringify(leg.carried)}\n` +
+      "이어받되, 코드와 어긋나면 코드를 따르세요.\n\n"
+    : "";
+  return (
+    `[실행 흐름 요청]\n대상 파일: ${leg.path}\n시작 줄: ${leg.startLine}\n\n` +
+    `아래가 그 파일의 전체 내용이다. 각 줄 앞의 번호가 파일의 실제 줄 번호다.\n\n` +
+    `${numbered}\n\n` +
+    carried +
+    `${leg.startLine}행에서 시작해 이어질 단계를 최대 ${leg.steps}개까지 서술하라.\n` +
+    "실제로 실행되는 줄만 단계로 삼는다. 빈 줄, 닫는 괄호, 선언만 있고 지나가지 않는 줄은 넣지 마라.\n" +
+    "이 파일을 벗어나 아래 목록의 다른 파일로 넘어가면, 넘어가기 직전 단계까지만 적고 " +
+    "leaves_to에 그 파일의 경로와 줄을 적어라. 경로는 아래 목록의 문자열을 그대로 쓴다.\n" +
+    `이 프로젝트의 파일: ${leg.paths.join(", ")}\n` +
+    "반환·종료·응답처럼 더 따라갈 곳이 없으면 done을 true로 하고 leaves_to는 null로 둔다.\n\n" +
+    "JSON만 출력한다. 산문도 마크다운 펜스도 쓰지 마라.\n" +
+    '{"steps":[{"line":숫자,"explain":"한 문장",' +
+    '"vars":[{"name":"이름","value":"이 시점의 값","scope":"함수명(선택)"}]}],' +
+    '"leaves_to":{"path":"","line":0},"done":false}'
+  );
+}

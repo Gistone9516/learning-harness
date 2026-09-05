@@ -188,14 +188,19 @@ cd web && npm run build               # tsc --noEmit + vite production build
   pre-baked concept with no session and grades it with zero AI). For a local visual check,
   `cd web && npm run dev` serves a dev fixture at `localhost:5173` (`#conceptprob` for the offline module).
 
-One test is opt-in because it spends money: `parts/codeproj/codeproj.live.test.ts` calls a running
-`ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`. There is no
-vitest config in this repo, so the default include glob picks the file up and the gate lives inside it —
-without `LH_LIVE` the suite is skipped and `npm test` stays at 339 green.
+Two tests are opt-in because they spend money. `parts/codeproj/codeproj.live.test.ts` calls a running
+`ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`;
+`parts/codeproj/trace.live.test.ts` resumes a session already holding a project and times one debug
+leg. There is no vitest config in this repo, so the default include glob picks both files up and the
+gate lives inside them — without `LH_LIVE` they are skipped and `npm test` stays at 459 green.
 
 ```bash
 cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/codeproj.live.test.ts
+cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/trace.live.test.ts
 ```
+
+The token goes in the `X-AI-Token` header (`Authorization: Bearer` also works); `ai_server` refuses
+to start without one and rejects every other header name.
 - Env: `LH_LIVE_URL` (default `http://127.0.0.1:8765`), `LH_LIVE_MODEL` (default `claude-opus-5[1m]`),
   `LH_LIVE_OUT` (where the raw response is written), `LH_LIVE_WATCH` (tree checked for stray writes).
   It writes the raw response before parsing it, because the response body is the whole point of the run:
@@ -249,10 +254,15 @@ cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codepro
   no CDN so it works offline), multi-range code scrap, and a composed-answer block system
   (`parts/codeproj/components`, 24 block types covering the 25 catalogue entries — inline and block code
   references share one `ref` type). `session_guard` ends claude sessions so no process is orphaned.
-- Pending: live Discord verification (needs the user prerequisites: bot app, token, server), live AI smoke
-  (needs the `claude` CLI on PATH; the whole generation path is still unproven against a real model), and
-  an annotation layer with instant Ctrl-hover popups plus semi-answers — designed in the consuming instance's
-  docs, not yet built.
+  Three AI-written layers sit over a generated project, each its own per-project record and each
+  injected into the part rather than stored by it: annotations (`annotations.ts`, Ctrl-hover popups
+  built before the learner arrives), concept documents (`concepts.ts`, background after entry), and
+  debug runs (`trace.ts`, one leg per file, started by the learner from a chosen line). All three are
+  read back with zero AI calls when an archived project is reopened.
+- Pending: live Discord verification (needs the user prerequisites: bot app, token, server), the
+  conversation compaction and long-term memory that the stored per-day records exist to feed, and a
+  delete tombstone in `web/src/storage/buffered.ts` — with the server unreachable a removed record is
+  still served from the localStorage buffer, so a deletion made offline comes back.
 
 ## 7. Where to start (for AI and new contributors)
 

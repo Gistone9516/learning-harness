@@ -3,7 +3,7 @@
 // mount needs, so the mount wires panels together instead of manipulating their internals.
 
 import { buildLineIndex, fileNote, type Annotation } from "./annotations";
-import { createNotePopup } from "./notepopup";
+import { createNotePopup, type DebugView } from "./notepopup";
 import type { GeneratedProject, Lens, TreeNode } from "./model";
 import { LENS_LABELS, LENS_ORDER } from "./prompts";
 import { highlightLines } from "../../src/highlight/highlight";
@@ -128,6 +128,29 @@ export interface CodePanel {
   onNoteExpand(cb: (lines: [number, number], what: string) => void): void;
   /** Scroll a line into view and select it, for a code reference or a scrap list entry. */
   reveal(range: [number, number]): void;
+
+  /**
+   * Where the debug run stands IN THE FILE ON SCREEN. Both null when the run is elsewhere or
+   * there is no run. A method rather than state of its own, and for the same reason `markScraps`
+   * is one: `show()` rebuilds every line, so the mount reapplies this after each file switch and
+   * the panel never has to know what a run is.
+   */
+  markDebug(startLine: number | null, currentLine: number | null): void;
+  /** Whether Space steps. Off means the key is left alone, so nothing else on screen loses it. */
+  setDebugActive(on: boolean): void;
+  /** Step forward (1) or back (-1). The only free callback slot on this panel. */
+  onStepKey(cb: (dir: 1 | -1) => void): void;
+  /**
+   * Open the popup on a debug step, carrying that line's annotation too when it has one. Passing
+   * null closes it, which is how a run ends without the mount reaching into the popup.
+   */
+  showDebug(line: number, view: DebugView | null): void;
+  /**
+   * The debug control in the panel header. One slot, four states, because a run needs both a way
+   * in and a way out and the header is a single row -- the same sharing the note link already
+   * does with its retry.
+   */
+  setDebugControl(state: "hidden" | "ready" | "loading" | "running", run: () => void): void;
 }
 
 export function createCodePanel(): CodePanel {
@@ -139,6 +162,10 @@ export function createCodePanel(): CodePanel {
   // nothing. It carries the gesture too, because nothing else on screen teaches it.
   const noteLink = el("button", "lh-cp-note-link", "주석 보기 (Alt+Enter)");
   noteLink.hidden = true;
+  // Appears with a selection, because "the line you picked" is the whole input to a run. Turns
+  // into the way out once one is going, so the header never carries both at once.
+  const debugBtn = el("button", "lh-cp-debug-btn", "디버그 실행");
+  debugBtn.hidden = true;
   const scrapBtn = el("button", "lh-cp-scrap-btn", "스크랩 담기");
   scrapBtn.hidden = true;
   const clearBtn = el("button", "lh-cp-clear-selection", "선택 해제");
@@ -146,9 +173,14 @@ export function createCodePanel(): CodePanel {
   head.appendChild(pathLabel);
   head.appendChild(selectionLabel);
   head.appendChild(noteLink);
+  head.appendChild(debugBtn);
   head.appendChild(scrapBtn);
   head.appendChild(clearBtn);
   const codeArea = el("div", "lh-cp-code-scroll");
+  // Focusable by script, never by Tab. A debug run parks focus here so that Space is not being
+  // typed into the question box or re-pressing the button that started the run; code lines carry
+  // no tabindex, so once focus is here clicking a line cannot take it away again.
+  codeArea.tabIndex = -1;
   root.appendChild(head);
   root.appendChild(codeArea);
 
@@ -164,6 +196,40 @@ export function createCodePanel(): CodePanel {
   let expandListener: ((lines: [number, number], what: string) => void) | null = null;
   let closeTimer: number | null = null;
   let retry: (() => void) | null = null;
+  // Where a debug run stands in the file currently shown. Deliberately outside `show()`'s reset
+  // block: the mount owns the run and reapplies these after every file switch.
+  let debugStart: number | null = null;
+  let debugCurrent: number | null = null;
+  let debugActive = false;
+  let stepListener: ((dir: 1 | -1) => void) | null = null;
+  let debugPress: (() => void) | null = null;
+  /** The step currently on screen, kept so a scroll can re-place its popup rather than close it. */
+  let debugShown: { line: number; view: DebugView } | null = null;
+
+  debugBtn.addEventListener("click", () => debugPress?.());
+
+  /**
+   * Put the debug popup next to its own line, wherever that line is now.
+   *
+   * Hidden rather than moved once the line has scrolled out of the code area: a fixed popup
+   * clamped to the viewport would otherwise sit at the edge pointing at nothing.
+   */
+  function placeDebugPopup(): void {
+    if (!debugShown) return;
+    // Any close the hover path had queued is void: this popup is not the one it was closing.
+    if (closeTimer !== null) {
+      window.clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    const anchorRect = anchorFor(debugShown.line, debugShown.line);
+    const box = codeArea.getBoundingClientRect();
+    if (!anchorRect || anchorRect.bottom < box.top || anchorRect.top > box.bottom) {
+      popup.hide();
+      return;
+    }
+    const i = noteIndex ? noteIndex[debugShown.line] : -1;
+    popup.showFor(i >= 0 ? notes[i] : null, anchorRect, debugShown.view);
+  }
 
   function paint(): void {
     codeArea.querySelectorAll(".lh-cp-code-line").forEach((lineEl) => {
@@ -175,6 +241,11 @@ export function createCodePanel(): CodePanel {
       // Inert on its own; it only becomes visible while Ctrl is held. The class is static so
       // holding Ctrl costs one class toggle on the container instead of a pass over every line.
       e.classList.toggle("lh-cp-has-note", !!noteIndex && noteIndex[n] >= 0);
+      // Debug takes the two channels the other three do not: the empty space left of the line
+      // number, and the row's right edge. Selection owns the row background, a scrap owns the
+      // left rail, an annotation owns the text underline -- all four can sit on one line.
+      e.classList.toggle("lh-cp-debug-start", debugStart === n);
+      e.classList.toggle("lh-cp-debug-current", debugCurrent === n);
     });
 
     const selected = range && noteIndex ? noteIndex[range[0]] : -1;
@@ -197,23 +268,47 @@ export function createCodePanel(): CodePanel {
   }
 
   /**
+   * The rectangle a popup is placed against: vertically the whole range, horizontally the CODE
+   * rather than the row.
+   *
+   * The row is as wide as the panel, so anchoring to it would leave no room to the right and push
+   * every popup back under the code. `.lh-cp-line-text` is an inline span with `white-space: pre`
+   * and no flex sizing, so its right edge is where that line's text actually ends -- the
+   * semicolon, in a language that has one. Over a multi-line range the widest line wins, so the
+   * popup clears all of the code it is about and not just the first line of it.
+   */
+  function anchorFor(lo: number, hi: number): DOMRect | null {
+    const first = codeArea.querySelector(`.lh-cp-code-line[data-line="${lo}"]`);
+    const last = codeArea.querySelector(`.lh-cp-code-line[data-line="${hi}"]`) ?? first;
+    if (!first || !last) return null;
+    const a = first.getBoundingClientRect();
+    const b = last.getBoundingClientRect();
+    let right = a.left;
+    for (let n = lo; n <= hi; n += 1) {
+      const text = codeArea.querySelector(`.lh-cp-code-line[data-line="${n}"] .lh-cp-line-text`);
+      if (text) right = Math.max(right, text.getBoundingClientRect().right);
+    }
+    return new DOMRect(a.left, a.top, Math.max(0, right - a.left), b.bottom - a.top);
+  }
+
+  /**
    * Open the note covering a line, anchored to the whole range it explains.
    *
-   * Anchoring to the hovered row alone puts the popup on top of the rest of the range, so a
-   * six-line note covers five of the lines it is about (08 §3.5: the popup must not hide the
-   * code). The union of the range's rows pushes it clear.
+   * Anchoring to the hovered row alone would put the popup on top of the rest of the range when
+   * it falls back to below-the-code, so a six-line note covers five of the lines it is about
+   * (08 §3.5: the popup must not hide the code).
    */
   function openNoteAt(line: number): void {
     if (!noteIndex || line < 1 || line > lineCount) return;
     const i = noteIndex[line];
     if (i < 0) return;
     const [lo, hi] = notes[i].target.lines;
-    const first = codeArea.querySelector(`.lh-cp-code-line[data-line="${lo}"]`);
-    const last = codeArea.querySelector(`.lh-cp-code-line[data-line="${hi}"]`) ?? first;
-    if (!first || !last) return;
-    const a = first.getBoundingClientRect();
-    const b = last.getBoundingClientRect();
-    popup.showFor(notes[i], new DOMRect(a.left, a.top, a.width, b.bottom - a.top));
+    const anchor = anchorFor(lo, hi);
+    if (!anchor) return;
+    // An explicit request for this line's note takes the popup from a run that was using it.
+    // Space brings the step back; two things fighting over one popup would not be recoverable.
+    debugShown = null;
+    popup.showFor(notes[i], anchor);
   }
 
   scrapBtn.addEventListener("click", () => {
@@ -226,18 +321,33 @@ export function createCodePanel(): CodePanel {
       scrapListener?.(r);
     },
     canExpand: () => expandListener !== null,
-    onExpand: (note) => {
-      setRange(note.target.lines);
-      expandListener?.(note.target.lines, note.what);
+    onExpand: (lines, what) => {
+      setRange(lines);
+      expandListener?.(lines, what);
     },
     onRef: (path, line) => refListener?.(path, line),
   });
   root.appendChild(popup.root);
 
+  /**
+   * Dismiss whatever is in the popup, debug step included. For the explicit gestures only:
+   * Escape, leaving the window, switching files.
+   */
   function closeNote(): void {
     if (closeTimer !== null) window.clearTimeout(closeTimer);
     closeTimer = null;
+    debugShown = null;
     popup.hide();
+  }
+
+  /**
+   * The hover machinery's own close. It must not touch a debug step: that popup was not opened by
+   * a pointer, so a pointer moving away is not a reason to take it down. Without this, moving the
+   * mouse anywhere over the code dismisses the step the learner is on.
+   */
+  function closeHover(): void {
+    if (debugShown) return;
+    closeNote();
   }
 
   // Ctrl state is read off the pointer event rather than tracked with a global keydown listener.
@@ -246,8 +356,11 @@ export function createCodePanel(): CodePanel {
   codeArea.addEventListener("mousemove", (ev) => {
     const e = ev as MouseEvent;
     codeArea.classList.toggle("lh-cp-ctrl-held", e.ctrlKey);
+    // One popup, one owner. While a run is on screen the hover path neither opens nor closes it;
+    // the learner still reaches a line's note explicitly, through Alt+Enter or the header link.
+    if (debugShown) return;
     if (!e.ctrlKey) {
-      closeNote();
+      closeHover();
       return;
     }
     const row = (e.target as HTMLElement | null)?.closest?.(".lh-cp-code-line") as HTMLElement | null;
@@ -255,7 +368,7 @@ export function createCodePanel(): CodePanel {
     const line = Number(row.dataset["line"]);
     // A line with no note opens nothing. An empty popup is worse than no popup.
     if (!noteIndex || noteIndex[line] < 0) {
-      closeNote();
+      closeHover();
       return;
     }
     if (closeTimer !== null) {
@@ -267,16 +380,41 @@ export function createCodePanel(): CodePanel {
 
   // Leaving the code gives a moment to reach the popup, which sits outside this element.
   codeArea.addEventListener("mouseleave", () => {
+    if (debugShown) return;
     if (closeTimer !== null) window.clearTimeout(closeTimer);
     closeTimer = window.setTimeout(() => {
-      if (!popup.hovered) popup.hide();
+      // Re-checked here, not only when the timer was set. Moving the pointer from the code up to
+      // the debug button fires this leave BEFORE the run exists, and 120ms later the run has
+      // started and opened its popup -- which this would then close. Measured 2026-09-05: the
+      // popup rendered correctly and vanished a tenth of a second later, every single time.
+      if (!popup.hovered && !debugShown) popup.hide();
       closeTimer = null;
     }, 120);
   });
 
-  // Scrolling moves the code out from under a stationary cursor without firing any mouse event,
-  // so none of the documented close triggers would fire and the popup would hang in place.
-  codeArea.addEventListener("scroll", closeNote);
+  /*
+   * Scrolling moves the code out from under a stationary cursor without firing any mouse event,
+   * so none of the documented close triggers would fire and a hover popup would hang in place.
+   *
+   * A debug popup is followed instead of closed. It was not opened by a pointer that has now
+   * moved on -- it belongs to a step the learner is still on, and closing it means every step
+   * that has to scroll closes its own popup: `markDebug` scrolls, the scroll event arrives after
+   * the popup opened, and it is shut again before anyone sees it. Measured 2026-09-05, on the
+   * step that crosses into another file, which always scrolls.
+   */
+  codeArea.addEventListener("scroll", () => {
+    if (debugShown) placeDebugPopup();
+    else closeNote();
+  });
+
+  // A resize moves every line without moving the popup, which is positioned once in fixed
+  // coordinates. Measured 2026-09-05 at 880px: a popup placed at 1600px stayed where it was and
+  // hung 23px off the right edge and 232px below the bottom. Same split as the scroll: a step is
+  // re-placed, a hover popup is closed.
+  window.addEventListener("resize", () => {
+    if (debugShown) placeDebugPopup();
+    else closeNote();
+  });
 
   window.addEventListener("keyup", (ev) => {
     if ((ev as KeyboardEvent).key === "Control") {
@@ -292,9 +430,35 @@ export function createCodePanel(): CodePanel {
       closeNote();
       return;
     }
+    const tag = (document.activeElement as HTMLElement | null)?.tagName;
+    /*
+     * Space steps a debug run; Shift+Space goes back.
+     *
+     * The guard is wider than Alt+Enter's below, which only has to stay out of the question box.
+     * This one also has to survive a focused <button>, because a native button activates on the
+     * Space KEYUP that follows this keydown -- and the button that started the run is holding
+     * focus at exactly that moment. preventDefault here suppresses that synthetic click and the
+     * page scroll in one move. The run also parks focus on the code area, so in practice this
+     * fires with nothing focusable in the way; the guard is what makes it safe when it does not.
+     */
+    if (
+      debugActive &&
+      // These window listeners outlive their panel: the flow discards the study screen by
+      // emptying its container, which detaches the DOM and leaves the listeners attached. The
+      // other branches only repaint a node nobody can see, but this one CONSUMES a key -- a
+      // learner who left mid-run would find Space dead on every screen for the rest of the page.
+      root.isConnected &&
+      e.code === "Space" &&
+      tag !== "INPUT" &&
+      tag !== "TEXTAREA" &&
+      tag !== "SELECT"
+    ) {
+      e.preventDefault();
+      stepListener?.(e.shiftKey ? -1 : 1);
+      return;
+    }
     // Alt+Enter is the path for a learner who is not using a mouse. It must not fire while the
     // caret is in the question box, where Enter belongs to the text.
-    const tag = (document.activeElement as HTMLElement | null)?.tagName;
     if (e.altKey && e.key === "Enter" && tag !== "INPUT" && tag !== "TEXTAREA" && range) {
       e.preventDefault();
       openNoteAt(range[0]);
@@ -421,6 +585,48 @@ export function createCodePanel(): CodePanel {
       if (typeof row?.scrollIntoView === "function") {
         row.scrollIntoView({ block: "center", behavior: "smooth" });
       }
+    },
+    markDebug(startLine, currentLine) {
+      debugStart = startLine;
+      debugCurrent = currentLine;
+      paint();
+      if (currentLine === null) return;
+      // The learner may have scrolled away between steps, and a step they cannot see is not one.
+      // Instant, not smooth: a smooth scroll keeps firing scroll events for hundreds of
+      // milliseconds after the step landed, and each one re-places the popup mid-animation.
+      const row = codeArea.querySelector(`[data-line="${currentLine}"]`);
+      if (typeof row?.scrollIntoView === "function") {
+        row.scrollIntoView({ block: "center", behavior: "auto" });
+      }
+    },
+    setDebugActive(on) {
+      debugActive = on;
+      // Take focus off whatever button started the run. Nothing else on this screen wants Space,
+      // and the code area cannot consume it.
+      if (on && typeof codeArea.focus === "function") codeArea.focus({ preventScroll: true });
+    },
+    onStepKey(cb) {
+      stepListener = cb;
+    },
+    setDebugControl(state, run) {
+      debugPress = run;
+      debugBtn.hidden = state === "hidden";
+      debugBtn.disabled = state === "loading";
+      debugBtn.textContent =
+        state === "running" ? "디버그 중단" : state === "loading" ? "흐름 만드는 중" : "디버그 실행";
+      debugBtn.classList.toggle("lh-cp-debug-btn--on", state === "running");
+    },
+    showDebug(line, view) {
+      if (!view) {
+        debugShown = null;
+        closeNote();
+        return;
+      }
+      // A stepped line may also carry an annotation. Both are about this line, so both are shown,
+      // in one popup, in the order they were written: the standing note first, the run below it.
+      // Placement goes through the same path a scroll uses, so the two cannot drift apart.
+      debugShown = { line, view };
+      placeDebugPopup();
     },
   };
 }

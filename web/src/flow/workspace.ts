@@ -5,6 +5,7 @@
 import { mountCodeproj, type ExchangeEvent, type GeneratedProject } from "../../parts/codeproj/codeproj";
 import type { CodeprojHandle, CodeprojView, ConceptSet } from "../../parts/codeproj/codeproj";
 import type { AnnotationSet } from "../../parts/codeproj/annotations";
+import type { TraceSet } from "../../parts/codeproj/trace";
 import { renderLauncher } from "../../parts/codeproj/launcher";
 import type { AiSession } from "../ai/client";
 import type { ArchivedProject, Proposal, StudyFlow } from "./study";
@@ -147,6 +148,9 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     // Same plain read, same reason: the concepts written for this project belong to it, and
     // reopening one must not spend a call to see them again.
     const concepts = (await flow.readConcepts(project.id)) as ConceptSet | null;
+    // And the walkthroughs already paid for. A run costs a real call to build, so reopening a
+    // project must hand back the ones it already has rather than charging for them twice.
+    const traces = (await flow.readTraces(project.id)) as TraceSet | null;
 
     renderStudyShell();
     activeView = "code";
@@ -155,9 +159,15 @@ export function createWorkspace(cfg: WorkspaceConfig) {
       project: record.data.project as GeneratedProject,
       annotations: annotations ?? undefined,
       concepts: concepts ?? undefined,
+      traces: traces ?? undefined,
       onFileSeen: (path) => void onFileSeen(mine, path),
       onExchange: (event: ExchangeEvent) => recordExchange(mine, event),
       onConcepts: (set) => writeConceptSet(project.id, set),
+      // The first write-back this call site has ever had. Annotations and concepts are built once,
+      // before the learner arrives, so reopening a project never produced anything to store. A
+      // debug run breaks that assumption: it is the learner's to start, from any line, at any
+      // time, including on a project reopened months later.
+      onTraces: (set) => writeTraceSet(project.id, set),
       onConceptProgress: (done, total) => renderTabs(handle, done, total),
     });
     const n = concepts?.entries.length ?? 0;
@@ -172,6 +182,14 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     void serialize(async () => {
       await sessionReady;
       await flow.writeConcepts(id, set);
+    });
+  }
+
+  /** Store the trace layer, on the same terms and for the same reason. */
+  function writeTraceSet(id: string, set: TraceSet): void {
+    void serialize(async () => {
+      await sessionReady;
+      await flow.writeTraces(id, set);
     });
   }
 
@@ -226,6 +244,14 @@ export function createWorkspace(cfg: WorkspaceConfig) {
         void serialize(async () => {
           await sessionReady;
           if (myProjectId) await flow.writeConcepts(myProjectId, set);
+        });
+      },
+      onTraces: (set) => {
+        // Same rule again. A run lands one leg at a time, so this fires several times per run and
+        // each arrival replaces the set -- walking away mid-run keeps the legs that arrived.
+        void serialize(async () => {
+          await sessionReady;
+          if (myProjectId) await flow.writeTraces(myProjectId, set);
         });
       },
       onConceptProgress: (done, total) => renderTabs(handle, done, total),

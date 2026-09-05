@@ -8,6 +8,8 @@
 //   history    one record per study session: what was read, asked and explained
 //   ai-sessions one record per project: which AI session already holds its codebase
 //   annotations one record per project: the explanation layer over its code, keyed by file path
+//   concepts   one record per project: what its codebase teaches, written out as documents
+//   traces     one record per project: predicted execution walkthroughs, keyed by entry point
 //   conversations one record per day: every question and answer, kept verbatim on this machine
 
 import type { IndexEntry, StoragePort, StorageRecord } from "../storage/port";
@@ -21,6 +23,7 @@ export const COLLECTIONS = {
   aiSessions: "ai-sessions",
   annotations: "annotations",
   concepts: "concepts",
+  traces: "traces",
   conversations: "conversations",
 } as const;
 
@@ -96,6 +99,21 @@ export interface AnnotationSetData {
  */
 export interface ConceptSetData {
   entries: unknown[];
+}
+
+/**
+ * The debug traces for one project, keyed by entry point.
+ *
+ * One record per project again, for the annotation layer's reason and one more: a run is keyed by
+ * a file path and a line, and neither half of that can be a record id. The key is a plain field
+ * inside the payload, which has no such constraint.
+ *
+ * Written more than once per project, and unlike the other two layers it is written while the
+ * learner is reading rather than before they arrive: a run is theirs to start, from any line, at
+ * any time, including on a project reopened months later.
+ */
+export interface TraceSetData {
+  runs: Record<string, { status: string; steps: unknown[] }>;
 }
 
 /**
@@ -405,6 +423,36 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
       );
     },
 
+    async readTraces(projectId: string): Promise<TraceSetData | null> {
+      const record = await storage.get<TraceSetData>(COLLECTIONS.traces, projectId);
+      return record?.data ?? null;
+    },
+
+    /**
+     * Replace a project's trace layer.
+     *
+     * Called after every leg lands, not once when a run finishes, so a learner who walks away
+     * mid-run keeps the part that already arrived. Whole-set replace, like the other two layers:
+     * a run is added by writing the set that contains it.
+     */
+    async writeTraces(projectId: string, set: TraceSetData): Promise<void> {
+      const runs = Object.values(set.runs);
+      await storage.put(
+        COLLECTIONS.traces,
+        makeRecord<TraceSetData>(
+          "traces",
+          projectId,
+          {
+            project_id: projectId,
+            runs: runs.length,
+            steps: runs.reduce((n, r) => n + r.steps.length, 0),
+            failed: runs.filter((r) => r.status === "failed").length,
+          },
+          set,
+        ),
+      );
+    },
+
     /**
      * Append one exchange to today's conversation record.
      *
@@ -596,6 +644,7 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         COLLECTIONS.aiSessions,
         COLLECTIONS.annotations,
         COLLECTIONS.concepts,
+        COLLECTIONS.traces,
       ]) {
         await storage.remove(collection, projectId);
       }

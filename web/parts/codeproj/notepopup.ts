@@ -12,8 +12,9 @@ import { el } from "./view";
 export interface NotePopupHandlers {
   /** Collect the annotated range, exactly as the header's own button does. */
   onScrap(range: [number, number]): void;
-  /** Promote this note to a short answer. */
-  onExpand(note: Annotation): void;
+  /** Promote what is on screen to a short answer. Takes a range and a sentence, not a note,
+   * because a debug step has both and is not an annotation. */
+  onExpand(lines: [number, number], what: string): void;
   /**
    * Whether promotion is possible at all, asked when the popup is drawn rather than when it is
    * built: the mount registers its handlers after this exists, so construction time is too early
@@ -24,9 +25,34 @@ export interface NotePopupHandlers {
   onRef(path: string, line?: number): void;
 }
 
+/**
+ * One step of a debug run, ready to draw.
+ *
+ * It arrives already diffed: `changed` per variable is computed by the mount from the neighbouring
+ * step, because the popup has no idea what came before it and the trace model deliberately stores
+ * a full snapshot rather than a delta.
+ */
+export interface DebugView {
+  /** Position in the run, 1-based, and its length. */
+  at: number;
+  total: number;
+  /** The line this step is on, so the footer can collect it when there is no annotation. */
+  line: number;
+  explain: string;
+  vars: { name: string; value: string; scope?: string; changed: boolean }[];
+  /** At the end of a run that stopped before the program did. */
+  truncated: boolean;
+  /** The next file's steps have not arrived yet. */
+  pending?: boolean;
+}
+
 export interface NotePopup {
+  /**
+   * Show an annotation, a debug step, or both on the same line at once. Neither means nothing to
+   * say, and the popup stays closed rather than opening empty.
+   */
+  showFor(note: Annotation | null, anchor: DOMRect, debug?: DebugView): void;
   root: HTMLElement;
-  showFor(note: Annotation, anchor: DOMRect): void;
   hide(): void;
   readonly open: boolean;
   /** True while the pointer is inside the popup, so a mouseout over code does not close it. */
@@ -46,9 +72,86 @@ export function createNotePopup(handlers: NotePopupHandlers): NotePopup {
     hovered = false;
   });
 
-  function render(note: Annotation): void {
-    root.innerHTML = "";
+  /**
+   * The debug half: the step counter, the standing honesty label, the step's sentence, and the
+   * live variable set.
+   *
+   * The label is constant and always shown. A per-step confidence flag was considered and left
+   * out: marking some steps uncertain reads as verification of the ones without a mark, and every
+   * step in a predicted walkthrough is equally a guess.
+   */
+  function renderDebug(debug: DebugView, hasNote: boolean): void {
+    // Only between two things. A divider above nothing is a line for its own sake.
+    if (hasNote) root.appendChild(el("div", "lh-cp-debug-sep"));
 
+    const meta = el("div", "lh-cp-debug-meta");
+    meta.appendChild(el("span", "lh-cp-debug-counter", `${debug.at}/${debug.total}단계`));
+    meta.appendChild(el("span", "lh-cp-debug-predicted", "예측"));
+    root.appendChild(meta);
+
+    root.appendChild(el("p", "lh-cp-debug-what", debug.explain));
+
+    if (debug.pending) {
+      root.appendChild(el("p", "lh-cp-debug-note", "다음 파일의 흐름을 받아오는 중입니다."));
+    } else if (debug.at >= debug.total) {
+      root.appendChild(
+        el(
+          "p",
+          "lh-cp-debug-note",
+          debug.truncated
+            ? "여기까지만 따라갔습니다. 프로그램이 끝난 지점은 아닙니다."
+            : "마지막 단계입니다.",
+        ),
+      );
+    }
+
+    if (debug.vars.length) {
+      const table = el("div", "lh-cp-debug-vars");
+      for (const v of debug.vars) {
+        const name = el("div", "lh-cp-debug-var-name", v.scope ? `${v.scope}.${v.name}` : v.name);
+        const value = el("div", "lh-cp-debug-var-value", v.value);
+        if (v.changed) {
+          name.classList.add("lh-cp-debug-var--changed");
+          value.classList.add("lh-cp-debug-var--changed");
+        }
+        table.appendChild(name);
+        table.appendChild(value);
+      }
+      root.appendChild(table);
+    }
+  }
+
+  function render(note: Annotation | null, debug?: DebugView): void {
+    root.innerHTML = "";
+    root.classList.toggle("lh-cp-note-popup--debug", !!debug);
+
+    if (note) renderNote(note);
+    if (debug) renderDebug(debug, !!note);
+
+    const target: [number, number] = note ? note.target.lines : [debug!.line, debug!.line];
+    const what = note ? note.what : debug!.explain;
+
+    const foot = el("div", "lh-cp-note-foot");
+    // Named exactly as the header button that does the same thing. Two names for one action is
+    // how an interface stops teaching itself.
+    const scrap = el("button", "lh-cp-note-scrap", "스크랩 담기");
+    scrap.addEventListener("click", () => {
+      hide();
+      handlers.onScrap(target);
+    });
+    foot.appendChild(scrap);
+    if (handlers.canExpand()) {
+      const expand = el("button", "lh-cp-note-expand", "더 알아보기");
+      expand.addEventListener("click", () => {
+        hide();
+        handlers.onExpand(target, what);
+      });
+      foot.appendChild(expand);
+    }
+    root.appendChild(foot);
+  }
+
+  function renderNote(note: Annotation): void {
     const head = el("div", "lh-cp-note-head");
     const [lo, hi] = note.target.lines;
     head.appendChild(el("span", "lh-cp-note-where", lo === hi ? `${lo}행` : `${lo}-${hi}행`));
@@ -85,29 +188,11 @@ export function createNotePopup(handlers: NotePopupHandlers): NotePopup {
       }
       root.appendChild(refs);
     }
-
-    const foot = el("div", "lh-cp-note-foot");
-    // Named exactly as the header button that does the same thing. Two names for one action is
-    // how an interface stops teaching itself.
-    const scrap = el("button", "lh-cp-note-scrap", "스크랩 담기");
-    scrap.addEventListener("click", () => {
-      hide();
-      handlers.onScrap(note.target.lines);
-    });
-    foot.appendChild(scrap);
-    if (handlers.canExpand()) {
-      const expand = el("button", "lh-cp-note-expand", "더 알아보기");
-      expand.addEventListener("click", () => {
-        hide();
-        handlers.onExpand(note);
-      });
-      foot.appendChild(expand);
-    }
-    root.appendChild(foot);
   }
 
-  function showFor(note: Annotation, anchor: DOMRect): void {
-    render(note);
+  function showFor(note: Annotation | null, anchor: DOMRect, debug?: DebugView): void {
+    if (!note && !debug) return;
+    render(note, debug);
     // Measured after rendering and before positioning: the popup's height depends on which
     // optional fields this annotation actually has.
     root.hidden = false;
@@ -121,6 +206,7 @@ export function createNotePopup(handlers: NotePopupHandlers): NotePopup {
     root.style.left = `${at.left}px`;
     root.style.top = `${at.top}px`;
     root.classList.toggle("lh-cp-note-popup--above", at.above);
+    root.classList.toggle("lh-cp-note-popup--beside", at.beside);
     root.style.visibility = "";
     open = true;
   }

@@ -8,6 +8,7 @@ import {
   placePopup,
   POPUP_GAP,
   POPUP_MARGIN,
+  POPUP_SIDE_GAP,
   type Annotation,
 } from "./annotations";
 
@@ -147,37 +148,71 @@ describe("buildLineIndex", () => {
   });
 });
 
+/*
+ * The popup goes BESIDE the code, not under it, and falls back to the old below-or-above rule
+ * only when the line is too long to leave room.
+ *
+ * `anchor.width` is the width of the CODE on that line, not of the row: a row is as wide as the
+ * panel, so anchoring to it would put every popup into the fallback. That is why the anchors
+ * below are narrow.
+ */
 describe("placePopup", () => {
   const popup = { width: 320, height: 160 };
   const viewport = { width: 1200, height: 800 };
 
-  it("sits below the anchor when there is room", () => {
+  it("sits beside the code, just past where the line ends", () => {
     const p = placePopup({ left: 400, top: 200, width: 60, height: 20 }, popup, viewport);
+    expect(p.beside).toBe(true);
+    expect(p.left).toBe(400 + 60 + POPUP_SIDE_GAP);
+    // Top-aligned with the line, so the explanation starts level with what it explains.
+    expect(p.top).toBe(200);
     expect(p.above).toBe(false);
-    expect(p.top).toBe(200 + 20 + POPUP_GAP);
-    expect(p.left).toBe(400);
   });
 
-  it("flips above when the anchor is near the bottom", () => {
+  it("does not flip above merely because the line is near the bottom", () => {
+    // Vertical room stopped deciding anything once there is horizontal room: beside the code
+    // nothing is covered, so there is nothing to flip away from.
     const p = placePopup({ left: 400, top: 700, width: 60, height: 20 }, popup, viewport);
+    expect(p.beside).toBe(true);
+    expect(p.above).toBe(false);
+    // Still pulled up to stay on screen.
+    expect(p.top).toBe(viewport.height - popup.height - POPUP_MARGIN);
+  });
+
+  it("falls back under the code when the line runs too far right", () => {
+    // A long line leaves no room beside it. This is the old rule, kept for exactly this case
+    // and for the single-column layout under 900px.
+    const p = placePopup({ left: 100, top: 200, width: 900, height: 20 }, popup, viewport);
+    expect(p.beside).toBe(false);
+    expect(p.top).toBe(200 + 20 + POPUP_GAP);
+    expect(p.left).toBe(100);
+  });
+
+  it("still flips above in the fallback when there is no room below", () => {
+    const p = placePopup({ left: 100, top: 700, width: 900, height: 20 }, popup, viewport);
+    expect(p.beside).toBe(false);
     expect(p.above).toBe(true);
     expect(p.top).toBe(700 - popup.height - POPUP_GAP);
   });
 
   it("keeps the popup inside the right edge", () => {
     const p = placePopup({ left: 1150, top: 100, width: 40, height: 20 }, popup, viewport);
+    expect(p.beside).toBe(false);
     expect(p.left).toBe(viewport.width - popup.width - POPUP_MARGIN);
   });
 
   it("never goes past the left or top margin", () => {
+    // A line scrolled partly out of view has a negative left. Beside it there is plenty of room,
+    // so it takes the side path, and the clamp keeps the top on screen.
     const p = placePopup({ left: -50, top: 4, width: 40, height: 20 }, popup, viewport);
-    expect(p.left).toBe(POPUP_MARGIN);
+    expect(p.left).toBeGreaterThanOrEqual(POPUP_MARGIN);
     expect(p.top).toBeGreaterThanOrEqual(POPUP_MARGIN);
   });
 
-  it("stays below rather than flipping when neither side fits, in a very short viewport", () => {
-    // Nothing fits; the popup must still land somewhere on screen rather than off it.
-    const p = placePopup({ left: 10, top: 40, width: 40, height: 20 }, popup, { width: 400, height: 180 });
+  it("lands on screen even when neither beside nor below fits", () => {
+    // A narrow, short viewport: nothing fits anywhere. The popup must still be reachable.
+    const p = placePopup({ left: 10, top: 40, width: 300, height: 20 }, popup, { width: 400, height: 180 });
+    expect(p.beside).toBe(false);
     expect(p.top).toBeGreaterThanOrEqual(POPUP_MARGIN);
     expect(p.left).toBeGreaterThanOrEqual(POPUP_MARGIN);
   });

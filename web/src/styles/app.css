@@ -969,11 +969,14 @@ body {
    They sit at opposite ends so a mis-click cannot spend one while reaching for the other. */
 .lh-codeproj .lh-cp-note-foot { margin-top: 10px; display: flex; justify-content: space-between; gap: var(--lh-s2); }
 
-/* The two header entry points are labels, not new buttons: the panel head is a single nowrap
-   row with overflow hidden, so a fifth control there would simply be clipped away. */
+/* The two annotation entry points are labels, not new buttons. The head is a nowrap flex row
+   inside a panel that clips its overflow, so it has room for very little -- and the path label
+   is the item that has to give, because it is the only one whose length is unbounded. It
+   truncates; the controls beside it keep their size. */
 #app .lh-cp-path-label {
   background: none; border: none; padding: 0; font: inherit; color: inherit;
   text-align: left; cursor: default;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #app .lh-cp-path-label.lh-cp-path-label--noted { cursor: pointer; text-decoration: underline dotted; text-decoration-color: var(--lh-ink-faint); text-underline-offset: 3px; }
 #app .lh-cp-path-label.lh-cp-path-label--noted:hover { color: var(--lh-primary); }
@@ -985,6 +988,92 @@ body {
 
 .lh-cp-code-line.lh-cp-line-scrapped { box-shadow: inset 2px 0 0 var(--lh-primary-line); background: var(--lh-surface-soft); }
 .lh-cp-code-line.lh-cp-line-scrapped.lh-cp-line-selected { background: var(--lh-primary-soft); }
+
+/* ── 디버그 실행 (FR-24) ─────────────────────────────────────────────────────
+   A fourth channel on the same line, and it has to coexist with the three above. Selection owns
+   the row background, a scrap owns the left rail, an annotation owns the text underline -- so a
+   run takes the two places none of them reach: the empty space to the LEFT of the line number,
+   and the row's RIGHT edge.
+
+   Both markers are pseudo-elements. A real element would mean one more node on every line of a
+   thousand-line file, and it would sit in the row's flex flow, so starting a run would shove all
+   the code sideways. `.lh-cp-line-num` is 48px wide with its digits right-aligned, so the space
+   is already there and already empty. */
+.lh-codeproj .lh-cp-line-num { position: relative; }
+/* Where the learner started it: a hollow ring, quiet, and it stays put for the whole run. */
+.lh-codeproj .lh-cp-code-line.lh-cp-debug-start .lh-cp-line-num::before {
+  content: ""; position: absolute; left: 2px; top: 50%; margin-top: -4px;
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1.5px solid var(--lh-ink-faint); pointer-events: none;
+}
+/* Where it is now: the solid red dot. Nearer the digits so the two never touch. */
+.lh-codeproj .lh-cp-code-line.lh-cp-debug-current .lh-cp-line-num::after {
+  content: ""; position: absolute; left: 13px; top: 50%; margin-top: -4px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--lh-bad); pointer-events: none;
+}
+.lh-codeproj .lh-cp-code-line.lh-cp-debug-current { box-shadow: inset -3px 0 0 var(--lh-bad); }
+/* Both edges at once, because a collected line can also be the one being stepped through. One
+   box-shadow property, two shadows: without this rule the later declaration simply wins. */
+.lh-codeproj .lh-cp-code-line.lh-cp-debug-current.lh-cp-line-scrapped {
+  box-shadow: inset 2px 0 0 var(--lh-primary-line), inset -3px 0 0 var(--lh-bad);
+}
+
+/* The header control. Restates `background` on :hover, or `#app button:hover` takes it and the
+   control floods with the accent -- the defect `tests/accent_contrast.test.ts` exists to catch. */
+#app .lh-codeproj .lh-cp-debug-btn {
+  background: transparent; border: 1px solid var(--lh-line-strong); color: var(--lh-ink-mid);
+  font-size: 11px; letter-spacing: 0.02em; border-radius: var(--lh-r-xs);
+  padding: 2px 8px; white-space: nowrap; cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-debug-btn:hover {
+  color: var(--lh-ink); border-color: var(--lh-primary); background: transparent;
+}
+/* Stopping is the same colour as the dot it removes, so the two read as one thing. */
+#app .lh-codeproj .lh-cp-debug-btn.lh-cp-debug-btn--on { color: var(--lh-bad); border-color: var(--lh-bad-line); }
+#app .lh-codeproj .lh-cp-debug-btn.lh-cp-debug-btn--on:hover { color: var(--lh-bad); border-color: var(--lh-bad); background: transparent; }
+#app .lh-codeproj .lh-cp-debug-btn:disabled { color: var(--lh-ink-faint); cursor: default; }
+#app .lh-codeproj .lh-cp-debug-btn:disabled:hover { color: var(--lh-ink-faint); border-color: var(--lh-line-strong); background: transparent; }
+
+/* The debug half of the popup. Wider than a bare note because it carries a table, and the table
+   is the reason the whole popup moved out from under the code in the first place.
+
+   Capped in height as well, because the variable set GROWS as the walkthrough goes deeper --
+   measured 2026-09-05, step 24 of a real run carried ten bindings and the popup reached 560px,
+   tall enough to be pushed off to the side, land above the code, and cover the project title on
+   the way. The cap also feeds back into placement: `showFor` measures the rendered box, so a
+   shorter popup fits beside the code in more places instead of falling back under it. */
+.lh-codeproj .lh-cp-note-popup.lh-cp-note-popup--debug {
+  max-width: 420px;
+  max-height: 62vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.lh-codeproj .lh-cp-debug-sep { margin: 10px 0 8px; border-top: 1px solid var(--lh-line-soft); }
+.lh-codeproj .lh-cp-debug-meta { display: flex; align-items: baseline; justify-content: space-between; gap: var(--lh-s2); margin-bottom: 6px; }
+/* `--lh-ink-mid`, not `--lh-ink-faint`: measured 2026-09-05 the faint token put this at 4.03:1 on
+   the popup surface in the dark palette, under the 4.5 bar. Mid clears it on every surface in both
+   themes and is still a step quieter than the step's own sentence. */
+.lh-codeproj .lh-cp-debug-counter { font-family: var(--lh-font-mono); font-size: 11px; color: var(--lh-ink-mid); font-variant-numeric: tabular-nums; }
+/* Always present, never per-step. Marking only some steps as uncertain would read as a promise
+   about the others, and every step in a predicted walkthrough is equally a guess. */
+.lh-codeproj .lh-cp-debug-predicted {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--lh-amber-ink); background: var(--lh-amber-bg);
+  border: 1px solid var(--lh-amber-line); border-radius: var(--lh-r-xs); padding: 1px 7px;
+}
+.lh-codeproj .lh-cp-debug-what { margin: 0; }
+.lh-codeproj .lh-cp-debug-note { margin: 8px 0 0; font-size: 12px; color: var(--lh-ink-mid); }
+/* Name and value, and both wrap: a value is model prose and can be any length, and a name can
+   be a dotted path. min-width:0 because a grid item defaults to its own content's width. */
+.lh-codeproj .lh-cp-debug-vars {
+  margin-top: 10px; display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 4px var(--lh-s3); font-size: 12.5px;
+}
+.lh-codeproj .lh-cp-debug-var-name { font-family: var(--lh-font-mono); color: var(--lh-ink-mid); overflow-wrap: anywhere; }
+.lh-codeproj .lh-cp-debug-var-value { font-family: var(--lh-font-mono); color: var(--lh-ink-soft); overflow-wrap: anywhere; }
+/* What moved at this step. The cumulative set is what is shown; this is what makes it readable. */
+.lh-codeproj .lh-cp-debug-var--changed { color: var(--lh-primary-strong); font-weight: 700; }
 
 .lh-cp-scrap-box { padding: 0 var(--lh-s4) var(--lh-s2); display: grid; gap: var(--lh-s1); }
 .lh-cp-scrap-bar { display: flex; align-items: baseline; gap: var(--lh-s2); }

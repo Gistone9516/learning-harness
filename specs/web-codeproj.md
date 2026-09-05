@@ -119,8 +119,11 @@ The generator system preamble forces the §1 `GeneratedProject` JSON only (no pr
 `web/parts/codeproj/codeproj.ts` header (Web SoT §1):
 - `WHAT` AI-generated project, read-only comprehension with session-based click explanations.
 - `DEPS` shell + `web/src/ai` (ai_server client) + `web/src/highlight` (own highlighter; no third-party editor, no CDN) + `web/src/storage` (record store port).
-- `INPUT` `{topic, scale, seed?}`; consumes `GeneratedProject`.
-- `EVENTS` file-seen flags (and, fast-follow, scored-task verdicts).
+- `INPUT` `{topic, scale, seed?}`; consumes `GeneratedProject`, plus the three injected layers
+  `annotations` (AnnotationSet), `concepts` (ConceptSet) and `traces` (TraceSet) — rendered, never
+  stored here, because every record is keyed by a project id only the flow holds.
+- `EVENTS` file-seen flags; `onAnnotations` / `onConcepts` / `onTraces` hand each layer back to the
+  owner as it is built (and, fast-follow, scored-task verdicts).
 - `AI` yes — generation (`/ai` new session) + explanations (`/ai` resume).
 - `CONSTRAINTS` `subject-agnostic, secrets-gated, session-resume`.
 - `DEMO` standalone with a canned `GeneratedProject` (no live AI) for the tree + viewer + lens UI.
@@ -157,3 +160,42 @@ the generated codebase teaches, read in a `개념` view that shares the study gr
   time. Reopening an archived project reads it and makes no call.
 - **`mountCodeproj` returns a handle** (`setView`, `hasConcepts`). The view tabs belong to whoever
   owns the surrounding chrome; the part owns only the panels.
+
+## 디버그 실행 (FR-24)
+
+A third AI-written layer: a step-by-step walkthrough of where control goes from a line the learner
+picks, replayed locally. **The code does not run.** Nothing in the browser can execute a generated
+FastAPI project, so this is the model's *prediction* of an execution order — which is why the popup
+carries a standing `예측` label and why every name in `trace.ts` says trace and none says execution.
+
+- **Legs, one file each.** A leg restates one file with `000|` line-number prefixes and asks for the
+  steps inside it; when control leaves, the model names the destination in `leaves_to` and the next
+  leg opens there. Within a leg the model is never asked for a path per step, so a path can be
+  invented in exactly one place — which is the one place the parser checks it.
+- **Measured 2026-09-05** against a live session holding a 16-file FastAPI project
+  (`app/api/routes.py:93`, effort medium): one leg 14.1s, 8% of the 180s follow-up ceiling. Eight
+  steps asked, two returned — layered code crosses files constantly, so a leg is worth about two
+  steps. Every line inside the file, and `leaves_to` came back structured and semantically right
+  (`app/api/deps.py:46`, exactly the `def pagination_params(` it named). Hence `TRACE_MAX_LEGS = 8`,
+  `TRACE_STEP_CAP = 24`.
+- **The first leg blocks, the rest prefetch.** The learner waits once (~15s) and then steps with no
+  network at all; later legs land behind them and extend the run in place. Measured: 2 → 18 → 24
+  steps while the learner sat on step 1.
+- **A trace is a chain, so a bad step CUTS it** rather than being dropped and stepped over the way a
+  bad annotation is. Skipping a link makes the pointer jump with nothing said about why control
+  moved. Out-of-range lines and unknown `leaves_to` paths are never clamped or repaired.
+- **`truncated` is load-bearing.** A run that hit a budget, lost a later leg, or ended on a leg that
+  said neither `done` nor `leaves_to` stopped before the program did, and the popup must say so —
+  otherwise a walkthrough that ends mid-statement reads as a finished one.
+- **Failure is asymmetric.** The first leg failing leaves nothing to walk, so the run is `failed`
+  and a retry is offered; a later leg failing leaves a real, shorter walkthrough worth reading.
+- **Variables are stored as a full snapshot per step, never a delta.** A delta the model carries
+  forward compounds, and "forgot to mention it" is indistinguishable from "unchanged". The diff is
+  derived at render time (`changedSince`), like `conceptProgress` and `buildLineIndex`.
+- **Runs are keyed by entry point inside one per-project record** (`traces`), because neither half
+  of `path:line` can be a record id. A cached run replays with zero calls, including on a project
+  reopened months later — which is why this is the first layer whose owner needs a write-back on
+  the reopen path.
+- **The popup is the annotation popup.** One element, one owner: a stepped line that also carries a
+  note shows both, the note first. While a step is on screen the hover machinery neither opens nor
+  closes it, and a scroll or resize re-places it rather than dismissing it.
