@@ -96,8 +96,46 @@ An explanation is not free prose. The model returns `{blocks: [...]}` and the re
 
 ## 4. Difficulty = project scale
 
-- A `scale` parameter maps to generation targets (this is the red-pen detail): e.g. `small` ≈ 3–6 files / ≤ ~300 lines; larger tiers increase file count and total lines, bounded by the 1M context window and per-call token budget.
+- A `scale` parameter maps to generation targets. Current bands, from `SCALE_GUIDE` in
+  `prompts.ts`: `small` 6-9 files / ~500 lines, `medium` 10-16 / ~1100, `large` 18-30 / ~2000.
+  (They were 3-6 / ≤300 for `small` until 2026-09-02, when a measured run showed six files is the
+  floor `QUALITY_CLAUSE` itself implies — the old range left no room for domain code at all.)
 - Scale is the only difficulty axis in v1 (more files, more cross-file flow to trace).
+- **The learner's pick is a recommendation; the pre-flight assessment settles it** (§4.1). What
+  generation is handed is still a hard bound — that sentence is a dated fix (2026-09-02: a `small`
+  asking 6-9 files returned 16) and softening it would reinstate the overshoot. Discretion sits in
+  front of generation so generation itself stays deterministic.
+
+### 4.1 Pre-flight assessment (FR-25)
+
+One short call before the expensive one, added 2026-09-10 after a learner lost two or three
+attempts of tens of minutes each and could not tell why any of them failed.
+
+- **It judges buildability, not worth**: does a layered codebase fall out of this sentence — entry
+  point, domain, storage, config in separate files, with tests and a README. The shape that fails
+  is a topic naming a practice rather than a program (`무중단 배포 및 Chaos Engineering 실습`):
+  `QUALITY_CLAUSE`'s layering has nothing to attach to, so the model must invent a subject first.
+- **It errs toward allowing.** Only a refusal that also says why is honoured; an ambiguous or
+  unreadable verdict passes. And it **fails open** in every direction — a failed call, unparseable
+  JSON, or a refusal with no reason all become `go` with the learner's own scale. A gate that can
+  lock someone out of generating on its own malfunction is a worse failure than the one it prevents.
+- **A refusal owes the learner something to press**: the reason, and two or three complete topic
+  sentences that can be pasted straight in. Advice they have to rewrite is a second puzzle.
+- **Measured 2026-09-10** against the live model: 11.7s to refuse the real failing topic with
+  three usable alternatives; 6.9s to pass a normal REST API untouched; 7.4s to pass a trivial
+  calculator while lowering `large` to `small` with a stated reason. Set against a generation whose
+  only measured full run is 279s.
+- Evidence: `Coding-GO/docs/verification/2026-09-10-fr25/`. Re-runnable with
+  `LH_LIVE=1 npx vitest run parts/codeproj/assess.live.test.ts`.
+
+### 4.2 A failed generation says which failure it was
+
+`generateProject` returns a reason, not a bare null: `call` (transport, carrying the server's own
+message), `timeout` (split out because it is the one a learner can act on — smaller scale, narrower
+topic), `parse` (prose instead of JSON), `shape` (JSON about something else), `empty` (agreed to
+the schema and filled in no files, which used to be a *success* that rendered an empty file tree).
+The screen keeps the elapsed clock and the chosen scale on a failure; both used to be wiped, so
+"it failed" arrived without even the facts already on screen.
 
 ---
 
@@ -184,6 +222,19 @@ carries a standing `예측` label and why every name in `trace.ts` says trace an
 - **A trace is a chain, so a bad step CUTS it** rather than being dropped and stepped over the way a
   bad annotation is. Skipping a link makes the pointer jump with nothing said about why control
   moved. Out-of-range lines and unknown `leaves_to` paths are never clamped or repaired.
+- **Wiring is bundled into one step, not walked** (user directive 2026-09-10). A step is spent only
+  where the reader's understanding of the flow changes. Signatures, parameter defaults, injected
+  dependencies, `self._x = x` plumbing, imports, definitions that are not yet called, and
+  conditions that do not fire are collapsed into a single step that says what came out of them,
+  and `leaves_to` does not follow wiring into another file. It bundles and says so; it never drops
+  silently, which would be the pointer jump the rule above forbids.
+  Measured on two stored runs before the change: a FastAPI walkthrough reached its service logic
+  only at step 16 of 24, with 18 of 32 steps across two runs sitting on wiring; and a Node gateway
+  run spent **all 23 of its steps** on imports and function definitions without reaching a single
+  line of what the program does. The two fail differently, which is why the prompt names module
+  load separately and says a definition is entered when it is *called*, not where it sits.
+  The per-leg and per-run budgets above were measured under the previous prompt and have not been
+  re-measured since.
 - **`truncated` is load-bearing.** A run that hit a budget, lost a later leg, or ended on a leg that
   said neither `done` nor `leaves_to` stopped before the program did, and the popup must say so —
   otherwise a walkthrough that ends mid-statement reads as a finished one.

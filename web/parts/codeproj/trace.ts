@@ -88,6 +88,14 @@ export function traceKey(path: string, line: number): string {
  * is what sets the leg budget below: at four legs a run would end after eight steps, well short
  * of a walkthrough. At 14s each, and with every leg after the first prefetched while the learner
  * reads, more legs cost wall-clock only on the one they are waiting for.
+ *
+ * STALE IN ONE RESPECT, 2026-09-10. The prompt changed under these numbers: it now bundles wiring
+ * and module loading into one step instead of walking them (see the FR-24 block in `prompts.ts`).
+ * The 14.1s and the 180s headroom still hold -- neither depends on step selection. The "two steps
+ * per leg" does not: the two steps that run produced were a signature and a `Depends` line, and
+ * both are now bundled. Whether a leg is worth more useful steps, fewer total ones, or crosses
+ * fewer files has NOT been re-measured, so treat TRACE_MAX_LEGS below as inherited rather than
+ * currently evidenced.
  */
 
 /** How many steps one run may have, across every file it visits. A reading limit, not a cost one. */

@@ -39,58 +39,79 @@ describe("parseProject", () => {
     entrypoints: ["src/main.py"],
   });
 
+  /** Narrow the union once, so each case reads as one assertion rather than three. */
+  const ok = (text: string) => {
+    const r = parseProject(text);
+    if (!r.ok) throw new Error(`expected a project, got ${r.reason} (${r.detail ?? ""})`);
+    return r.project;
+  };
+  const rejected = (text: string) => {
+    const r = parseProject(text);
+    if (r.ok) throw new Error("expected a rejection, got a project");
+    return r;
+  };
+
   it("parses plain JSON", () => {
-    const p = parseProject(VALID_JSON);
-    expect(p).not.toBeNull();
-    expect(p!.title).toBe("MyApp");
-    expect(p!.files).toHaveLength(2);
-    expect(p!.entrypoints).toEqual(["src/main.py"]);
+    const p = ok(VALID_JSON);
+    expect(p.title).toBe("MyApp");
+    expect(p.files).toHaveLength(2);
+    expect(p.entrypoints).toEqual(["src/main.py"]);
   });
 
   it("strips ```json fences", () => {
-    const fenced = "```json\n" + VALID_JSON + "\n```";
-    const p = parseProject(fenced);
-    expect(p).not.toBeNull();
-    expect(p!.title).toBe("MyApp");
+    expect(ok("```json\n" + VALID_JSON + "\n```").title).toBe("MyApp");
   });
 
   it("strips plain ``` fences", () => {
-    const fenced = "```\n" + VALID_JSON + "\n```";
-    const p = parseProject(fenced);
-    expect(p).not.toBeNull();
+    expect(ok("```\n" + VALID_JSON + "\n```").title).toBe("MyApp");
   });
 
-  it("returns null on invalid JSON", () => {
-    expect(parseProject("not json")).toBeNull();
+  // The three rejections below are the whole point of the reason field. Before 2026-09-10 they
+  // were one `null`, so a learner who waited minutes was told only that it had not worked -- and
+  // so was anyone reading the code afterwards.
+  it("says `parse` when the reply is prose rather than JSON", () => {
+    const r = rejected("죄송하지만 그 주제로는 만들 수 없습니다.");
+    expect(r.reason).toBe("parse");
+    // The parser's own message, so a truncated reply reads differently from prose.
+    expect(r.detail).toBeTruthy();
   });
 
-  it("returns null when required fields are missing", () => {
-    expect(parseProject(JSON.stringify({ title: "X" }))).toBeNull();
-    expect(parseProject(JSON.stringify({ title: "X", summary: "Y" }))).toBeNull();
-    expect(parseProject(JSON.stringify({ title: "X", summary: "Y", files: "bad" }))).toBeNull();
+  it("says `shape` when it is JSON about something else, and names the keys it did send", () => {
+    const r = rejected(JSON.stringify({ error: "cannot", explanation: "too vague" }));
+    expect(r.reason).toBe("shape");
+    expect(r.detail).toBe("error, explanation");
+  });
+
+  it("says `shape` for each missing required field", () => {
+    expect(rejected(JSON.stringify({ title: "X" })).reason).toBe("shape");
+    expect(rejected(JSON.stringify({ title: "X", summary: "Y" })).reason).toBe("shape");
+    expect(rejected(JSON.stringify({ title: "X", summary: "Y", files: "bad" })).reason).toBe("shape");
   });
 
   it("filters out malformed file entries but keeps valid ones", () => {
-    const raw = JSON.stringify({
-      title: "T",
-      summary: "S",
-      files: [
-        { path: "ok.ts", content: "// ok" },
-        { missing_path: true, content: "bad" },
-        42,
-      ],
-    });
-    const p = parseProject(raw);
-    expect(p).not.toBeNull();
-    expect(p!.files).toHaveLength(1);
-    expect(p!.files[0].path).toBe("ok.ts");
+    const p = ok(
+      JSON.stringify({
+        title: "T",
+        summary: "S",
+        files: [{ path: "ok.ts", content: "// ok" }, { missing_path: true, content: "bad" }, 42],
+      }),
+    );
+    expect(p.files).toHaveLength(1);
+    expect(p.files[0].path).toBe("ok.ts");
+  });
+
+  it("refuses a project with no usable files instead of returning an empty one", () => {
+    // This used to be a SUCCESS: `files: []` satisfies every type check above, so the screen got
+    // a valid GeneratedProject, rendered an empty file tree, and read as a bug somewhere else.
+    expect(rejected(JSON.stringify({ title: "T", summary: "S", files: [] })).reason).toBe("empty");
+    const allBad = rejected(JSON.stringify({ title: "T", summary: "S", files: [42, { nope: 1 }] }));
+    expect(allBad.reason).toBe("empty");
+    expect(allBad.detail).toContain("2");
   });
 
   it("handles missing entrypoints gracefully", () => {
-    const raw = JSON.stringify({ title: "T", summary: "S", files: [{ path: "a.ts", content: "" }] });
-    const p = parseProject(raw);
-    expect(p).not.toBeNull();
-    expect(p!.entrypoints).toBeUndefined();
+    const p = ok(JSON.stringify({ title: "T", summary: "S", files: [{ path: "a.ts", content: "" }] }));
+    expect(p.entrypoints).toBeUndefined();
   });
 });
 
@@ -284,6 +305,9 @@ describe("explain", () => {
 // ── generateProject (fake session) ───────────────────────────────────────────
 
 describe("generateProject", () => {
+  const reply = (over: Record<string, unknown>) =>
+    makeSession(() => ({ ok: true, text: "", session_id: "s", error: null, ...over }) as any);
+
   it("returns a GeneratedProject on success", async () => {
     const canned: GeneratedProject = {
       title: "Todo App",
@@ -291,39 +315,60 @@ describe("generateProject", () => {
       files: [{ path: "app.py", content: "# app" }],
       entrypoints: ["app.py"],
     };
-    const session = makeSession(() => ({
-      ok: true,
-      text: JSON.stringify(canned),
-      session_id: "sess-gen",
-      error: null,
-    }));
-
-    const result = await generateProject(session, { topic: "todo app", scale: "small" });
-    expect(result).not.toBeNull();
-    expect(result!.title).toBe("Todo App");
-    expect(result!.files[0].path).toBe("app.py");
+    const result = await generateProject(reply({ text: JSON.stringify(canned) }), {
+      topic: "todo app",
+      scale: "small",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.project.title).toBe("Todo App");
+    expect(result.project.files[0].path).toBe("app.py");
   });
 
-  it("returns null when AI response is not ok", async () => {
+  // Four failures that used to be one `null`. Each wants a different response from the learner,
+  // which is why each has to arrive distinguishable.
+  it("reports a transport failure as `call`, carrying the server's own message", async () => {
+    const session = makeSession(() => ({ ok: false, text: "", session_id: null, error: "HTTP 502" }));
+    const result = await generateProject(session, { topic: "x", scale: "small" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("call");
+    expect(result.detail).toBe("HTTP 502");
+  });
+
+  it("splits a timeout out of the generic bucket, because it is the actionable one", async () => {
+    // `ai.py` reports its own ceiling this way. A learner can respond to it -- narrower topic,
+    // smaller scale -- which is not true of the others.
     const session = makeSession(() => ({
       ok: false,
       text: "",
       session_id: null,
-      error: "error",
+      error: "Timeout after 1800s",
     }));
-    const result = await generateProject(session, { topic: "x", scale: "small" });
-    expect(result).toBeNull();
+    const result = await generateProject(session, { topic: "x", scale: "large" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("timeout");
   });
 
-  it("returns null when response text is not valid GeneratedProject JSON", async () => {
-    const session = makeSession(() => ({
-      ok: true,
-      text: "Sorry, I cannot help with that.",
-      session_id: "s",
-      error: null,
-    }));
-    const result = await generateProject(session, { topic: "x", scale: "small" });
-    expect(result).toBeNull();
+  it("reports prose as `parse`", async () => {
+    const result = await generateProject(reply({ text: "Sorry, I cannot help with that." }), {
+      topic: "x",
+      scale: "small",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("parse");
+  });
+
+  it("reports a well-formed answer about the wrong thing as `shape`", async () => {
+    const result = await generateProject(reply({ text: JSON.stringify({ answer: "no" }) }), {
+      topic: "x",
+      scale: "small",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("shape");
   });
 
   it("parses fenced JSON from generation response", async () => {
@@ -332,15 +377,11 @@ describe("generateProject", () => {
       summary: "Calculator.",
       files: [{ path: "calc.py", content: "# calc" }],
     });
-    const session = makeSession(() => ({
-      ok: true,
-      text: "```json\n" + canned + "\n```",
-      session_id: "s2",
-      error: null,
-    }));
-    const result = await generateProject(session, { topic: "calculator", scale: "small" });
-    expect(result).not.toBeNull();
-    expect(result!.title).toBe("Calc");
+    const result = await generateProject(reply({ text: "```json\n" + canned + "\n```" }), {
+      topic: "calculator",
+      scale: "small",
+    });
+    expect(result.ok && result.project.title).toBe("Calc");
   });
 });
 

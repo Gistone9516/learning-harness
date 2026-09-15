@@ -114,6 +114,63 @@ export function buildGeneratePrompt(input: GenerateInput): string {
     seed
   );
 }
+// ── 주제 사전 판정 (FR-25) ───────────────────────────────────────────────────
+//
+// One short call before the expensive one. Generation is `xhigh` and takes minutes -- the only
+// measured full run is 279s for 14 files (2026-09-02) -- and until 2026-09-10 a topic it could
+// not build burned that whole wait and then said one generic sentence. A learner reported losing
+// two or three attempts of tens of minutes each that way.
+//
+// The judgement is narrow on purpose: not "is this a good thing to learn", which is not the
+// model's call, but "does a layered codebase fall out of this sentence". `무중단 배포 및 Chaos
+// Engineering 실습` is the shape that fails -- it names a practice to carry out, not a program
+// that does something, so QUALITY_CLAUSE's entry point / domain / storage / config layering has
+// nothing to attach to and the model has to invent a subject before it can start.
+//
+// The scale comes back from here too. The learner's pick is a recommendation and the model may
+// move it, but generation itself keeps treating whatever scale it is handed as a hard bound --
+// that sentence is a dated fix (2026-09-02: a `small` asking 6-9 files returned 16) and softening
+// it would reinstate the overshoot. Discretion moves in front of generation; generation stays
+// deterministic.
+
+export function buildAssessSystem(): string {
+  return [
+    "너는 학습용 프로젝트 생성을 시작하기 전에, 주어진 주제로 코드베이스를 만들 수 있는지 판정한다.",
+    "",
+    "[판정 기준]",
+    "만들 수 있는 주제는 '무엇을 하는 프로그램'이다. 진입점, 도메인·서비스 로직, 저장소, 설정이",
+    "각각 다른 파일로 갈라지고, 테스트와 README가 붙는 형태로 떨어져야 한다.",
+    "만들 수 없는 주제는 이런 것들이다.",
+    "- 프로그램이 아니라 운영 방식이나 실습 과정을 가리키는 것 (배포 절차, 장애 주입 훈련, 성능 튜닝 실습)",
+    "- 도메인이 없어서 무엇을 다루는 프로그램인지 정해지지 않는 것",
+    "- 언어나 라이브러리 자체를 익히는 것처럼, 코드베이스가 아니라 예제 모음이 되는 것",
+    "- 여러 대의 장비나 외부 인프라가 있어야만 성립하는 것",
+    "판정이 애매하면 만들 수 있다고 본다. 막는 것은 확실히 안 되는 경우뿐이다.",
+    "",
+    "[규모]",
+    "학습자가 고른 규모는 권장일 뿐이다. 주제에 견주어 맞지 않으면 네가 조정하고 왜인지 밝혀라.",
+    "small은 6~9파일, medium은 10~16파일, large는 18~30파일이다.",
+    "주제가 담고 있는 책임이 적으면 내리고, 계층이 여럿 필요하면 올린다.",
+    "",
+    "[막을 때]",
+    "왜 안 되는지 한 문장으로 말하고, 학습자의 의도를 최대한 살린 대안 주제를 2~3개 준다.",
+    "대안은 그대로 입력하면 바로 생성되는 완성된 문장이어야 한다. 조언이 아니라 붙여넣을 문장이다.",
+    "",
+    "[출력]",
+    'JSON 하나만 출력한다. {"verdict":"go"|"reword","scale":"small"|"medium"|"large",',
+    '"scale_reason":"한 문장 또는 빈 문자열","why":"막은 이유 한 문장 또는 빈 문자열",',
+    '"suggestions":["대안 주제 문장"]}',
+    "verdict가 go면 why는 빈 문자열이고 suggestions는 빈 배열이다.",
+    "규모를 학습자 선택 그대로 둘 때는 scale_reason을 빈 문자열로 둔다.",
+    "설명 문장이나 코드펜스 없이 JSON만 출력한다.",
+  ].join("\n");
+}
+
+export function buildAssessPrompt(input: GenerateInput): string {
+  const seed = input.seed ? `\n제약/스택: ${input.seed}` : "\n제약/스택: (지정 없음)";
+  return `[주제 판정]\n주제: ${input.topic}\n학습자가 고른 규모: ${input.scale}${seed}`;
+}
+
 /**
  * System clause for a reseed: put a codebase back into a fresh session so questions can carry on.
  *
@@ -312,6 +369,44 @@ export function buildConceptDocPrompt(seed: { area: string; concept_id: string; 
 // place, `leaves_to`, which is the one place the parser checks. Asking for a path on every step
 // would open the same hallucination surface once per step and give the parser nothing better to
 // check it against.
+//
+// WIRING IS COLLAPSED INTO ONE STEP (user directive 2026-09-10, measured the same day).
+//
+// The first version of this prompt said "실제로 실행되는 줄만 단계로 삼는다 ... 선언만 있고
+// 지나가지 않는 줄은 넣지 마라", and the model obeyed it exactly while still spending most of a
+// walkthrough on wiring -- because the rule filtered the wrong axis. `def list_overdue_loans(`
+// and `limit: int = Query(default=20)` DO execute in Python: the decorator runs, the default is
+// evaluated, FastAPI resolves the Depends before the body. They are executing lines, so nothing
+// forbade them.
+//
+// Measured on two stored runs, and they fail in two different ways.
+//
+// `state/traces/prj-mtmhonko-n82lu6.json` (FastAPI, 32 steps across two runs): 8 landed on a
+// signature or parameter default, 2 on `self._x = x` constructor plumbing, 5 on an `if x is not
+// None:` that did not fire, 2 on a type annotation with an empty initialiser. 14 of 32 reached a
+// line that computed or called anything, and the 24-step run did not arrive at the service logic
+// until step 16.
+//
+// `state/traces/prj-mtnxg62p-jie43p.json` (a Node gateway, one 23-step run started at
+// `src/server.js:1`) is worse and is NOT the same failure: every one of its 23 steps is module
+// loading. It follows `import` after `import`, narrates `function readInt(`, `function
+// serialize(`, `function formatLabels(` as they are merely defined, and repeats
+// `metrics.js:11` twice. It never reaches a single line of what the gateway does. A rule written
+// only against the FastAPI case would not have caught this one, which is why the wording below
+// names module load explicitly and says to enter a definition when it is CALLED, not where it
+// sits.
+//
+// So the axis is not "does this line execute" but "does the reader's understanding of the flow
+// change here". Wiring is bundled into one step that says what came out of it, and the run moves
+// on to the line that does something. Two consequences worth keeping in mind when editing:
+//   - It must BUNDLE, never silently drop. A trace is a chain; a pointer that jumps with nothing
+//     said is the defect `parseTraceLeg` refuses to create by cutting instead of skipping.
+//   - `leaves_to` is told not to follow wiring into another file. That is what removes the
+//     deps.py detour above -- five steps and a file boundary spent resolving two default values.
+//
+// The word for this is 묶다, never 생략: AUDIENCE_CLAUSE already uses 생략 to forbid shortening
+// the explanation of a step that IS narrated, and one word doing both jobs in the same bundle
+// would leave the model guessing which it meant.
 
 /**
  * The trace pass predicts an order of execution over code that already exists, so QUALITY_CLAUSE
@@ -326,6 +421,13 @@ export function buildTraceSystem(): string {
     "Do not modify, rewrite, improve or extend the code.\n" +
     "표준 라이브러리와 프레임워크 내부로는 들어가지 마라. 그런 호출은 한 단계로 요약하고, " +
     "이 프로젝트에 실제로 있는 파일일 때만 그 파일로 넘어가라.\n" +
+    "한 단계는 흐름에 대한 이해가 그 줄에서 달라질 때만 쓴다. 값을 자리에 꽂기만 하는 배선은 " +
+    "한 단계로 묶는다. 함수 시그니처와 매개변수 기본값, 프레임워크가 본문 실행 전에 채워 주는 " +
+    "의존성, 생성자가 인자를 필드로 옮기는 줄이 그렇다.\n" +
+    "모듈이 적재되는 과정도 배선이다. import, 함수와 클래스가 정의되기만 하는 줄, 모듈 수준 " +
+    "상수 준비를 한 단계로 묶고, 프로그램이 실제로 일을 시작하는 지점부터 따라가라. " +
+    "정의를 만나면 그 자리에서 서술하지 말고, 그것이 실제로 호출될 때 따라 들어간다.\n" +
+    "묶을 때 말없이 건너뛰지는 마라. 그 한 단계에서 무엇이 준비되었는지 밝힌다.\n" +
     "각 단계는 그 줄에서 일어나는 일 한 문장과, 그 시점에 살아 있는 변수와 상태의 전체 목록이다.\n" +
     "매 단계 전체 목록을 다시 적어라. 바뀐 것만 적지 마라. 값이 그대로인 변수도 다시 적는다.\n" +
     "Write every sentence in Korean. Leave symbol names, paths and code fragments as they are." +
@@ -367,7 +469,15 @@ export function buildTraceLegPrompt(leg: {
     `${numbered}\n\n` +
     carried +
     `${leg.startLine}행에서 시작해 이어질 단계를 최대 ${leg.steps}개까지 서술하라.\n` +
-    "실제로 실행되는 줄만 단계로 삼는다. 빈 줄, 닫는 괄호, 선언만 있고 지나가지 않는 줄은 넣지 마라.\n" +
+    "실행되는 줄이라고 전부 단계가 되지는 않는다. 빈 줄과 닫는 괄호는 넣지 마라.\n" +
+    "시그니처·매개변수 기본값·의존성 주입·필드 대입처럼 값을 자리에 꽂기만 하는 줄, import와 " +
+    "정의만 하고 아직 부르지 않는 함수·클래스 줄, 그리고 확인만 하고 아무 일도 일어나지 않는 " +
+    "조건 줄이 이어지면, 묶어서 한 단계로 만들고 그 단계는 배선을 촉발한 줄에 둔다. " +
+    "그 다음 단계는 실제로 일하는 줄이다.\n" +
+    "시작 줄이 import나 정의라면 거기서부터 읽어 내려가지 말고, 이 파일이 실제로 일을 시작하는 " +
+    "지점을 찾아 그곳을 첫 단계로 삼아라.\n" +
+    "배선을 따라가려고 다른 파일로 넘어가지 마라. leaves_to는 실제로 일이 일어나는 곳에만 쓴다.\n" +
+    "같은 줄을 연달아 두 번 단계로 삼지 마라.\n" +
     "이 파일을 벗어나 아래 목록의 다른 파일로 넘어가면, 넘어가기 직전 단계까지만 적고 " +
     "leaves_to에 그 파일의 경로와 줄을 적어라. 경로는 아래 목록의 문자열을 그대로 쓴다.\n" +
     `이 프로젝트의 파일: ${leg.paths.join(", ")}\n` +

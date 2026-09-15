@@ -51,8 +51,8 @@ describe("generation quality clause (C8)", () => {
 
   it("sends the clause on a real generation call", async () => {
     const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
-    const project = await generateProject(new AiSession(client), { topic: "메모 앱", scale: "small" });
-    expect(project?.title).toBe("T");
+    const result = await generateProject(new AiSession(client), { topic: "메모 앱", scale: "small" });
+    expect(result.ok && result.project.title).toBe("T");
     expect(sent[0].system).toContain("Code quality requirements");
     expect(sent[0].session_id).toBeNull();      // generation mints the session
   });

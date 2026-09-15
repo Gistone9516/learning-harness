@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
 import { traceRun } from "./session";
+import { buildTraceLegPrompt, buildTraceSystem } from "./prompts";
 import { TRACE_MAX_LEGS, TRACE_STEP_CAP, type TraceRun } from "./trace";
 import type { GeneratedProject } from "./model";
 
@@ -86,6 +87,78 @@ describe("one file, one leg", () => {
     await traceRun(session, PROJECT, ENTRY, () => {});
     expect(sent[0].session_id).toBe("existing-sid");
     expect(sent[0].effort).toBe("medium");
+  });
+});
+
+describe("what earns a step (user directive 2026-09-10)", () => {
+  // Nothing pinned the prompt's step-selection rule before this, and that is how the first
+  // version went wrong unnoticed: it said "실제로 실행되는 줄만 단계로 삼는다", the model obeyed
+  // it exactly, and a 24-step run still reached the service logic only at step 16. Measured on
+  // `state/traces/prj-mtmhonko-n82lu6.json`: 18 of 32 steps sat on a signature, a parameter
+  // default, constructor plumbing, or a condition that did not fire.
+  const legPrompt = () =>
+    buildTraceLegPrompt({
+      path: "app.py",
+      content: lines(12, "app"),
+      startLine: 3,
+      carried: [],
+      steps: 8,
+      paths: ["app.py", "service.py"],
+    });
+
+  it("tells the model to bundle wiring instead of stepping through it", () => {
+    const prompt = legPrompt();
+    for (const category of ["시그니처", "기본값", "의존성", "대입"]) {
+      expect(prompt, `wiring category missing: ${category}`).toContain(category);
+    }
+    expect(prompt).toMatch(/묶어서 한 단계/);
+  });
+
+  it("covers module loading, which is a different waste from the wiring one", () => {
+    // `state/traces/prj-mtnxg62p-jie43p.json`: all 23 steps of a real run were imports and
+    // function definitions, and it never reached what the program does. A rule written only
+    // against the FastAPI dependency case does not catch this.
+    expect(legPrompt()).toContain("import");
+    expect(buildTraceSystem()).toMatch(/모듈이 적재되는 과정도 배선이다/);
+    // A definition is entered when it is called, not where it sits.
+    expect(buildTraceSystem()).toMatch(/실제로 호출될 때 따라 들어간다/);
+  });
+
+  it("does not start reading downwards when the chosen line is an import or a definition", () => {
+    // The measured run was started at `src/server.js:1`, an import. Reading on from there is how
+    // a whole walkthrough goes to module load.
+    expect(legPrompt()).toMatch(/시작 줄이 import나 정의라면/);
+  });
+
+  it("forbids the same line twice in a row", () => {
+    // Measured: `src/lib/metrics.js:11` appeared as both step 17 and step 18 of one run.
+    expect(legPrompt()).toMatch(/같은 줄을 연달아 두 번/);
+  });
+
+  it("names the same rule in the system preamble, so it survives a leg-prompt rewrite", () => {
+    expect(buildTraceSystem()).toMatch(/한 단계로 묶는다/);
+  });
+
+  it("still refuses to bundle silently, because a trace is a chain", () => {
+    // A pointer that jumps with nothing said is the exact defect `parseTraceLeg` avoids by
+    // cutting rather than skipping. Bundling must say what came out of the bundle.
+    expect(buildTraceSystem()).toMatch(/말없이 건너뛰지는 마라/);
+  });
+
+  it("keeps leaves_to off wiring, which is what removed the dependency detour", () => {
+    // Measured: five steps and a file boundary were spent in deps.py resolving two default values.
+    expect(legPrompt()).toMatch(/배선을 따라가려고 다른 파일로 넘어가지 마라/);
+  });
+
+  it("does not use 생략 for this, because AUDIENCE_CLAUSE already claimed that word", () => {
+    // There it forbids shortening the explanation of a step that IS narrated. One word doing both
+    // jobs leaves the model guessing which was meant.
+    expect(legPrompt()).not.toContain("생략");
+  });
+
+  it("no longer filters on the wrong axis", () => {
+    // The superseded sentence. Its return would reinstate the measured failure.
+    expect(legPrompt()).not.toContain("실제로 실행되는 줄만 단계로 삼는다");
   });
 });
 

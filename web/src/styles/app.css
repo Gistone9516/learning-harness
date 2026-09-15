@@ -717,6 +717,42 @@ body {
 }
 .lh-cp-generate-status { font-size: 13px; color: var(--lh-ink-mid); min-height: 1.2em; }
 
+/* ── 주제 판정 결과 (FR-25) ──────────────────────────────────────────────────
+   A block that stays put, unlike the status line the clock rewrites every second. It carries
+   the one thing a refused generation owes the learner: why, and something to press. */
+.lh-cp-generate-advice {
+  margin-top: var(--lh-s3);
+  padding: var(--lh-s3) var(--lh-s4);
+  background: var(--lh-amber-bg);
+  border: 1px solid var(--lh-amber-line);
+  border-radius: var(--lh-r-sm);
+  display: grid;
+  gap: var(--lh-s2);
+}
+.lh-cp-generate-warning { margin: 0; font-size: 13px; line-height: 1.6; color: var(--lh-amber-ink); font-weight: 700; }
+.lh-cp-generate-advice-lead { margin: 0; font-size: 12.5px; color: var(--lh-ink-mid); }
+.lh-cp-generate-suggestions { display: grid; gap: var(--lh-s2); }
+/* Pressing one fills the topic box, so it is a control and reads as one -- a left-aligned block
+   that can wrap, because these are whole sentences and not chips. */
+#app .lh-cp-generate-suggestion {
+  padding: var(--lh-s2) var(--lh-s3);
+  background: var(--lh-surface);
+  border: 1px solid var(--lh-amber-line);
+  border-radius: var(--lh-r-xs);
+  color: var(--lh-ink);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+}
+/* `background` restated: without it `#app button:hover` wins and floods the suggestion with the
+   accent, which is the defect tests/accent_contrast.test.ts exists to catch. */
+#app .lh-cp-generate-suggestion:hover {
+  background: var(--lh-surface);
+  border-color: var(--lh-primary);
+  color: var(--lh-primary-strong);
+}
+
 /* Narrow screens: stack the panes instead of squeezing three columns. */
 @media (max-width: 900px) {
   .lh-cp-panes, .lh-cp-panes.lh-cp-no-ai { grid-template-columns: 1fr; height: auto; }

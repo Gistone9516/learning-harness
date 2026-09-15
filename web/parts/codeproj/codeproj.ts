@@ -23,7 +23,7 @@
 import { AiSession } from "../../src/ai/client";
 import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
 import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, traceRun, type Reseed } from "./session";
+import { generateProject, assessTopic, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, traceRun, type GenerateFailure, type Reseed } from "./session";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
 import { conceptProgress, type ConceptEntry, type ConceptSet } from "./concepts";
 import { changedSince, traceKey, varKey, type TraceRun, type TraceSet } from "./trace";
@@ -637,12 +637,89 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
       ticker = null;
     }
 
+    /*
+     * Where a refused topic and a failed generation are explained.
+     *
+     * Separate from `status` because status is one line that the ticker overwrites every second,
+     * and this has to stay put and be read: a reason, and topics that can be pasted straight in.
+     */
+    const advice = el("div", "lh-cp-generate-advice");
+    advice.hidden = true;
+
+    function clearAdvice(): void {
+      advice.hidden = true;
+      advice.innerHTML = "";
+    }
+
+    /** Stop, say why, and hand back something to do about it. */
+    function showAdvice(warning: string, suggestions: string[]): void {
+      advice.innerHTML = "";
+      advice.appendChild(el("p", "lh-cp-generate-warning", warning));
+      if (suggestions.length) {
+        advice.appendChild(
+          el("p", "lh-cp-generate-advice-lead", "이렇게 적으면 만들 수 있습니다. 눌러서 채우세요."),
+        );
+        const list = el("div", "lh-cp-generate-suggestions");
+        for (const s of suggestions) {
+          const pick = el("button", "lh-cp-generate-suggestion", s);
+          pick.type = "button";
+          // Filling the box IS the fix, so the suggestion is the control rather than a caption
+          // beside one. Focus lands in the topic field so the learner can keep editing it.
+          pick.addEventListener("click", () => {
+            topicInput.value = s;
+            clearAdvice();
+            topicInput.focus();
+          });
+          list.appendChild(pick);
+        }
+        advice.appendChild(list);
+      }
+      advice.hidden = false;
+    }
+
+    /**
+     * What to tell the learner about a generation that did not produce a project.
+     *
+     * One sentence per cause, because they call for different responses: a timeout wants a
+     * smaller scale, a refusal wants a different topic, a transport error wants the server
+     * checked, and a malformed reply usually just wants pressing the button again. Until
+     * 2026-09-10 all five arrived as the same sentence and none of them could be acted on.
+     */
+    function failureText(reason: GenerateFailure, detail?: string): string {
+      const tail = detail ? ` (${detail})` : "";
+      switch (reason) {
+        case "timeout":
+          return "생성이 제한 시간 안에 끝나지 않았습니다. 규모를 한 단계 낮추거나 주제를 좁혀 주세요.";
+        case "call":
+          return `AI 서버 호출이 실패했습니다. 서버가 켜져 있는지 확인해 주세요.${tail}`;
+        case "parse":
+          return "AI가 프로젝트 대신 다른 형식으로 답했습니다. 대개 한 번 더 누르면 됩니다.";
+        case "shape":
+          return `AI가 프로젝트 형식에 맞지 않는 답을 보냈습니다. 다시 시도해 주세요.${tail}`;
+        case "empty":
+          return "파일이 하나도 없는 프로젝트가 돌아왔습니다. 주제를 조금 더 구체적으로 적어 주세요.";
+      }
+    }
+
+    function stopWith(text: string, meta = ""): void {
+      stopTicker();
+      status.classList.remove("lh-cp-generate-status--waiting");
+      phaseEl.textContent = text;
+      // The clock stays, and so does the scale. Both used to be wiped here, so "it failed"
+      // arrived without the two facts the learner already had on screen -- how long it ran, and
+      // at which scale. The second matters most on a timeout: "lower the scale" reads as nonsense
+      // to someone who picked `small` and was never told the model raised it to `large`.
+      metaEl.textContent = meta ? `${meta} · ${clock()}` : clock();
+      startBtn.disabled = false;
+    }
+
     startBtn.addEventListener("click", async () => {
       const topic = topicInput.value.trim();
       if (!topic) {
         status.textContent = "주제를 입력해 주세요.";
         return;
       }
+      clearAdvice();
       const input: GenerateInput = {
         topic,
         scale: scaleSelect.value as GenerateInput["scale"],
@@ -650,31 +727,50 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
       };
       startBtn.disabled = true;
       startedAt = Date.now();
-      phase = () => setPhase("프로젝트를 생성하는 중...", "", true);
-      phase();
       // Every exit below clears this: leaving it running would keep writing into an element the
       // panel is about to remove.
       ticker = window.setInterval(() => phase(), 1000);
 
-      const result = await generateProject(session!, input);
-      if (!result) {
-        stopTicker();
-        status.classList.remove("lh-cp-generate-status--waiting");
-        phaseEl.textContent = "프로젝트 생성에 실패했습니다. 다시 시도해 주세요.";
-        metaEl.textContent = "";
-        startBtn.disabled = false;
+      /*
+       * Judge the topic first. One short call in front of a call that runs for minutes -- the
+       * only measured full generation is 279s (2026-09-02) -- because a topic this cannot build
+       * used to cost that entire wait and then say nothing about why.
+       *
+       * It fails open: a broken pre-check must not be able to lock anyone out of generating.
+       */
+      phase = () => setPhase("주제를 확인하는 중...", "", true);
+      phase();
+      const verdict = await assessTopic(session!, input);
+      if (verdict.verdict === "reword") {
+        stopWith("이 주제로는 프로젝트를 만들기 어렵습니다.");
+        showAdvice(verdict.why, verdict.suggestions);
         return;
       }
 
-      currentProject = result;
+      // The learner's scale was a recommendation; this is the one the model settled on, and
+      // generation binds to it as hard as it ever did.
+      input.scale = verdict.scale;
+      const scaleNote = verdict.scaleReason ? `규모 ${verdict.scale} · ${verdict.scaleReason}` : "";
+
+      phase = () => setPhase("프로젝트를 생성하는 중...", scaleNote, true);
+      phase();
+
+      const result = await generateProject(session!, input);
+      if (!result.ok) {
+        stopWith(failureText(result.reason, result.detail), scaleNote);
+        return;
+      }
+      const project = result.project;
+
+      currentProject = project;
       // Announce before rendering: loading the project immediately emits its first file-seen
       // event, and the owner has to be able to set up storage for it first.
-      onProjectGenerated?.(result, input);
+      onProjectGenerated?.(project, input);
 
       // The explanation layer is built here, while the learner is still on the waiting screen and
       // has nothing to click. Doing it after they enter would put their first question behind a
       // chunk of it, and the wait would look like the tool being slow (design 08 §3.2).
-      annotations = await annotateProject(session!, result, (done, total, path) => {
+      annotations = await annotateProject(session!, project, (done, total, path) => {
         const at = path ? `(${done + 1}/${total}) ${path}` : `(${total}/${total})`;
         phase = () => setPhase("설명을 다는 중...", at, false);
         phase();
@@ -683,20 +779,23 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
 
       stopTicker();
       panel.remove();
-      loadProject(result);
+      loadProject(project);
 
       // Deliberately not awaited: the learner enters now and the concepts fill in behind them.
-      void buildConcepts(result);
+      void buildConcepts(project);
     });
 
     panel.appendChild(el("label", "", "주제"));
     panel.appendChild(topicInput);
-    panel.appendChild(el("label", "", "규모"));
+    // "권장": the model may move this, and the screen has to say so rather than promising a
+    // range it does not control. The chosen scale is reported back on the waiting line.
+    panel.appendChild(el("label", "", "규모 (권장)"));
     panel.appendChild(scaleSelect);
     panel.appendChild(el("label", "", "제약/스택 (선택)"));
     panel.appendChild(seedInput);
     panel.appendChild(startBtn);
     panel.appendChild(status);
+    panel.appendChild(advice);
     return panel;
   }
 

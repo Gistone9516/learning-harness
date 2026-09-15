@@ -86,10 +86,92 @@ export interface GenerateInput {
 }
 
 /**
- * parseProject: tolerant JSON parse — strips markdown code fences, then JSON.parse.
- * Returns null if the text is unparseable or structurally invalid (missing title/summary/files).
+ * The verdict on a topic, taken before the expensive call.
+ *
+ * `scale` always carries a value: on `go` it is the scale generation will be bound to, and on a
+ * failed or unreadable assessment it is the learner's own pick. Nothing downstream has to handle
+ * an absent scale, which is the difference between a gate and a new failure mode.
  */
-export function parseProject(text: string): GeneratedProject | null {
+export interface TopicAssessment {
+  verdict: "go" | "reword";
+  scale: GenerateInput["scale"];
+  /** Why the scale moved, or empty when it did not. */
+  scaleReason: string;
+  /** Why the topic was refused, or empty on `go`. */
+  why: string;
+  /** Ready-to-paste replacement topics. Empty on `go`. */
+  suggestions: string[];
+}
+
+const SCALES: readonly GenerateInput["scale"][] = ["small", "medium", "large"];
+
+/**
+ * Read the assessment, and FAIL OPEN.
+ *
+ * A gate that refuses on its own malfunction is worse than no gate: the learner would be locked
+ * out of generation by a broken pre-check instead of by a bad topic. So anything unreadable comes
+ * back as `go` with the learner's own scale, and the only thing that can stop a generation is the
+ * model explicitly saying `reword` with something to say about it.
+ */
+export function parseAssessment(text: string, fallback: GenerateInput["scale"]): TopicAssessment {
+  const open: TopicAssessment = { verdict: "go", scale: fallback, scaleReason: "", why: "", suggestions: [] };
+
+  let cleaned = text.trim().replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(cleaned);
+  } catch {
+    return open;
+  }
+  if (typeof raw !== "object" || raw === null) return open;
+  const o = raw as Record<string, unknown>;
+
+  const str = (k: string): string => (typeof o[k] === "string" ? (o[k] as string).trim() : "");
+  const scale = SCALES.includes(o["scale"] as GenerateInput["scale"])
+    ? (o["scale"] as GenerateInput["scale"])
+    : fallback;
+  const suggestions = Array.isArray(o["suggestions"])
+    ? (o["suggestions"] as unknown[])
+        .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+        .map((s) => s.trim())
+        .slice(0, 3)
+    : [];
+
+  // A refusal with nothing to say is not actionable, so it is not honoured. The learner would be
+  // stopped and told only that they were stopped -- exactly the dead end this feature exists to
+  // remove, rebuilt one layer earlier.
+  const why = str("why");
+  if (str("verdict") === "reword" && why) {
+    return { verdict: "reword", scale, scaleReason: str("scale_reason"), why, suggestions };
+  }
+  return { verdict: "go", scale, scaleReason: str("scale_reason"), why: "", suggestions: [] };
+}
+
+/**
+ * Why a reply could not become a project. Three causes wanting three different responses:
+ * `parse` means prose or a reply cut off mid-JSON, `shape` means JSON about something else,
+ * `empty` means it agreed to the schema and then filled in no files.
+ */
+export type ProjectRejection = "parse" | "shape" | "empty";
+
+export type ParsedProject =
+  | { ok: true; project: GeneratedProject }
+  | { ok: false; reason: ProjectRejection; detail?: string };
+
+/**
+ * parseProject: tolerant JSON parse — strips markdown code fences, then JSON.parse.
+ *
+ * Returns a REASON rather than a bare null. Generation is the one call a learner waits minutes
+ * for, and until 2026-09-10 every way it could fail reached the screen as the same sentence:
+ * nothing downstream could tell a truncated reply from prose from a well-formed answer about the
+ * wrong thing. A learner reported burning two or three attempts of tens of minutes each with
+ * nothing to go on, which is what that collapse costs.
+ *
+ * `empty` is a rejection now, not a success. A `files: []` satisfies every check below and used
+ * to return a perfectly valid `GeneratedProject`, which then rendered an empty file tree and read
+ * as a bug somewhere else entirely.
+ */
+export function parseProject(text: string): ParsedProject {
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, "");
   cleaned = cleaned.replace(/\n?```\s*$/, "");
@@ -98,8 +180,9 @@ export function parseProject(text: string): GeneratedProject | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
-  } catch {
-    return null;
+  } catch (e) {
+    // The parser's own message says where it broke, which separates prose from a cut-off reply.
+    return { ok: false, reason: "parse", detail: String((e as Error)?.message ?? e) };
   }
 
   if (
@@ -109,11 +192,17 @@ export function parseProject(text: string): GeneratedProject | null {
     typeof (parsed as Record<string, unknown>)["summary"] !== "string" ||
     !Array.isArray((parsed as Record<string, unknown>)["files"])
   ) {
-    return null;
+    // The keys it did send are the fastest way to see what it answered instead.
+    const detail =
+      typeof parsed === "object" && parsed !== null
+        ? Object.keys(parsed as Record<string, unknown>).slice(0, 8).join(", ")
+        : typeof parsed;
+    return { ok: false, reason: "shape", detail };
   }
 
   const raw = parsed as Record<string, unknown>;
-  const files: ProjectFile[] = (raw["files"] as unknown[]).filter(
+  const all = raw["files"] as unknown[];
+  const files: ProjectFile[] = all.filter(
     (f): f is ProjectFile =>
       typeof f === "object" &&
       f !== null &&
@@ -121,15 +210,22 @@ export function parseProject(text: string): GeneratedProject | null {
       typeof (f as Record<string, unknown>)["content"] === "string",
   );
 
+  if (files.length === 0) {
+    return { ok: false, reason: "empty", detail: `files: ${all.length}개 중 0개 사용 가능` };
+  }
+
   const entrypoints = Array.isArray(raw["entrypoints"])
     ? (raw["entrypoints"] as unknown[]).filter((e): e is string => typeof e === "string")
     : undefined;
 
   return {
-    title: raw["title"] as string,
-    summary: raw["summary"] as string,
-    files,
-    entrypoints,
+    ok: true,
+    project: {
+      title: raw["title"] as string,
+      summary: raw["summary"] as string,
+      files,
+      entrypoints,
+    },
   };
 }
 

@@ -5,8 +5,17 @@
 import type { AiResponse, AiSession } from "../../src/ai/client";
 import { parseAnnotations, type AnnotationSet, type FileAnnotations } from "./annotations";
 import { carveJson } from "./components/parse";
-import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
-import { parseProject, sliceLines } from "./model";
+import type {
+  AskRequest,
+  ExplainRequest,
+  GenerateInput,
+  GeneratedProject,
+  Lens,
+  ProjectRejection,
+  Scrap,
+  TopicAssessment,
+} from "./model";
+import { parseAssessment, parseProject, sliceLines } from "./model";
 import {
   buildAskPrompt,
   buildExplainPrompt,
@@ -23,6 +32,8 @@ import {
   buildConceptDocPrompt,
   buildTraceSystem,
   buildTraceLegPrompt,
+  buildAssessSystem,
+  buildAssessPrompt,
 } from "./prompts";
 import { parseDoc, parseSeeds, seedSet, type ConceptSeed, type ConceptSet } from "./concepts";
 import {
@@ -78,13 +89,47 @@ export async function reseedSession(session: AiSession, project: GeneratedProjec
 }
 
 /**
+ * Judge the topic before spending the expensive call on it.
+ *
+ * One short resumed-class call in front of a several-minute one. FAILS OPEN in every direction:
+ * a failed call, an unreadable reply or a refusal with no reason all come back as `go` with the
+ * learner's own scale, because a pre-check that can lock someone out of generation on its own
+ * malfunction is a worse failure than the one it prevents.
+ *
+ * It runs on the same session object, which `generateProject` resets immediately afterwards, so
+ * nothing it said reaches the generation context.
+ */
+export async function assessTopic(session: AiSession, input: GenerateInput): Promise<TopicAssessment> {
+  const res = await session.send({
+    prompt: buildAssessPrompt(input),
+    system: buildAssessSystem(),
+    effort: "medium",
+  });
+  if (!res.ok) return { verdict: "go", scale: input.scale, scaleReason: "", why: "", suggestions: [] };
+  return parseAssessment(res.text, input.scale);
+}
+
+/** Why a generation did not produce a project. `timeout` is split out of `call` because it is the
+ * one the learner can act on -- a smaller scale or a narrower topic finishes inside the ceiling. */
+export type GenerateFailure = "call" | "timeout" | ProjectRejection;
+
+export type GenerateResult =
+  | { ok: true; project: GeneratedProject }
+  | { ok: false; reason: GenerateFailure; detail?: string };
+
+/**
  * generateProject: one generation call (force_json) into a new session.
- * Returns null on AI failure or parse failure, so the caller can offer a retry.
+ *
+ * Returns a REASON, not a bare null. Three independent places used to collapse every failure into
+ * one value -- this function, `parseProject`, and the click handler -- so a transport error, a
+ * 30-minute timeout, prose instead of JSON and a well-formed answer about the wrong thing all
+ * reached the screen as the same sentence. Measured cost of that: a learner lost two or three
+ * attempts of tens of minutes each with nothing to go on (2026-09-10).
  */
 export async function generateProject(
   session: AiSession,
   input: GenerateInput,
-): Promise<GeneratedProject | null> {
+): Promise<GenerateResult> {
   // Generation always mints a fresh session. Resuming would hand the model its own previous
   // attempt: after a failed generation a retry gets "I already built this last turn" instead of a
   // project, and the load-once cost model assumes the codebase enters a clean context anyway.
@@ -98,8 +143,16 @@ export async function generateProject(
     system: buildGenerateSystem(),
     effort: "xhigh",
   });
-  if (!res.ok) return null;
-  return parseProject(res.text);
+  if (!res.ok) {
+    const detail = res.error ?? "알 수 없는 오류";
+    // `ai.py` reports its own ceiling as "Timeout after 1800s"; that is the only failure a
+    // learner can do something about, so it is not left inside the generic bucket.
+    const timedOut = /timeout/i.test(detail);
+    return { ok: false, reason: timedOut ? "timeout" : "call", detail };
+  }
+  const parsed = parseProject(res.text);
+  if (parsed.ok) return { ok: true, project: parsed.project };
+  return { ok: false, reason: parsed.reason, detail: parsed.detail };
 }
 
 

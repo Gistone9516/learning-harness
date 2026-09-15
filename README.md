@@ -188,14 +188,16 @@ cd web && npm run build               # tsc --noEmit + vite production build
   pre-baked concept with no session and grades it with zero AI). For a local visual check,
   `cd web && npm run dev` serves a dev fixture at `localhost:5173` (`#conceptprob` for the offline module).
 
-Two tests are opt-in because they spend money. `parts/codeproj/codeproj.live.test.ts` calls a running
+Three tests are opt-in because they spend money. `parts/codeproj/codeproj.live.test.ts` calls a running
 `ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`;
+`parts/codeproj/assess.live.test.ts` times the pre-flight topic assessment (FR-25) on three topics;
 `parts/codeproj/trace.live.test.ts` resumes a session already holding a project and times one debug
-leg. There is no vitest config in this repo, so the default include glob picks both files up and the
-gate lives inside them — without `LH_LIVE` they are skipped and `npm test` stays at 459 green.
+leg. There is no vitest config in this repo, so the default include glob picks these files up and the
+gate lives inside them — without `LH_LIVE` they are skipped and `npm test` stays at 493 green.
 
 ```bash
 cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/codeproj.live.test.ts
+cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/assess.live.test.ts
 cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/trace.live.test.ts
 ```
 

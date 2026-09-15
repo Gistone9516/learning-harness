@@ -13,6 +13,7 @@
 // because that helper collapses both a transport failure and an unparseable body
 // into a bare null and the raw text is exactly what this test exists to capture.
 import { describe, it, expect } from "vitest";
+import { request as httpRequest } from "node:http";
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { buildAnnotatePrompt, buildAnnotateSystem, buildExplainPrompt, buildGenerateSystem, buildGeneratePrompt } from "./prompts";
@@ -31,11 +32,50 @@ const MODEL = process.env.LH_LIVE_MODEL ?? "claude-opus-5[1m]";
 const OUT = process.env.LH_LIVE_OUT ?? resolve(process.cwd(), "../../Coding-GO/docs/verification/2026-09-02-fr1");
 const WATCH = process.env.LH_LIVE_WATCH ?? resolve(process.cwd(), "../../Coding-GO");
 
+// Overridable, because the interesting runs are the ones that FAILED in the UI: the app collapses
+// every failure into one `null` and throws the response body away, so re-running the same topic
+// through this file is the only way to see which branch it actually took.
 const INPUT: GenerateInput = {
-  topic: "도서 대출 관리 REST API (등록, 대출, 반납, 연체 조회)",
-  scale: "medium",
-  seed: "FastAPI + SQLite",
+  topic: process.env.LH_LIVE_TOPIC ?? "도서 대출 관리 REST API (등록, 대출, 반납, 연체 조회)",
+  scale: (process.env.LH_LIVE_SCALE as GenerateInput["scale"]) ?? "medium",
+  seed: process.env.LH_LIVE_SEED ?? "FastAPI + SQLite",
 };
+
+/**
+ * POST to ai_server over node:http rather than fetch.
+ *
+ * Node's fetch (undici) gives up after 300s of silence with UND_ERR_HEADERS_TIMEOUT, and a
+ * generation holds the connection open with no headers for exactly that long. Measured
+ * 2026-09-05: a run was cut at 306.8s while the server kept generating and finished around 345s,
+ * and the response body -- the entire point of this file -- was lost. The browser has no such
+ * limit (measured the same day: a 420s request completed in Chrome), so the timeout was an
+ * artifact of the harness and made the app look broken when it was not.
+ *
+ * `timeout` is left unset, so this waits as long as the server does.
+ */
+function postJson(url: string, headers: Record<string, string>, body: string): Promise<{ status: number; text: string }> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        method: "POST",
+        headers: { ...headers, "Content-Length": Buffer.byteLength(body).toString() },
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf-8");
+        res.on("data", (chunk) => (text += chunk));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
+      },
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
 
 // Directories that churn on their own and would make G8 a false alarm.
 const IGNORED = new Set(["state", ".git", "node_modules", "__pycache__", ".playwright-mcp", "docs"]);
@@ -67,10 +107,10 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
       const before = walk(WATCH, WATCH, []);
 
       const started = Date.now();
-      const res = await fetch(`${SERVER}/ai`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-AI-Token": TOKEN },
-        body: JSON.stringify({
+      const res = await postJson(
+        `${SERVER}/ai`,
+        { "Content-Type": "application/json", "X-AI-Token": TOKEN },
+        JSON.stringify({
           prompt: buildGeneratePrompt(INPUT),
           system: buildGenerateSystem(),
           model: MODEL,
@@ -79,13 +119,15 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
           effort: "xhigh",
           session_id: null,
         }),
-      });
+      );
       const elapsedMs = Date.now() - started;
 
       // An AI-level failure still answers HTTP 200 with ok:false in the body
       // (ai_server.py always serializes a result), so status only catches transport.
       expect(res.status, "transport-level failure").toBe(200);
-      const body = (await res.json()) as {
+      // Written before parsing, so a malformed body is still on disk to look at.
+      writeFileSync(join(OUT, "response.body.txt"), res.text, "utf-8");
+      const body = JSON.parse(res.text) as {
         ok: boolean;
         text: string;
         session_id: string | null;
@@ -107,9 +149,14 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
       expect(body.text).not.toContain("<invoke");
       expect(body.text).not.toContain("<parameter");
 
-      // G2
-      const project = parseProject(body.text);
-      expect(project, "parseProject returned null; see response.raw.json").not.toBeNull();
+      // G2 -- the rejection reason is in the message now, so a failure here says which
+      // of prose / wrong-shape / no-files it was without opening the raw file first.
+      const parsed = parseProject(body.text);
+      expect(
+        parsed.ok,
+        parsed.ok ? "" : `parseProject rejected the reply: ${parsed.reason} (${parsed.detail ?? ""})`,
+      ).toBe(true);
+      const project = parsed.ok ? parsed.project : null;
       writeFileSync(join(OUT, "project.parsed.json"), JSON.stringify(project, null, 2), "utf-8");
 
       // G4
@@ -120,9 +167,10 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
         expect(p.includes(".."), `traversal in path: ${p}`).toBe(false);
       }
 
-      // G3 / G5 — recorded, not gated. The 7-15 / 400-900 band comes from SCALE_GUIDE,
-      // not from measurement, so a run outside it needs a written justification in
-      // checklist.md rather than a hard failure here.
+      // G3 / G5 — recorded, not gated. The band judgement used to live here as a second
+      // copy of SCALE_GUIDE and had drifted from it (7-15 / 400-900 against a medium of
+      // 10-16 / ~1100). The counts and the scale are recorded; whether they are
+      // acceptable is a judgement for checklist.md, where the reasoning can be written.
       const lines = project!.files.reduce((n, f) => n + f.content.split(/\r?\n/).length, 0);
       const stats = {
         files: project!.files.length,
@@ -131,9 +179,7 @@ describe.skipIf(!LIVE)("FR-1 live generation smoke", () => {
         session_id: body.session_id,
         title: project!.title,
         entrypoints: project!.entrypoints ?? null,
-        band_files: "7-15",
-        band_lines: "400-900",
-        in_band: project!.files.length >= 7 && project!.files.length <= 15 && lines >= 400 && lines <= 900,
+        scale: INPUT.scale,
       };
       writeFileSync(join(OUT, "stats.json"), JSON.stringify(stats, null, 2), "utf-8");
       expect(project!.files.length).toBeGreaterThan(0);
