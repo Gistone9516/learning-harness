@@ -249,7 +249,8 @@ to start without one and rejects every other header name.
   is its browser port with an offline buffer (localStorage is a buffer, never the source of truth), and
   `web/src/flow` holds the load→archive study flow and the archived-project workspace.
   `codeproj` grew to the IDE shape it was specified for: a dependency-free syntax highlighter (`web/src/highlight`,
-  no CDN so it works offline), multi-range code scrap, and a composed-answer block system
+  no CDN so it works offline), an optional soft wrap with hanging indent and copy-safe `↵` marks (`parts/codeproj/wrap.ts`),
+  multi-range code scrap, and a composed-answer block system
   (`parts/codeproj/components`, 24 block types covering the 25 catalogue entries — inline and block code
   references share one `ref` type). `session_guard` ends claude sessions so no process is orphaned.
   Three AI-written layers sit over a loaded project, each its own per-project record and each

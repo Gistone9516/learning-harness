@@ -99,6 +99,7 @@ type AskRequest = {
 - **Syntax highlighting is dependency-free and lives in `web/src/highlight`**, shared by every part; `parts/conceptprob/highlight.ts` is a re-export of it, not a second implementation. No CDN, because the tool must work offline.
 - Five token classes only (keyword, string, comment, number, call). More classes means more colour and less legibility.
 - **Selection and syntax occupy different layers**: selection paints the background, syntax paints the glyphs, so neither can hide the other.
+- **Soft wrap is a viewer toggle, off by default** (`wrap.ts`, key `lh:code-wrap`, global like `lh:theme`). It floats over the code's top-right corner because the head row already clips. A continuation row hangs from its own line's indent plus `WRAP_EXTRA_CH` (2 — four would read as a nested block where indentation is syntax), and each wrapped row ends with a `↵` mark: absolutely positioned so it cannot move the break, CSS content on an `aria-hidden` span so it is never copied or read. Marks are placed from per-character boxes, not row fragments, because `pre-wrap` hangs the breaking space to the row's end; they are repainted on resize and when the code font finishes loading. Only the code panel wraps; code blocks in answers and concept documents stay `pre`.
 - **Scrap**: several non-adjacent ranges, possibly across files, can be collected into one explanation target. The scrap set is what §2 sends; clearing it returns the target to the current file.
 
 ### 3.2 Composed answers — the block system

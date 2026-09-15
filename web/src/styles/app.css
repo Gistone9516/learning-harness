@@ -656,6 +656,67 @@ body {
   font-size: 11px; color: var(--lh-ink-mid); cursor: pointer;
 }
 .lh-cp-code-scroll { flex: 1; overflow: auto; background: var(--lh-code-bg); }
+
+/* ── 긴 줄 줄바꿈 (코드 패널만) ───────────────────────────────────────────────
+   The scroll area sits in a wrapper so the toggle can float over it without scrolling with the
+   code. Only the code panel wraps: code blocks inside answers and concept documents stay `pre`. */
+.lh-cp-code-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.lh-cp-code-scroll--wrap .lh-cp-code-line { position: relative; }
+/* Hanging indent: the first row starts at column zero as before, every continuation row starts at
+   this line's own indent plus WRAP_EXTRA_CH, which view.ts writes into --lh-wrap-indent per line. */
+.lh-cp-code-scroll--wrap .lh-cp-line-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-left: calc(var(--lh-wrap-indent, 2) * 1ch);
+  text-indent: calc(var(--lh-wrap-indent, 2) * -1ch);
+}
+/* The number column would otherwise stretch to the wrapped height, and the debug dots, placed at
+   50% of it, would sit between rows instead of on the line's first one. */
+.lh-cp-code-scroll--wrap .lh-cp-line-num { align-self: flex-start; }
+.lh-cp-wrap-mark {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  padding-left: 3px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--lh-code-faint);
+  user-select: none;
+  pointer-events: none;
+}
+.lh-cp-wrap-mark::before { content: "\21B5"; }
+#app .lh-codeproj .lh-cp-wrap-toggle {
+  position: absolute;
+  top: var(--lh-s2);
+  right: calc(var(--lh-s2) + 10px);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: var(--lh-code-head);
+  border: 1px solid var(--lh-code-border);
+  border-radius: var(--lh-r-pill);
+  color: var(--lh-code-faint);
+  cursor: pointer;
+}
+#app .lh-codeproj .lh-cp-wrap-toggle:hover {
+  background: var(--lh-code-head);
+  border-color: var(--lh-primary);
+  color: var(--lh-ink);
+}
+#app .lh-codeproj .lh-cp-wrap-toggle[aria-pressed="true"] {
+  background: var(--lh-primary-soft);
+  border-color: var(--lh-primary-line);
+  color: var(--lh-primary-strong);
+}
+#app .lh-codeproj .lh-cp-wrap-toggle[aria-pressed="true"]:hover {
+  background: var(--lh-primary-soft);
+  border-color: var(--lh-primary);
+}
+.lh-cp-wrap-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .lh-cp-code { margin: 0; padding: var(--lh-s3) 0; }
 .lh-cp-code-line { cursor: pointer; }
 .lh-cp-code-line:hover { background: var(--lh-bg-2); }

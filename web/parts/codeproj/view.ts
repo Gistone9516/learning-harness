@@ -7,6 +7,13 @@ import { createNotePopup, type DebugView } from "./notepopup";
 import type { CodeProject, Lens, TreeNode } from "./model";
 import { LENS_LABELS, LENS_ORDER } from "./prompts";
 import { highlightLines } from "../../src/highlight/highlight";
+import { leadingColumns, readWrapPreference, WRAP_EXTRA_CH, wrappedRowEnds, writeWrapPreference } from "./wrap";
+
+/** Stroke-only and currentColor like the other kit icons: a line, a line that turns back, a short line. */
+const WRAP_ICON =
+  '<svg class="lh-cp-wrap-icon" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path d="M4 6h16" /><path d="M4 12h13a3 3 0 0 1 0 6h-4" /><path d="M15 15.5 12.5 18l2.5 2.5" />' +
+  '<path d="M4 18h5" /></svg>';
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -193,8 +200,21 @@ export function createCodePanel(): CodePanel {
   // typed into the question box or re-pressing the button that started the run; code lines carry
   // no tabindex, so once focus is here clicking a line cannot take it away again.
   codeArea.tabIndex = -1;
+  /*
+   * The wrap toggle floats over the top-right of the code rather than joining the head: the head
+   * is a single nowrap row that already clips its path label when a selection is up, and a sixth
+   * control there would be the first thing cut. It sits in a wrapper, not in the scroll area, so it
+   * stays put while the code scrolls under it.
+   */
+  const codeBody = el("div", "lh-cp-code-body");
+  const wrapBtn = el("button", "lh-cp-wrap-toggle");
+  wrapBtn.type = "button";
+  wrapBtn.innerHTML = WRAP_ICON;
+  let wrap = readWrapPreference();
+  codeBody.appendChild(codeArea);
+  codeBody.appendChild(wrapBtn);
   root.appendChild(head);
-  root.appendChild(codeArea);
+  root.appendChild(codeBody);
 
   let anchor: number | null = null;
   let range: [number, number] | null = null;
@@ -220,6 +240,110 @@ export function createCodePanel(): CodePanel {
   let debugShown: { line: number; view: DebugView } | null = null;
 
   debugBtn.addEventListener("click", () => debugPress?.());
+
+  // ── soft wrap ──────────────────────────────────────────────────────────────
+
+  function applyWrap(): void {
+    codeArea.classList.toggle("lh-cp-code-scroll--wrap", wrap);
+    wrapBtn.setAttribute("aria-pressed", String(wrap));
+    const label = wrap ? "긴 줄 줄바꿈 끄기" : "긴 줄 줄바꿈 켜기";
+    wrapBtn.setAttribute("aria-label", label);
+    wrapBtn.title = label;
+    scheduleWrapMarks();
+  }
+
+  /*
+   * The mark at the end of each wrapped row. Where a row breaks is known only after layout, so this
+   * measures the line body's inline fragments and places one absolutely positioned mark per break.
+   * Absolute, never inline: a glyph inserted into the text would take width and move the break it
+   * is marking. The glyph itself is CSS content on an aria-hidden span, so copying code never picks
+   * it up and a screen reader never reads it.
+   */
+  let wrapFrame = 0;
+  function scheduleWrapMarks(): void {
+    if (typeof requestAnimationFrame !== "function") return;
+    if (wrapFrame) cancelAnimationFrame(wrapFrame);
+    wrapFrame = requestAnimationFrame(() => {
+      wrapFrame = 0;
+      paintWrapMarks();
+    });
+  }
+
+  function paintWrapMarks(): void {
+    codeArea.querySelectorAll(".lh-cp-wrap-mark").forEach((m) => m.remove());
+    if (!wrap) return;
+    codeArea.querySelectorAll(".lh-cp-code-line").forEach((lineEl) => {
+      const body = lineEl.querySelector(".lh-cp-line-body");
+      if (!body) return;
+      // One fragment per visual row, so fewer than two means the line did not wrap: skip it cheaply.
+      if (body.getClientRects().length < 2) return;
+      const origin = lineEl.getBoundingClientRect();
+      for (const row of wrappedRowEnds(glyphBoxes(body))) {
+        const mark = el("span", "lh-cp-wrap-mark");
+        mark.setAttribute("aria-hidden", "true");
+        mark.style.left = `${row.right - origin.left}px`;
+        mark.style.top = `${row.top - origin.top}px`;
+        mark.style.height = `${row.bottom - row.top}px`;
+        lineEl.appendChild(mark);
+      }
+    });
+  }
+
+  /*
+   * The box of every visible character in a wrapped line, whitespace left out.
+   *
+   * Row fragments alone put the mark at the panel edge: `pre-wrap` keeps the space the line broke
+   * at, and that space hangs to the end of the row. Measured 2026-09-15, a mark sat a third of the
+   * panel away from the word it followed. Per-character boxes find where the text on each row
+   * actually ends. Only wrapped lines get here, so the cost is paid on the few long ones.
+   */
+  function glyphBoxes(body: Element): { top: number; bottom: number; right: number }[] {
+    const boxes: { top: number; bottom: number; right: number }[] = [];
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent ?? "";
+      for (let i = 0; i < text.length; i += 1) {
+        if (text[i].trim() === "") continue;
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const r = range.getBoundingClientRect();
+        if (r.height > 0) boxes.push({ top: r.top, bottom: r.bottom, right: r.right });
+      }
+    }
+    return boxes;
+  }
+
+  wrapBtn.addEventListener("click", () => {
+    wrap = !wrap;
+    writeWrapPreference(wrap);
+    // Every line just changed height, so a hover popup points at nothing; a debug step is re-placed.
+    if (debugShown) placeDebugPopup();
+    else closeNote();
+    applyWrap();
+  });
+
+  // Breaks move with the panel's width: resizing the window, dragging a pane, or the narrow layout.
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+      if (wrap) scheduleWrapMarks();
+    }).observe(codeArea);
+  }
+  /*
+   * Breaks also move when the code font finishes loading, and no resize fires for that. Measured
+   * 2026-09-15: marks painted against the fallback font sat 19px short of where the web font ended
+   * the row, on top of the last word.
+   */
+  const fonts = typeof document !== "undefined" ? (document as Document & { fonts?: FontFaceSet }).fonts : undefined;
+  fonts?.ready?.then(() => {
+    if (wrap && root.isConnected) scheduleWrapMarks();
+  });
+  fonts?.addEventListener?.("loadingdone", () => {
+    if (wrap && root.isConnected) scheduleWrapMarks();
+  });
+
+  // After `wrapFrame` exists: applyWrap schedules a paint, and a `let` is not hoisted.
+  applyWrap();
 
   /**
    * Put the debug popup next to its own line, wherever that line is now.
@@ -543,9 +667,15 @@ export function createCodePanel(): CodePanel {
         lineEl.dataset["line"] = String(n);
         lineEl.appendChild(el("span", "lh-cp-line-num", String(n)));
         const codeEl = el("span", "lh-cp-line-text");
-        codeEl.innerHTML = highlighted[i] ?? "";
+        // An inline body inside the block, because only an inline box reports one fragment per
+        // visual row, which is what the wrap marks are placed from.
+        const body = el("span", "lh-cp-line-body");
+        body.innerHTML = highlighted[i] ?? "";
+        codeEl.appendChild(body);
+        // A continuation row hangs from this line's own indent, not from column zero, so a wrapped
+        // statement still sits inside its block. Set on every line so toggling needs no rebuild.
+        codeEl.style.setProperty("--lh-wrap-indent", String(leadingColumns(text) + WRAP_EXTRA_CH));
         lineEl.appendChild(codeEl);
-        void text;
         // Click picks a line; shift-click extends from the previous one, the usual editor gesture.
         lineEl.addEventListener("click", (ev) => {
           if ((ev as MouseEvent).shiftKey && anchor !== null) {
@@ -559,6 +689,7 @@ export function createCodePanel(): CodePanel {
       });
       codeArea.appendChild(pre);
       paint();
+      scheduleWrapMarks();
     },
     selection: () => range,
     clearSelection: () => {
