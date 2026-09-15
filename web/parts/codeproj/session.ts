@@ -1,26 +1,17 @@
-// AI transport for the codeproj part: the load-once then resume cost model in three calls.
-// Generation mints the session (the codebase enters its context once); explain and ask resume it,
-// so a click costs a small follow-up instead of re-sending the project.
+// AI transport for the codeproj part: the load-once then resume cost model.
+// Loading a repository mints the session (the codebase enters its context once); annotation,
+// explain and ask resume it, so a click costs a small follow-up instead of re-sending the project.
 
 import type { AiResponse, AiSession } from "../../src/ai/client";
 import { parseAnnotations, type AnnotationSet, type FileAnnotations } from "./annotations";
 import { carveJson } from "./components/parse";
-import type {
-  AskRequest,
-  ExplainRequest,
-  GenerateInput,
-  GeneratedProject,
-  Lens,
-  ProjectRejection,
-  Scrap,
-  TopicAssessment,
-} from "./model";
-import { parseAssessment, parseProject, sliceLines } from "./model";
+import type { AskRequest, ExplainRequest, CodeProject, Lens, ReadingRequest, Scrap } from "./model";
+import { sliceLines } from "./model";
 import {
   buildAskPrompt,
   buildExplainPrompt,
-  buildGeneratePrompt,
-  buildGenerateSystem,
+  buildFocusPrompt,
+  buildFocusSystem,
   buildAnnotatePrompt,
   buildAnnotateSystem,
   buildReseedPrompt,
@@ -32,10 +23,8 @@ import {
   buildConceptDocPrompt,
   buildTraceSystem,
   buildTraceLegPrompt,
-  buildAssessSystem,
-  buildAssessPrompt,
 } from "./prompts";
-import { parseDoc, parseSeeds, seedSet, type ConceptSeed, type ConceptSet } from "./concepts";
+import { parseDoc, parseSeeds, type ConceptSeed } from "./concepts";
 import {
   parseTraceLeg,
   TRACE_LEG_STEPS,
@@ -74,11 +63,11 @@ async function sendResuming(
 }
 
 /**
- * Reload a codebase into a fresh session. `reset()` clears the id, so this goes out as a new
- * session and the server gives it the generation timeout rather than the follow-up one.
- * Expensive by nature, which is why it runs only after a resume actually failed.
+ * Load a codebase into a fresh session: once when a repository is first loaded, and again only
+ * after a resume actually failed, because it re-sends the whole codebase. `reset()` clears the id,
+ * so it goes out as a new session and the server gives it the long timeout, not the follow-up one.
  */
-export async function reseedSession(session: AiSession, project: GeneratedProject): Promise<boolean> {
+export async function reseedSession(session: AiSession, project: CodeProject): Promise<boolean> {
   session.reset();
   const res = await session.send({
     prompt: buildReseedPrompt(project),
@@ -89,72 +78,54 @@ export async function reseedSession(session: AiSession, project: GeneratedProjec
 }
 
 /**
- * Judge the topic before spending the expensive call on it.
+ * How many files are annotated before the learner is let in.
  *
- * One short resumed-class call in front of a several-minute one. FAILS OPEN in every direction:
- * a failed call, an unreadable reply or a refusal with no reason all come back as `go` with the
- * learner's own scale, because a pre-check that can lock someone out of generation on its own
- * malfunction is a worse failure than the one it prevents.
- *
- * It runs on the same session object, which `generateProject` resets immediately afterwards, so
- * nothing it said reaches the generation context.
+ * Annotation is one call per file, measured at about 37s each (2026-09-02: 14 files in 489s), so
+ * this bounds the entry wait near five minutes however large the repository is, and the rest are
+ * annotated behind the learner. A repository at or under this size is annotated whole before entry.
  */
-export async function assessTopic(session: AiSession, input: GenerateInput): Promise<TopicAssessment> {
-  const res = await session.send({
-    prompt: buildAssessPrompt(input),
-    system: buildAssessSystem(),
-    effort: "medium",
-  });
-  if (!res.ok) return { verdict: "go", scale: input.scale, scaleReason: "", why: "", suggestions: [] };
-  return parseAssessment(res.text, input.scale);
-}
-
-/** Why a generation did not produce a project. `timeout` is split out of `call` because it is the
- * one the learner can act on -- a smaller scale or a narrower topic finishes inside the ceiling. */
-export type GenerateFailure = "call" | "timeout" | ProjectRejection;
-
-export type GenerateResult =
-  | { ok: true; project: GeneratedProject }
-  | { ok: false; reason: GenerateFailure; detail?: string };
+export const ENTRY_ANNOTATE_MAX = 8;
 
 /**
- * generateProject: one generation call (force_json) into a new session.
+ * Choose the files to annotate before entry, in reading order.
  *
- * Returns a REASON, not a bare null. Three independent places used to collapse every failure into
- * one value -- this function, `parseProject`, and the click handler -- so a transport error, a
- * 30-minute timeout, prose instead of JSON and a well-formed answer about the wrong thing all
- * reached the screen as the same sentence. Measured cost of that: a learner lost two or three
- * attempts of tens of minutes each with nothing to go on (2026-09-10).
+ * Never fails, because choosing only reorders the first few minutes and must not become a gate:
+ * a repository small enough to annotate whole, a request that says nothing, a failed call and an
+ * unusable reply all return [] and the caller keeps project order. Paths not in the project, and
+ * repeats, are dropped here, so an invented path costs nothing.
  */
-export async function generateProject(
+export async function pickFocusFiles(
   session: AiSession,
-  input: GenerateInput,
-): Promise<GenerateResult> {
-  // Generation always mints a fresh session. Resuming would hand the model its own previous
-  // attempt: after a failed generation a retry gets "I already built this last turn" instead of a
-  // project, and the load-once cost model assumes the codebase enters a clean context anyway.
-  session.reset();
-
-  // Generation is the one call whose output is read for hours, so it gets the deepest setting.
-  // Every other call stays at the medium default: the measured floor for any call is ~5s
-  // regardless of effort or model, so lowering it buys no speed and costs explanation quality.
+  project: CodeProject,
+  request: ReadingRequest,
+  max = ENTRY_ANNOTATE_MAX,
+): Promise<string[]> {
+  if (project.files.length <= max) return [];
+  if (!request.goal.trim() && !request.focus.trim()) return [];
+  const paths = project.files.map((f) => f.path);
   const res = await session.send({
-    prompt: buildGeneratePrompt(input),
-    system: buildGenerateSystem(),
-    effort: "xhigh",
+    prompt: buildFocusPrompt(paths, request, max),
+    system: buildFocusSystem(),
+    effort: "medium",
   });
-  if (!res.ok) {
-    const detail = res.error ?? "알 수 없는 오류";
-    // `ai.py` reports its own ceiling as "Timeout after 1800s"; that is the only failure a
-    // learner can do something about, so it is not left inside the generic bucket.
-    const timedOut = /timeout/i.test(detail);
-    return { ok: false, reason: timedOut ? "timeout" : "call", detail };
+  if (!res.ok) return [];
+  const carved = carveJson(res.text);
+  if (!carved) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(carved);
+  } catch {
+    return [];
   }
-  const parsed = parseProject(res.text);
-  if (parsed.ok) return { ok: true, project: parsed.project };
-  return { ok: false, reason: parsed.reason, detail: parsed.detail };
+  const list = (raw as { paths?: unknown } | null)?.paths;
+  if (!Array.isArray(list)) return [];
+  const known = new Set(paths);
+  const picked: string[] = [];
+  for (const p of list) {
+    if (typeof p === "string" && known.has(p) && !picked.includes(p)) picked.push(p);
+  }
+  return picked.slice(0, max);
 }
-
 
 /**
  * Annotate one file. Failure is contained here: the caller keeps going, because a project with
@@ -164,9 +135,10 @@ export async function annotateFile(
   session: AiSession,
   path: string,
   content: string,
+  request?: ReadingRequest,
 ): Promise<FileAnnotations> {
   const res = await session.send({
-    prompt: buildAnnotatePrompt(path, content),
+    prompt: buildAnnotatePrompt(path, content, request),
     system: buildAnnotateSystem(),
     effort: "medium",
   });
@@ -196,20 +168,25 @@ export async function annotateFile(
  * past that. Sequential by construction, so no separate serialisation is needed.
  *
  * This runs before the learner reaches the project (design 08 §3.2), which is why no request
- * of theirs can queue behind it.
+ * of theirs can queue behind it. `paths` narrows it to the files annotated before entry; the rest
+ * go through the background queue after the learner is in.
  */
 export async function annotateProject(
   session: AiSession,
-  project: GeneratedProject,
+  project: CodeProject,
   onProgress?: (done: number, total: number, path: string) => void,
+  opts: { paths?: string[]; request?: ReadingRequest } = {},
 ): Promise<AnnotationSet> {
   const set: AnnotationSet = { files: {} };
-  for (let i = 0; i < project.files.length; i += 1) {
-    const file = project.files[i];
-    onProgress?.(i, project.files.length, file.path);
-    set.files[file.path] = await annotateFile(session, file.path, file.content);
+  const files = opts.paths
+    ? opts.paths.flatMap((p) => project.files.filter((f) => f.path === p))
+    : project.files;
+  for (let i = 0; i < files.length; i += 1) {
+    const file = files[i];
+    onProgress?.(i, files.length, file.path);
+    set.files[file.path] = await annotateFile(session, file.path, file.content, opts.request);
   }
-  onProgress?.(project.files.length, project.files.length, "");
+  onProgress?.(files.length, files.length, "");
   return set;
 }
 /** Quote the selected lines so the model sees exactly what the learner pointed at. */
@@ -276,10 +253,14 @@ export async function explainScraps(
 // ── 개념 문서 생성 (FR-23) ───────────────────────────────────────────────────
 
 /** Ask the session what its own codebase teaches. Cheap: measured 12.2s for 8 concepts. */
-export async function outlineConcepts(session: AiSession, reseed?: Reseed): Promise<ConceptSeed[]> {
+export async function outlineConcepts(
+  session: AiSession,
+  reseed?: Reseed,
+  request?: ReadingRequest,
+): Promise<ConceptSeed[]> {
   const res = await sendResuming(
     session,
-    { prompt: buildConceptOutlinePrompt(), system: buildConceptOutlineSystem(), effort: "medium" },
+    { prompt: buildConceptOutlinePrompt(request), system: buildConceptOutlineSystem(), effort: "medium" },
     reseed,
   );
   return res.ok ? parseSeeds(res.text) : [];
@@ -299,42 +280,6 @@ export async function writeConcept(
   if (!res.ok) return { doc: null, reason: "call" };
   const doc = parseDoc(res.text, seed);
   return doc ? { doc } : { doc: null, reason: "parse" };
-}
-
-/**
- * Write every concept, one at a time, reporting the set after each one.
- *
- * Unlike the annotation pass this runs while the learner is already reading, so two things follow.
- * The set is handed back after every document rather than at the end, so closing the tab mid-pass
- * still leaves everything written so far on disk. And nothing here serialises against the
- * learner's own requests: two concurrent resumes of one session were measured on 2026-09-03 and
- * both returned, in 36.9s wall against 71.3s serial. That was one trial and it proves only that
- * the calls complete -- not that the session's context is unaffected -- so this pass keeps itself
- * to one document at a time, and the only overlap it ever allows is the learner's single request.
- *
- * `onStep` fires before each call too, so the list can show which concept is being written now.
- */
-export async function writeConcepts(
-  session: AiSession,
-  seeds: ConceptSeed[],
-  onStep: (set: ConceptSet) => void,
-  reseed?: Reseed,
-): Promise<ConceptSet> {
-  const set = seedSet(seeds);
-  for (const entry of set.entries) {
-    entry.status = "writing";
-    onStep(set);
-    const { doc, reason } = await writeConcept(session, entry.seed, reseed);
-    if (doc) {
-      entry.doc = doc;
-      entry.status = "ok";
-    } else {
-      entry.status = "failed";
-      entry.reason = reason;
-    }
-    onStep(set);
-  }
-  return set;
 }
 
 
@@ -396,7 +341,7 @@ async function traceLeg(
  *
  * `onLeg` fires after every leg with the run as it stands, which is what makes the wait bearable:
  * the mount starts playing the first leg's steps while the next one is still being written, so a
- * file boundary does not stall the learner mid-step. Same shape as `writeConcepts`' `onStep`,
+ * file boundary does not stall the learner mid-step. Same shape as the concept queue's per-document publish,
  * and for the same reason -- walking away mid-pass still leaves what already arrived.
  *
  * Failure is asymmetric on purpose. The first leg failing leaves nothing to walk, so the run is
@@ -405,7 +350,7 @@ async function traceLeg(
  */
 export async function traceRun(
   session: AiSession,
-  project: GeneratedProject,
+  project: CodeProject,
   entry: { path: string; line: number },
   onLeg: (run: TraceRun) => void,
   reseed?: Reseed,

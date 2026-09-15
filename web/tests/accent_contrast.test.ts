@@ -17,12 +17,23 @@ import { join } from "node:path";
 const CSS = readFileSync(join(import.meta.dirname, "..", "src", "styles", "app.css"), "utf-8");
 const TOKENS = readFileSync(join(import.meta.dirname, "..", "src", "styles", "tokens.css"), "utf-8");
 
-/** Split a stylesheet into `{ selector, body }` for every top-level rule. */
+/**
+ * Split a stylesheet into `{ selector, body }` for every top-level rule.
+ *
+ * Comments go first. Left in, a comment above a rule became part of its selector, so the hover
+ * check below compared "<comment> #app .x" with "#app .x:hover" and silently skipped every
+ * commented rule -- measured 2026-09-15 by deleting the hover background from two such buttons:
+ * neither was reported until the comments were stripped.
+ */
 function rules(css: string): { selector: string; body: string }[] {
+  const bare = css
+    .split("/*")
+    .map((part, i) => (i === 0 ? part : part.slice(part.indexOf("*/") + 2)))
+    .join("");
   const out: { selector: string; body: string }[] = [];
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(css))) out.push({ selector: m[1].trim(), body: m[2] });
+  while ((m = re.exec(bare))) out.push({ selector: m[1].trim(), body: m[2] });
   return out;
 }
 
@@ -65,7 +76,7 @@ describe("a restyled button restates its background on every state", () => {
   // pointer. Measured 2026-09-04: the archive row's title hit 1.89:1 and its delete icon 1.33:1
   // exactly when the pointer arrived — which is when that icon is supposed to become visible.
   /** Only the part this instance mounts. See the recorded gap below for why the rest is not swept. */
-  const CODEPROJ = /lh-codeproj|archive|scrap|note-|confirm-|summary-toggle|depth-|entry-|concept-|generate-|start-btn|free-start|cp-back|head-row/;
+  const CODEPROJ = /lh-codeproj|archive|scrap|note-|confirm-|summary-toggle|depth-|entry-|concept-|load-|launcher-|cp-back|head-row/;
 
   it("has no :hover rule that repaints a codeproj button without setting its background", () => {
     const all = rules(CSS).filter((r) => CODEPROJ.test(r.selector));

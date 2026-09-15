@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createLocalStorage } from "../storage/local";
-import { makeRecord, type StoragePort } from "../storage/port";
-import { COLLECTIONS, createStudyFlow, type ProposalData } from "./study";
+import type { StoragePort } from "../storage/port";
+import { COLLECTIONS, createStudyFlow } from "./study";
 
 function memStorage(): Storage {
   const map = new Map<string, string>();
@@ -30,66 +30,25 @@ const PROJECT = {
   files: [{ path: "src/app.py", content: "x" }, { path: "README.md", content: "y" }],
 };
 
-async function seedProposal(storage: StoragePort, id = "prop-a", order = 1) {
-  await storage.put(
-    COLLECTIONS.proposals,
-    makeRecord<ProposalData>(
-      "proposal",
-      id,
-      { title: "도서 관리 API", stack: "FastAPI + SQLite", scale: "small", status: "open", order },
-      {
-        topic: "도서 대출 관리 API",
-        seed: "FastAPI + SQLite",
-        briefing: { why: "계층 분리를 실제 코드로 보기 위해", learning_points: ["라우터와 서비스 분리"] },
-      },
-    ),
-  );
-}
-
-describe("proposals (FR-14)", () => {
-  it("lists open proposals in the operator's order, with the briefing", async () => {
-    const { storage, flow } = setup();
-    await seedProposal(storage, "prop-b", 2);
-    await seedProposal(storage, "prop-a", 1);
-
-    const open = await flow.openProposals();
-    expect(open.map((p) => p.id)).toEqual(["prop-a", "prop-b"]);
-    expect(open[0].data.briefing.learning_points).toEqual(["라우터와 서비스 분리"]);
-    expect(open[0].stack).toBe("FastAPI + SQLite");
-  });
-
-  it("marks a proposal started and links it to the project it produced", async () => {
-    const { storage, flow } = setup();
-    await seedProposal(storage);
-
-    const { projectId } = await flow.startProject({
-      project: PROJECT,
-      topic: "도서 대출 관리 API",
-      stack: "FastAPI + SQLite",
-      scale: "small",
-      proposalId: "prop-a",
-    });
-
-    expect(await flow.openProposals()).toEqual([]);          // no longer offered
-    const all = await flow.listProposals();
-    expect(all[0].status).toBe("started");
-    expect(all[0].data.started_project_id).toBe(projectId);
-  });
-});
+const ORIGIN = {
+  kind: "repo" as const,
+  source: "https://example.test/o/repo",
+  ref: null,
+  commit: null,
+  request: { goal: "", focus: "", scope: [] },
+};
 
 describe("starting a project (FR-7)", () => {
   it("archives the project and initialises progress and history together", async () => {
     const { storage, flow } = setup();
     const { projectId, historyId } = await flow.startProject({
       project: PROJECT,
-      topic: "t",
-      stack: "s",
-      scale: "small",
+      origin: ORIGIN, stack: "s"
     });
 
     const archived = await flow.listArchived();
     expect(archived).toHaveLength(1);
-    expect(archived[0]).toMatchObject({ id: projectId, title: "도서 관리", file_count: 2 });
+    expect(archived[0]).toMatchObject({ id: projectId, title: "도서 관리", file_count: 2, source: ORIGIN.source });
 
     // The heavy payload is stored once, in its own record, and is not part of the index entry.
     const record = await flow.loadArchived(projectId);
@@ -99,12 +58,28 @@ describe("starting a project (FR-7)", () => {
     expect(await flow.seenPaths(projectId)).toEqual([]);
     const history = await storage.get(COLLECTIONS.history, historyId);
     expect(history?.summary["project_id"]).toBe(projectId);
+    // The dashboard shows this column as the name of what was studied.
+    expect(history?.summary["topic"]).toBe("도서 관리");
+  });
+
+  it("keeps the source and the learner's request with the project, stamped with the same moment", async () => {
+    // The request outlives the visit: files left unannotated are written later for the same goal.
+    const { storage, flow } = setup();
+    const request = { goal: "구조 익히기", focus: "저장 계층", scope: ["src"] };
+    const { projectId, historyId } = await flow.startProject({
+      project: PROJECT,
+      origin: { ...ORIGIN, ref: "main", commit: "abc", request },
+      stack: "Python",
+    });
+    const record = await flow.loadArchived(projectId);
+    const history = await storage.get(COLLECTIONS.history, historyId);
+    expect(record?.data.origin).toEqual({ ...ORIGIN, ref: "main", commit: "abc", request, loaded_at: history?.summary["started_at"] });
   });
 
   it("keeps each project's records in separate files", async () => {
     const { storage, flow } = setup();
-    await flow.startProject({ project: PROJECT, topic: "a", stack: "s", scale: "small" });
-    await flow.startProject({ project: PROJECT, topic: "b", stack: "s", scale: "small" });
+    await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
+    await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
 
     // Two projects, two project records and two history records; nothing accumulated into one.
     expect(await storage.list(COLLECTIONS.projects)).toHaveLength(2);
@@ -115,7 +90,7 @@ describe("starting a project (FR-7)", () => {
 describe("reading progress (FR-6)", () => {
   it("records each file once and keeps the counter in the index summary", async () => {
     const { storage, flow } = setup();
-    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { projectId } = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
 
     await flow.recordFileSeen(projectId, "src/app.py");
     await flow.recordFileSeen(projectId, "src/app.py");
@@ -130,7 +105,7 @@ describe("reading progress (FR-6)", () => {
   it("survives a reload, which is the point of persisting it", async () => {
     const store = memStorage();
     const first = createStudyFlow({ storage: createLocalStorage({ namespace: "flow", store }) });
-    const { projectId } = await first.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { projectId } = await first.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
     await first.recordFileSeen(projectId, "README.md");
 
     const reopened = createStudyFlow({ storage: createLocalStorage({ namespace: "flow", store }) });
@@ -142,7 +117,7 @@ describe("session history (FR-8)", () => {
   it("counts explains per lens and keeps question text in that session's record", async () => {
     const { storage, flow } = setup();
     const { projectId, historyId } = await flow.startProject({
-      project: PROJECT, topic: "t", stack: "s", scale: "small",
+      project: PROJECT, origin: ORIGIN, stack: "s"
     });
 
     await flow.recordExchange(historyId, { kind: "explain", lens: "concepts", path: "src/app.py" });
@@ -161,7 +136,7 @@ describe("session history (FR-8)", () => {
 
   it("exposes the dashboard numbers through index summaries alone", async () => {
     const { storage, flow } = setup();
-    const { historyId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { historyId } = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
     await flow.recordExchange(historyId, { kind: "ask", path: "p", question: "q" });
     await flow.endSession(historyId, 2);
 
@@ -178,7 +153,7 @@ describe("session history (FR-8)", () => {
   });
   it("remembers and recalls the session that holds a project's codebase", async () => {
     const { flow } = setup();
-    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { projectId } = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
 
     expect(await flow.recallSession(projectId)).toBeNull();
     await flow.rememberSession(projectId, "sid-9");
@@ -189,7 +164,7 @@ describe("session history (FR-8)", () => {
     // listArchived sorts by updated_at, so writing the session id onto the project record
     // would lift an old project to the top of the archive every time its session changed.
     const { storage, flow } = setup();
-    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { projectId } = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
     const before = await storage.get(COLLECTIONS.projects, projectId);
 
     await flow.rememberSession(projectId, "sid-9");
@@ -200,7 +175,7 @@ describe("session history (FR-8)", () => {
 
   it("stores an annotation layer and reports its coverage from the index alone", async () => {
     const { storage, flow } = setup();
-    const { projectId } = await flow.startProject({ project: PROJECT, topic: "t", stack: "s", scale: "small" });
+    const { projectId } = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "s" });
 
     expect(await flow.readAnnotations(projectId)).toBeNull();
     await flow.writeAnnotations(projectId, {
@@ -216,22 +191,5 @@ describe("session history (FR-8)", () => {
     // An operator can see how well a project is annotated without opening the record.
     const [entry] = await storage.list(COLLECTIONS.annotations);
     expect(entry.summary).toMatchObject({ files_ok: 1, files_failed: 1, items: 2 });
-  });
-
-  it("reads only the tuning fields that reach a prompt", async () => {
-    const { storage, flow } = setup();
-    await storage.putDoc("tuning", {
-      defaults: { scale: "large", stack_hint: "  ", output_lang: "ko" },
-      generation: { quality_profile: "production" },
-    });
-
-    // An empty hint is the same as no hint; forwarding it would put a stray clause in the prompt.
-    expect(await flow.readTuning()).toEqual({ scale: "large", stack_hint: undefined });
-  });
-
-  it("ignores a tuning scale that is not one of the three", async () => {
-    const { storage, flow } = setup();
-    await storage.putDoc("tuning", { defaults: { scale: "enormous" } });
-    expect((await flow.readTuning()).scale).toBeUndefined();
   });
 });

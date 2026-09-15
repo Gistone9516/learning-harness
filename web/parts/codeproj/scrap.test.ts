@@ -4,10 +4,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
-import { mountCodeproj, canAddScrap, scrapLineCount, SCRAP_MAX_COUNT, type GeneratedProject } from "./codeproj";
+import { mountCodeproj, canAddScrap, scrapLineCount, SCRAP_MAX_COUNT, type CodeProject } from "./codeproj";
 import { buildAskPrompt, buildScrapExplainPrompt } from "./prompts";
 
-const PROJECT: GeneratedProject = {
+const PROJECT: CodeProject = {
   title: "T",
   summary: "S",
   files: [

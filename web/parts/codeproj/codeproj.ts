@@ -1,31 +1,56 @@
-// WHAT: AI-generated project, IDE-shaped read-only comprehension with session-based explanations and questions.
+// WHAT: a git repository read in an IDE shape, with an annotation layer written for the learner's request, plus session-based explanations and questions.
 // DEPS: web/src/ai (ai_server client). No npm UI libs; tree, code panel and AI panel are hand-rolled DOM.
-// INPUT: a pre-baked `project` (GeneratedProject), or { topic, scale, seed? } generated live — injected, no subject literal.
+// INPUT: a pre-baked `project` (CodeProject), or a repository + request loaded through `loadRepo` — injected, no subject literal.
+// INPUT: `request` — what the learner asked of a reopened project, so files still unannotated are written for the same goal.
 // INPUT: `annotations` (AnnotationSet) — the explanation layer, injected; the part renders it and never stores it.
 // INPUT: `concepts` (ConceptSet) — the concept documents for the project, injected the same way.
 // INPUT: `traces` (TraceSet) — debug walkthroughs already built for this project, keyed by entry point.
-// EVENTS: file-seen flags via onFileSeen; generated projects via onProjectGenerated; AI exchanges via onExchange.
-// EVENTS: the freshly built annotation layer via onAnnotations — the part makes it, the owner stores it.
+// EVENTS: file-seen flags via onFileSeen; loaded projects via onProjectLoaded; AI exchanges via onExchange.
+// EVENTS: the annotation layer via onAnnotations, once per file as it lands — the part makes it, the owner stores it.
 // EVENTS: the concept layer via onConcepts, once per document as the background pass lands them.
 // EVENTS: the trace layer via onTraces, once per leg as a run is built — including on a reopened project.
 // EVENTS: that pass's progress via onConceptProgress, for chrome the owner draws (the view tabs).
-// AI: optional — with a session: generation (/ai new session, force_json) + explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
+// AI: optional — with a session: loading (/repos/load, then /ai new session) + annotate/explain/ask (/ai resume). With session:null: read a pre-baked project offline (AI panel hidden).
 // CONSTRAINTS: subject-agnostic, secrets-gated, session-resume (load-once->resume cost model).
-// CONSTRAINTS: generation is the only xhigh call; annotations, explanations and questions are medium.
+// CONSTRAINTS: every AI call is medium; at most one background call runs beside the learner's own.
 // RETURNS: a handle { setView, hasConcepts } — the owner draws the code/concept tabs in its own top bar.
-// DEMO: mountCodeproj(el, { session:null, project }) reads a canned GeneratedProject fully offline (no live AI).
+// DEMO: mountCodeproj(el, { session:null, project }) reads a canned CodeProject fully offline (no live AI).
 //
 // Layout is the three-pane IDE shape: files left, code centre, AI right — and a second pair of
 // panels for the concepts view, held in the same grid and swapped by display. This file only assembles
 // the panels and routes events; the pure model, the prompts, the AI calls and the DOM panels each
 // live in their own module beside it.
 
-import { AiSession } from "../../src/ai/client";
-import type { GeneratedProject, GenerateInput, Lens, Scrap } from "./model";
-import { buildTree, canAddScrap, fileByPath, sliceLines, SCRAP_MAX_COUNT, SCRAP_MAX_LINES } from "./model";
-import { generateProject, assessTopic, annotateProject, annotateFile, explain, explainScraps, ask, reseedSession, outlineConcepts, writeConcept, writeConcepts, traceRun, type GenerateFailure, type Reseed } from "./session";
+import { AiSession, type RepoLoadRequest, type RepoLoadResponse } from "../../src/ai/client";
+import type { CodeProject, Lens, ReadingRequest, RepoOrigin, Scrap } from "./model";
+import {
+  annotationOrder,
+  buildTree,
+  canAddScrap,
+  fileByPath,
+  parseScope,
+  projectFromRepo,
+  sliceLines,
+  SCRAP_MAX_COUNT,
+  SCRAP_MAX_LINES,
+} from "./model";
+import {
+  annotateProject,
+  annotateFile,
+  explain,
+  explainScraps,
+  ask,
+  ENTRY_ANNOTATE_MAX,
+  pickFocusFiles,
+  reseedSession,
+  outlineConcepts,
+  writeConcept,
+  traceRun,
+  type Reseed,
+} from "./session";
+import { createJobQueue } from "./background";
 import { parseAnnotations, type AnnotationSet } from "./annotations";
-import { conceptProgress, type ConceptEntry, type ConceptSet } from "./concepts";
+import { conceptProgress, seedSet, type ConceptEntry, type ConceptSet } from "./concepts";
 import { changedSince, traceKey, varKey, type TraceRun, type TraceSet } from "./trace";
 import { createConceptView } from "./conceptview";
 import { LENS_LABELS } from "./prompts";
@@ -41,6 +66,11 @@ import { renderComposed, type RenderContext } from "./components/render";
  */
 const SUMMARY_MORE = "더 보기";
 const SUMMARY_LESS = "접기";
+
+/** Sizes on the waiting line and in the too-large advice: KB under a megabyte, one decimal above. */
+function formatBytes(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))}KB` : `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
 
 export interface ExchangeEvent {
   kind: "explain" | "ask";
@@ -63,13 +93,19 @@ export interface ExchangeEvent {
 }
 
 export interface CodeprojProps {
-  // Live AI session, or null for offline reading of a pre-baked `project` (generation/AI disabled).
+  // Live AI session, or null for offline reading of a pre-baked `project` (loading/AI disabled).
   session: AiSession | null;
-  project?: GeneratedProject;
-  /** Pre-filled generation inputs (e.g. from an accepted proposal); the learner still starts it. */
-  initialInput?: Partial<GenerateInput>;
+  project?: CodeProject;
+  /** Reads a repository through the server. Without it there is no form to load one with. */
+  loadRepo?: (req: RepoLoadRequest) => Promise<RepoLoadResponse>;
+  /**
+   * What the learner asked of this project, when reopening one. Files a previous visit left
+   * unannotated are written for it, so a project does not read at two levels.
+   */
+  request?: ReadingRequest;
   onFileSeen?: (path: string) => void;
-  onProjectGenerated?: (project: GeneratedProject, input: GenerateInput) => void;
+  /** Fired once, when a repository has been read and put into the session, before entry. */
+  onProjectLoaded?: (project: CodeProject, origin: Omit<RepoOrigin, "loaded_at">) => void;
   onExchange?: (event: ExchangeEvent) => void;
   /**
    * The annotation layer for this project, keyed by file path. A snapshot: the part renders what
@@ -78,8 +114,9 @@ export interface CodeprojProps {
    */
   annotations?: AnnotationSet;
   /**
-   * Emitted once, right after generation, with the annotation layer just built for the project.
-   * The part cannot store it: the record is keyed by project id and only the flow has that.
+   * Emitted whenever the annotation layer changes: once when the files annotated before entry are
+   * done, then after every file the background queue lands, including on a reopened project. The
+   * part cannot store it: the record is keyed by project id and only the flow has that.
    */
   onAnnotations?: (set: AnnotationSet) => void;
   /**
@@ -126,14 +163,16 @@ export interface CodeprojHandle {
 export type CodeprojView = "code" | "concepts";
 
 export function mountCodeproj(container: HTMLElement, props: CodeprojProps): CodeprojHandle {
-  const { session, project, initialInput, onFileSeen, onProjectGenerated, onExchange } = props;
-  // Reassigned once when a generation builds its own layer, so the first file opened after
-  // generating shows notes without waiting for a remount.
+  const { session, project, loadRepo, onFileSeen, onProjectLoaded, onExchange } = props;
+  // Replaced as files are annotated, before entry and then behind the learner.
   let annotations = props.annotations ?? { files: {} };
+  // What every annotation prompt is written for. Set by the form on a fresh load, or handed in
+  // with a reopened project.
+  let request: ReadingRequest | undefined = props.request;
   // The concept layer, replaced wholesale as the background pass lands each document.
   let concepts: ConceptSet | null = props.concepts ?? null;
   // The debug layer. Replaced the same way, one leg at a time, and unlike the other two it can
-  // grow on a project the learner reopened long after it was generated.
+  // grow on a project the learner reopened long after it was loaded.
   let traces: TraceSet = props.traces ?? { runs: {} };
   /*
    * Where a debug run stands. `stepAt` indexes `run.steps`, or -1 for no run.
@@ -152,7 +191,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
   container.innerHTML = "";
   container.classList.add("lh-codeproj");
 
-  let currentProject: GeneratedProject | null = project ?? null;
+  let currentProject: CodeProject | null = project ?? null;
   let selectedPath: string | null = null;
   const seenPaths = new Set<string>();
   // Collected regions, possibly from several files. They become the subject of the next request.
@@ -186,7 +225,7 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
         return false;
       }
       reseedsLeft -= 1;
-      // Generation-class cost behind an explanation-class click, so it says so and keeps a live
+      // Load-class cost behind an explanation-class click, so it says so and keeps a live
       // signal: a minutes-long block of unchanging grey text next to greyed buttons reads as a hang.
       entry.setWaiting("이전 해설 세션이 만료되어 코드베이스를 다시 보내는 중입니다. 잠시 걸립니다...");
       const ok = await reseedSession(session, currentProject);
@@ -565,49 +604,121 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     panes.classList.add("lh-cp-no-ai");
   }
 
-  // ── generation (only starts on an explicit action) ───────────────────────────
+  // ── background: what is written behind a learner who is already reading ──────
+  //
+  // One queue for the files not annotated before entry and for the concept layer, so at most one
+  // background call ever runs beside the learner's own (see background.ts for why one). Declared
+  // before anything below can open a file, because opening one reads and bumps the queue.
 
-  if (!currentProject && session) {
-    container.insertBefore(buildGeneratePanel(), panes);
+  type Job = { kind: "annotate"; path: string } | { kind: "outline" } | { kind: "concept"; id: string };
+  const annotateKey = (path: string): string => `a:${path}`;
+  const jobKey = (job: Job): string =>
+    job.kind === "annotate" ? annotateKey(job.path) : job.kind === "outline" ? "outline" : `c:${job.id}`;
+  const queue = createJobQueue<Job>(jobKey, runJob, {
+    // Repainted after the job has left the queue, so the header stops saying "만드는 중".
+    onDone: (job) => {
+      if (job.kind === "annotate" && job.path === selectedPath) paintAnnotationState();
+    },
+  });
+
+  async function runJob(job: Job): Promise<void> {
+    if (!session || !currentProject) return;
+    if (job.kind === "annotate") {
+      const file = fileByPath(currentProject, job.path);
+      if (!file) return;
+      const built = await annotateFile(session, file.path, file.content, request);
+      annotations = { files: { ...annotations.files, [file.path]: built } };
+      props.onAnnotations?.(annotations);
+      return;
+    }
+    if (job.kind === "outline") {
+      const seeds = await outlineConcepts(session, undefined, request);
+      if (!seeds.length) return;
+      publishConcepts(seedSet(seeds));
+      // Ahead of the remaining annotations: a whole concept set is minutes, the rest of a large
+      // repository can be hours, and a file the learner opens still jumps ahead of both.
+      queue.push(seeds.map((seed) => ({ kind: "concept" as const, id: seed.concept_id })), { front: true });
+      return;
+    }
+    const entry = concepts?.entries.find((e) => e.seed.concept_id === job.id);
+    if (!entry || !concepts) return;
+    entry.status = "writing";
+    entry.reason = undefined;
+    publishConcepts(concepts);
+    const { doc, reason } = await writeConcept(session, entry.seed);
+    if (doc) {
+      entry.doc = doc;
+      entry.status = "ok";
+    } else {
+      entry.status = "failed";
+      entry.reason = reason;
+    }
+    publishConcepts(concepts);
+  }
+
+  /** A learner's own "make" or "retry" goes through the queue too, and to its front. */
+  function requestAnnotation(path: string): void {
+    queue.push([{ kind: "annotate", path }], { front: true });
+    queue.bump(annotateKey(path));
+    paintAnnotationState();
+  }
+
+  // ── loading a repository (only starts on an explicit action) ────────────────
+
+  if (!currentProject && session && loadRepo) {
+    container.insertBefore(buildLoadPanel(session, loadRepo), panes);
+    // The empty grid is hidden while the form is up. Both used to share one fixed-height column,
+    // and a form this tall pushed its own button below a viewport that does not scroll.
+    panes.style.display = "none";
   } else if (!currentProject) {
-    setSummary("표시할 프로젝트가 없습니다 (사전 생성 프로젝트 주입 또는 AI 설정 필요).");
+    setSummary("표시할 프로젝트가 없습니다 (미리 준비된 프로젝트 주입 또는 AI 설정 필요).");
   } else {
     loadProject(currentProject);
   }
 
-  function buildGeneratePanel(): HTMLElement {
-    const panel = el("div", "lh-cp-generate-panel");
-    const topicInput = el("input", "lh-cp-topic-input");
-    topicInput.type = "text";
-    topicInput.placeholder = "예: 간단한 메모 앱";
-    topicInput.value = initialInput?.topic ?? "";
+  function buildLoadPanel(live: AiSession, load: NonNullable<CodeprojProps["loadRepo"]>): HTMLElement {
+    const panel = el("div", "lh-cp-load-panel");
 
-    const scaleSelect = el("select", "lh-cp-scale-select");
-    for (const [val, label] of [
-      // These must match SCALE_GUIDE in prompts.ts: the form tells the learner what the
-      // prompt tells the model, and the two drifting apart is a lie the screen tells.
-      ["small", "소 (6-9 파일)"],
-      ["medium", "중 (10-16 파일)"],
-      ["large", "대 (18-30 파일)"],
-    ] as const) {
-      const o = document.createElement("option");
-      o.value = val;
-      o.textContent = label;
-      scaleSelect.appendChild(o);
+    let fieldSeq = 0;
+    function field(label: string, control: HTMLInputElement | HTMLTextAreaElement, hint?: string): HTMLElement {
+      const wrap = el("div", "lh-cp-load-field");
+      control.id = `lh-cp-load-${++fieldSeq}`;
+      const lab = el("label", "lh-cp-load-label", label);
+      lab.setAttribute("for", control.id);
+      wrap.appendChild(lab);
+      wrap.appendChild(control);
+      if (hint) wrap.appendChild(el("p", "lh-cp-load-hint", hint));
+      return wrap;
     }
-    scaleSelect.value = initialInput?.scale ?? "medium";
+    function text(cls: string, placeholder: string): HTMLInputElement {
+      const input = el("input", cls);
+      input.type = "text";
+      input.placeholder = placeholder;
+      input.spellcheck = false;
+      input.autocomplete = "off";
+      return input;
+    }
+    function area(cls: string, rows: number, placeholder: string): HTMLTextAreaElement {
+      const box = el("textarea", cls);
+      box.rows = rows;
+      box.placeholder = placeholder;
+      return box;
+    }
 
-    const seedInput = el("input", "lh-cp-seed-input");
-    seedInput.type = "text";
-    seedInput.placeholder = "예: Python, 외부 라이브러리 없이";
-    seedInput.value = initialInput?.seed ?? "";
+    const sourceInput = text("lh-cp-load-source", "https://github.com/owner/repo 또는 C:\\경로\\폴더");
+    const refInput = text("lh-cp-load-ref", "비우면 기본 브랜치");
+    const goalInput = area("lh-cp-load-goal", 2, "예: 전체 구조를 파악하고 싶다. 이 언어는 읽을 줄 안다.");
+    const focusInput = area("lh-cp-load-focus", 2, "예: 요청이 들어와 응답이 나가기까지");
+    const scopeInput = area("lh-cp-load-scope", 3, "src/auth\n*.py");
+    scopeInput.spellcheck = false;
 
-    const startBtn = el("button", "lh-cp-generate-btn", "프로젝트 생성");
-    const status = el("div", "lh-cp-generate-status", "");
-    const phaseEl = el("span", "lh-cp-generate-phase", "");
+    const startBtn = el("button", "lh-cp-load-btn", "불러오기");
+    startBtn.type = "button";
+    const status = el("div", "lh-cp-load-status", "");
+    const phaseEl = el("span", "lh-cp-load-phase", "");
     // Counts, paths and the clock go in their own span: fixed width digits so the line does not
     // twitch every second, and an ellipsis so a long path cannot push the phase text around.
-    const metaEl = el("span", "lh-cp-generate-meta", "");
+    const metaEl = el("span", "lh-cp-load-meta", "");
     status.appendChild(phaseEl);
     status.appendChild(metaEl);
 
@@ -620,15 +731,13 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     }
 
     /**
-     * Phase 1 is one opaque call of several minutes with nothing to count, so it pulses and
-     * shows the clock -- the docs call for elapsed time on a generation-class wait, and a line
-     * that does not change for four minutes reads as a hang. Phase 2 counts real files, so it
-     * already moves and does not need the animation on top.
+     * The opaque phases pulse and show the clock -- a line that does not change for minutes reads
+     * as a hang. The annotation phase counts real files, so it already moves without the pulse.
      */
-    function setPhase(text: string, meta: string, waiting: boolean): void {
-      phaseEl.textContent = text;
+    function setPhase(label: string, meta: string, waiting: boolean): void {
+      phaseEl.textContent = label;
       metaEl.textContent = meta ? `${meta} · ${clock()}` : clock();
-      status.classList.toggle("lh-cp-generate-status--waiting", waiting);
+      status.classList.toggle("lh-cp-load-status--waiting", waiting);
     }
 
     let phase: () => void = () => undefined;
@@ -638,12 +747,10 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     }
 
     /*
-     * Where a refused topic and a failed generation are explained.
-     *
-     * Separate from `status` because status is one line that the ticker overwrites every second,
-     * and this has to stay put and be read: a reason, and topics that can be pasted straight in.
+     * Where a failure is explained. Separate from `status` because status is one line the ticker
+     * rewrites every second, and this has to stay put and be read.
      */
-    const advice = el("div", "lh-cp-generate-advice");
+    const advice = el("div", "lh-cp-load-advice");
     advice.hidden = true;
 
     function clearAdvice(): void {
@@ -651,148 +758,164 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
       advice.innerHTML = "";
     }
 
-    /** Stop, say why, and hand back something to do about it. */
-    function showAdvice(warning: string, suggestions: string[]): void {
+    function addToScope(dir: string): void {
+      const lines = parseScope(scopeInput.value);
+      if (!lines.includes(dir)) lines.push(dir);
+      scopeInput.value = lines.join("\n");
+    }
+
+    /**
+     * Stop, say why, and where there is something to do about it, hand it over. On `too_large` the
+     * server says where the bulk is, and each directory is a control that narrows the scope to it:
+     * the fix is picking part of the repository, so the part is what gets pressed.
+     */
+    function showAdvice(detail: string, dirs?: { dir: string; files: number; bytes: number }[]): void {
       advice.innerHTML = "";
-      advice.appendChild(el("p", "lh-cp-generate-warning", warning));
-      if (suggestions.length) {
-        advice.appendChild(
-          el("p", "lh-cp-generate-advice-lead", "이렇게 적으면 만들 수 있습니다. 눌러서 채우세요."),
-        );
-        const list = el("div", "lh-cp-generate-suggestions");
-        for (const s of suggestions) {
-          const pick = el("button", "lh-cp-generate-suggestion", s);
+      if (detail) advice.appendChild(el("p", "lh-cp-load-warning", detail));
+      const picks = (dirs ?? []).filter((d) => d.dir !== ".");
+      if (picks.length) {
+        advice.appendChild(el("p", "lh-cp-load-advice-lead", "누르면 볼 파일 범위에 추가됩니다."));
+        const list = el("div", "lh-cp-load-dirs");
+        for (const d of picks) {
+          const pick = el("button", "lh-cp-load-dir");
           pick.type = "button";
-          // Filling the box IS the fix, so the suggestion is the control rather than a caption
-          // beside one. Focus lands in the topic field so the learner can keep editing it.
+          pick.appendChild(el("span", "lh-cp-load-dir-name", d.dir));
+          pick.appendChild(el("span", "lh-cp-load-dir-meta", `${d.files}개 · ${formatBytes(d.bytes)}`));
           pick.addEventListener("click", () => {
-            topicInput.value = s;
-            clearAdvice();
-            topicInput.focus();
+            addToScope(d.dir);
+            scopeInput.focus();
           });
           list.appendChild(pick);
         }
         advice.appendChild(list);
       }
-      advice.hidden = false;
+      advice.hidden = advice.childElementCount === 0;
     }
 
-    /**
-     * What to tell the learner about a generation that did not produce a project.
-     *
-     * One sentence per cause, because they call for different responses: a timeout wants a
-     * smaller scale, a refusal wants a different topic, a transport error wants the server
-     * checked, and a malformed reply usually just wants pressing the button again. Until
-     * 2026-09-10 all five arrived as the same sentence and none of them could be acted on.
-     */
-    function failureText(reason: GenerateFailure, detail?: string): string {
-      const tail = detail ? ` (${detail})` : "";
-      switch (reason) {
-        case "timeout":
-          return "생성이 제한 시간 안에 끝나지 않았습니다. 규모를 한 단계 낮추거나 주제를 좁혀 주세요.";
-        case "call":
-          return `AI 서버 호출이 실패했습니다. 서버가 켜져 있는지 확인해 주세요.${tail}`;
-        case "parse":
-          return "AI가 프로젝트 대신 다른 형식으로 답했습니다. 대개 한 번 더 누르면 됩니다.";
-        case "shape":
-          return `AI가 프로젝트 형식에 맞지 않는 답을 보냈습니다. 다시 시도해 주세요.${tail}`;
+    /** One sentence per cause, because each calls for a different response. */
+    function failureText(res: Extract<RepoLoadResponse, { ok: false }>): string {
+      switch (res.reason) {
+        case "source":
+          return "저장소 주소나 폴더 경로를 다시 확인해 주세요.";
+        case "clone":
+          return "저장소를 받아오지 못했습니다. 주소, 브랜치 이름, 공개 저장소인지 확인해 주세요.";
+        case "path":
+          return "그 경로에서 폴더를 찾지 못했습니다. 이 컴퓨터에서의 전체 경로를 적어 주세요.";
+        case "too_large": {
+          const found = res.found ? ` (파일 ${res.found.files}개 · ${formatBytes(res.found.bytes)})` : "";
+          const limit = res.limits ? ` 한 번에 파일 ${res.limits.files}개, ${formatBytes(res.limits.bytes)}까지 읽습니다.` : "";
+          return `저장소가 큽니다${found}.${limit} 볼 파일 범위를 좁혀 주세요.`;
+        }
         case "empty":
-          return "파일이 하나도 없는 프로젝트가 돌아왔습니다. 주제를 조금 더 구체적으로 적어 주세요.";
+          return "읽을 파일이 남지 않았습니다. 볼 파일 범위가 맞는지 확인해 주세요.";
+        case "call":
+          return "AI 서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인해 주세요.";
       }
     }
 
-    function stopWith(text: string, meta = ""): void {
+    function stopWith(label: string, meta = ""): void {
       stopTicker();
-      status.classList.remove("lh-cp-generate-status--waiting");
-      phaseEl.textContent = text;
-      // The clock stays, and so does the scale. Both used to be wiped here, so "it failed"
-      // arrived without the two facts the learner already had on screen -- how long it ran, and
-      // at which scale. The second matters most on a timeout: "lower the scale" reads as nonsense
-      // to someone who picked `small` and was never told the model raised it to `large`.
+      status.classList.remove("lh-cp-load-status--waiting");
+      phaseEl.textContent = label;
+      // The clock stays: "it failed" without how long it ran is missing a fact already on screen.
       metaEl.textContent = meta ? `${meta} · ${clock()}` : clock();
       startBtn.disabled = false;
     }
 
     startBtn.addEventListener("click", async () => {
-      const topic = topicInput.value.trim();
-      if (!topic) {
-        status.textContent = "주제를 입력해 주세요.";
+      const source = sourceInput.value.trim();
+      if (!source) {
+        phaseEl.textContent = "저장소 주소나 폴더 경로를 입력해 주세요.";
+        metaEl.textContent = "";
+        sourceInput.focus();
         return;
       }
       clearAdvice();
-      const input: GenerateInput = {
-        topic,
-        scale: scaleSelect.value as GenerateInput["scale"],
-        seed: seedInput.value.trim() || undefined,
+      const reading: ReadingRequest = {
+        goal: goalInput.value.trim(),
+        focus: focusInput.value.trim(),
+        scope: parseScope(scopeInput.value),
       };
+      const ref = refInput.value.trim();
       startBtn.disabled = true;
       startedAt = Date.now();
       // Every exit below clears this: leaving it running would keep writing into an element the
       // panel is about to remove.
       ticker = window.setInterval(() => phase(), 1000);
 
-      /*
-       * Judge the topic first. One short call in front of a call that runs for minutes -- the
-       * only measured full generation is 279s (2026-09-02) -- because a topic this cannot build
-       * used to cost that entire wait and then say nothing about why.
-       *
-       * It fails open: a broken pre-check must not be able to lock anyone out of generating.
-       */
-      phase = () => setPhase("주제를 확인하는 중...", "", true);
+      phase = () => setPhase("저장소를 받아오는 중...", "", true);
       phase();
-      const verdict = await assessTopic(session!, input);
-      if (verdict.verdict === "reword") {
-        stopWith("이 주제로는 프로젝트를 만들기 어렵습니다.");
-        showAdvice(verdict.why, verdict.suggestions);
+      const loaded = await load({ source, ref: ref || null, include: reading.scope });
+      if (!loaded.ok) {
+        stopWith(failureText(loaded));
+        // On too_large the status line already carries the sizes, formatted; the server's own
+        // sentence would say the same thing again in raw numbers above the directory list.
+        showAdvice(loaded.reason === "too_large" ? "" : loaded.error, loaded.dirs);
         return;
       }
 
-      // The learner's scale was a recommendation; this is the one the model settled on, and
-      // generation binds to it as hard as it ever did.
-      input.scale = verdict.scale;
-      const scaleNote = verdict.scaleReason ? `규모 ${verdict.scale} · ${verdict.scaleReason}` : "";
-
-      phase = () => setPhase("프로젝트를 생성하는 중...", scaleNote, true);
+      const proj = projectFromRepo(loaded);
+      const size = `파일 ${proj.files.length}개 · ${formatBytes(loaded.total_bytes)}`;
+      phase = () => setPhase("코드베이스를 AI 세션에 싣는 중...", size, true);
       phase();
-
-      const result = await generateProject(session!, input);
-      if (!result.ok) {
-        stopWith(failureText(result.reason, result.detail), scaleNote);
+      if (!(await reseedSession(live, proj))) {
+        stopWith("코드베이스를 AI 세션에 싣지 못했습니다. 다시 눌러 주세요.", size);
         return;
       }
-      const project = result.project;
 
-      currentProject = project;
+      currentProject = proj;
+      request = reading;
       // Announce before rendering: loading the project immediately emits its first file-seen
       // event, and the owner has to be able to set up storage for it first.
-      onProjectGenerated?.(project, input);
-
-      // The explanation layer is built here, while the learner is still on the waiting screen and
-      // has nothing to click. Doing it after they enter would put their first question behind a
-      // chunk of it, and the wait would look like the tool being slow (design 08 §3.2).
-      annotations = await annotateProject(session!, project, (done, total, path) => {
-        const at = path ? `(${done + 1}/${total}) ${path}` : `(${total}/${total})`;
-        phase = () => setPhase("설명을 다는 중...", at, false);
-        phase();
+      onProjectLoaded?.(proj, {
+        kind: "repo",
+        source: loaded.source,
+        ref: loaded.ref,
+        commit: loaded.commit,
+        request: reading,
       });
+
+      const paths = proj.files.map((f) => f.path);
+      let first: string[] = [];
+      if (paths.length > ENTRY_ANNOTATE_MAX && (reading.goal || reading.focus)) {
+        phase = () => setPhase("먼저 읽을 파일을 고르는 중...", size, true);
+        phase();
+        first = await pickFocusFiles(live, proj, reading);
+      }
+      const order = annotationOrder(paths, first);
+
+      // The files read first are annotated here, while the learner is still on the waiting screen
+      // and has nothing to click (design 08 §3.2). Only those: past ENTRY_ANNOTATE_MAX the wait
+      // would grow with the repository, so the rest are written behind the learner.
+      annotations = await annotateProject(
+        live,
+        proj,
+        (done, total, path) => {
+          const at = path ? `(${done + 1}/${total}) ${path}` : `(${total}/${total})`;
+          phase = () => setPhase("설명을 다는 중...", at, false);
+          phase();
+        },
+        { paths: order.slice(0, ENTRY_ANNOTATE_MAX), request: reading },
+      );
       props.onAnnotations?.(annotations);
 
       stopTicker();
       panel.remove();
-      loadProject(project);
+      panes.style.display = "";
+      // Open the first file the learner is meant to read, not the first one in the tree.
+      loadProject(proj, order[0]);
 
-      // Deliberately not awaited: the learner enters now and the concepts fill in behind them.
-      void buildConcepts(project);
+      queue.push([
+        { kind: "outline" },
+        ...order.slice(ENTRY_ANNOTATE_MAX).map((path) => ({ kind: "annotate" as const, path })),
+      ]);
     });
 
-    panel.appendChild(el("label", "", "주제"));
-    panel.appendChild(topicInput);
-    // "권장": the model may move this, and the screen has to say so rather than promising a
-    // range it does not control. The chosen scale is reported back on the waiting line.
-    panel.appendChild(el("label", "", "규모 (권장)"));
-    panel.appendChild(scaleSelect);
-    panel.appendChild(el("label", "", "제약/스택 (선택)"));
-    panel.appendChild(seedInput);
+    panel.appendChild(field("저장소", sourceInput));
+    panel.appendChild(field("브랜치 또는 태그 (선택)", refInput));
+    panel.appendChild(field("학습 목적과 수준", goalInput));
+    panel.appendChild(field("집중할 곳", focusInput));
+    panel.appendChild(field("볼 파일 범위 (선택)", scopeInput, "한 줄에 경로나 패턴 하나. 비우면 전체를 읽습니다."));
     panel.appendChild(startBtn);
     panel.appendChild(status);
     panel.appendChild(advice);
@@ -801,29 +924,38 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
 
   // ── project + file selection ────────────────────────────────────────────────
 
-  function loadProject(proj: GeneratedProject): void {
+  function loadProject(proj: CodeProject, firstPath?: string): void {
     titleEl.textContent = proj.title;
     setSummary(proj.summary);
     filePanel.render(proj, buildTree(proj.files));
     filePanel.markSeen(seenPaths);
-    if (proj.files.length > 0) selectFile(proj.files[0].path);
+    const first = (firstPath && fileByPath(proj, firstPath)) || proj.files[0];
+    if (first) selectFile(first.path);
   }
 
-
-  /** Rebuild one file's notes on demand. The pass itself never retries; the learner does. */
-  async function retryAnnotations(path: string, content: string): Promise<void> {
-    if (!session) return;
-    codePanel.offerAnnotationRetry(false, () => undefined);
-    const built = await annotateFile(session, path, content);
-    annotations = { files: { ...annotations.files, [path]: built } };
-    props.onAnnotations?.(annotations);
-    if (selectedPath === path) {
-      codePanel.setAnnotations(built.status === "ok" ? parseAnnotations(built.items, content.split(String.fromCharCode(10)).length).items : []);
-      codePanel.offerAnnotationRetry(built.status === "failed", () => {
-        void retryAnnotations(path, content);
-      });
-    }
+  /**
+   * The note-link slot for the file on screen: its notes, or what can be done about having none.
+   *
+   * "Pending" is read from the queue rather than stored, so it cannot outlive the job it describes.
+   * A file with no entry at all is offered a "make" only where a session could make it -- never on
+   * an offline instance, and never sent on its own: opening a reopened project spends nothing.
+   */
+  function paintAnnotationState(): void {
+    if (!currentProject || !selectedPath) return;
+    const file = fileByPath(currentProject, selectedPath);
+    if (!file) return;
+    const forFile = annotations.files[file.path];
+    codePanel.setAnnotations(
+      forFile?.status === "ok" ? parseAnnotations(forFile.items, file.content.split(String.fromCharCode(10)).length).items : [],
+    );
+    const path = file.path;
+    if (!session) codePanel.setAnnotationAction("none", () => undefined);
+    else if (queue.has(annotateKey(path))) codePanel.setAnnotationAction("pending", () => undefined);
+    else if (forFile?.status === "failed") codePanel.setAnnotationAction("retry", () => requestAnnotation(path));
+    else if (!forFile) codePanel.setAnnotationAction("make", () => requestAnnotation(path));
+    else codePanel.setAnnotationAction("none", () => undefined);
   }
+
   function selectFile(path: string): void {
     if (!currentProject) return;
     const file = fileByPath(currentProject, path);
@@ -840,17 +972,12 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     codePanel.show(file.path, file.content, file.lang);
     // Regions collected in this file stay visible when returning to it.
     codePanel.markScraps(scraps.filter((s) => s.path === path).map((s) => s.lines));
-    // Parsed here rather than at storage time: the file's own length is what separates a real
+    // A file still waiting for its notes moves to the front of the queue the moment it is opened,
+    // so the wait is the job in flight rather than every file ahead of it in tree order.
+    if (session && !annotations.files[path]) queue.bump(annotateKey(path));
+    // Parsed there rather than at storage time: the file's own length is what separates a real
     // line range from one the model invented, and only this side knows it.
-    const forFile = annotations.files[path];
-    codePanel.setAnnotations(
-      forFile?.status === "ok" ? parseAnnotations(forFile.items, file.content.split(String.fromCharCode(10)).length).items : [],
-    );
-    // Only where a retry could actually run: no session means nothing to ask, and a file that
-    // was never annotated at all is not a failure to recover from.
-    codePanel.offerAnnotationRetry(!!session && forFile?.status === "failed", () => {
-      void retryAnnotations(path, file.content);
-    });
+    paintAnnotationState();
     // A run in progress outlives a file switch -- including the switch the run itself caused.
     // `show()` has just rebuilt every line, so the markers have to be put back.
     applyDebugMarks();
@@ -880,21 +1007,17 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     updateTargetHint(codePanel.selection());
   }
 
-  /** Rebuild one failed document on demand. The pass itself never retries; the learner does. */
-  async function retryConcept(entry: ConceptEntry): Promise<void> {
+  /**
+   * Rebuild one failed document on demand. The pass itself never retries; the learner does. It
+   * goes through the queue's front rather than straight to the model, so a retry pressed while the
+   * background is busy does not become a third concurrent call.
+   */
+  function retryConcept(entry: ConceptEntry): void {
     if (!session || !concepts) return;
-    entry.status = "writing";
+    entry.status = "pending";
     entry.reason = undefined;
     conceptView.render(concepts);
-    const { doc, reason } = await writeConcept(session, entry.seed);
-    if (doc) {
-      entry.doc = doc;
-      entry.status = "ok";
-    } else {
-      entry.status = "failed";
-      entry.reason = reason;
-    }
-    publishConcepts(concepts);
+    queue.push([{ kind: "concept", id: entry.seed.concept_id }], { front: true });
   }
 
   function publishConcepts(set: ConceptSet): void {
@@ -903,22 +1026,6 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
     const p = conceptProgress(set);
     props.onConceptProgress?.(p.done, p.total);
     props.onConcepts?.(set);
-  }
-
-  /**
-   * Write the concept layer in the background, after the learner is already reading.
-   *
-   * Unlike the annotation pass this does not gate entry. Annotations attach to the code being read
-   * and are needed at minute zero; a concept page is somewhere else on the screen, so it can fill
-   * in while the learner works, and the outline arrives fast enough (measured 12.2s) that the list
-   * is populated almost immediately.
-   */
-  async function buildConcepts(proj: GeneratedProject): Promise<void> {
-    if (!session || !proj.files.length) return;
-    const seeds = await outlineConcepts(session);
-    if (!seeds.length) return;
-    publishConcepts({ entries: seeds.map((seed) => ({ seed, status: "pending" as const })) });
-    await writeConcepts(session, seeds, (set) => publishConcepts(set));
   }
 
   function updateTargetHint(range: [number, number] | null): void {
@@ -1060,8 +1167,8 @@ export function mountCodeproj(container: HTMLElement, props: CodeprojProps): Cod
 // Public surface: the pure model, the prompt builders and the session calls are re-exported so
 // callers and tests keep importing one module path.
 export * from "./model";
-export { LENS_LABELS, LENS_ORDER, QUALITY_CLAUSE } from "./prompts";
-export { generateProject, explain, ask } from "./session";
+export { LENS_LABELS, LENS_ORDER } from "./prompts";
+export { explain, ask } from "./session";
 export type { ConceptDoc, ConceptEntry, ConceptSeed, ConceptSet } from "./concepts";
 export { AiSession };
 export { createAiClient } from "../../src/ai/client";

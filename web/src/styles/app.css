@@ -212,7 +212,9 @@ body {
 .lh-cp-actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 3px; }
 #app .lh-cp-act { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--lh-line-strong); background: var(--lh-surface); border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--lh-ink-mid); }
 #app .lh-cp-act--on { border-color: var(--lh-primary-line); background: var(--lh-primary-soft); color: var(--lh-primary); }
-.lh-cp-summary { color: var(--lh-ink-mid); font-size: 15px; margin: 12px 0 0; line-height: 1.65; }
+/* `anywhere`: the summary now starts with a repository URL or a Windows path, neither of which has a
+   break opportunity, and an unbroken one overflows the clamp box instead of wrapping inside it. */
+.lh-cp-summary { color: var(--lh-ink-mid); font-size: 15px; margin: 12px 0 0; line-height: 1.65; overflow-wrap: anywhere; }
 .lh-cp-memo { margin-top: 16px; }
 #app .lh-cp-memo-ta { width: 100%; min-height: 84px; padding: 14px 16px; border: 1px solid var(--lh-line-strong); border-radius: 12px; font-size: 14px; line-height: 1.6; color: var(--lh-ink); background: var(--lh-surface-soft); }
 
@@ -689,18 +691,36 @@ body {
 .lh-cp-ask-bar { display: flex; gap: var(--lh-s2); padding: var(--lh-s3) var(--lh-s4); border-top: 1px solid var(--lh-line-soft); }
 .lh-cp-ask-input { flex: 1; min-width: 0; resize: vertical; padding: var(--lh-s2); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs); background: var(--lh-surface); color: var(--lh-ink); font: inherit; font-size: 13px; }
 
-.lh-cp-generate-panel {
-  display: grid; gap: var(--lh-s2); max-width: 520px;
+/* ── 저장소 불러오기 폼 ──────────────────────────────────────────────────────
+   The grid below it is hidden while it is up (codeproj.ts), so the form is the only thing in the
+   host column. It scrolls on its own: an instance may lock the page to the viewport while a
+   codeproj is mounted, and five fields plus an advice block are taller than a short screen. */
+.lh-cp-load-panel {
+  display: grid; gap: var(--lh-s3); width: 100%; max-width: 560px; box-sizing: border-box;
   margin: var(--lh-s5) auto; padding: var(--lh-s5);
   background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r);
+  min-height: 0; overflow-y: auto;
+  /* max-content rows: once the panel is height-bound and scrolling, `auto` rows shrink to their stated
+     minimum, and a two-line failure sentence (min-height 1.2em) was measured at 15.6px tall with 43px of
+     text, drawn underneath the advice block below it. */
+  grid-auto-rows: max-content;
 }
-.lh-cp-generate-panel label { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); }
-.lh-cp-generate-panel input, .lh-cp-generate-panel select { padding: var(--lh-s2) var(--lh-s3); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs); background: var(--lh-surface); color: var(--lh-ink); font-size: 14px; }
-#app .lh-cp-generate-btn { margin-top: var(--lh-s2); padding: var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 14px; font-weight: 700; cursor: pointer; }
+.lh-cp-load-field { display: grid; gap: var(--lh-s1); }
+.lh-cp-load-label { font-size: 12px; font-weight: 700; color: var(--lh-ink-mid); }
+.lh-cp-load-hint { margin: 0; font-size: 12px; color: var(--lh-ink-faint); }
+.lh-cp-load-panel input, .lh-cp-load-panel textarea {
+  padding: var(--lh-s2) var(--lh-s3); border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-xs);
+  background: var(--lh-surface); color: var(--lh-ink); font: inherit; font-size: 14px; line-height: 1.5;
+}
+.lh-cp-load-panel textarea { resize: vertical; }
+/* Paths and globs line up the way code does, so the scope box and the source box are mono. */
+.lh-cp-load-panel .lh-cp-load-source, .lh-cp-load-panel .lh-cp-load-scope { font-family: var(--lh-font-mono); font-size: 13px; }
+#app .lh-cp-load-btn { margin-top: var(--lh-s2); padding: var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 14px; font-weight: 700; cursor: pointer; }
+#app .lh-cp-load-btn:hover { background: var(--lh-primary-strong); }
 /* The waiting screen's meta track. Fixed-width digits so a ticking clock does not make the
    line twitch once a second, and an ellipsis so a long path cannot shove the phase text
    sideways -- the same treatment the target hint already uses for paths. */
-.lh-cp-generate-meta {
+.lh-cp-load-meta {
   margin-left: var(--lh-s2);
   font-family: var(--lh-font-mono);
   font-variant-numeric: tabular-nums;
@@ -710,18 +730,18 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Phase one is a single opaque call of several minutes with nothing to count. Reuses the same
-   pulse as the AI panel's long wait rather than inventing a second one. */
-.lh-cp-generate-status.lh-cp-generate-status--waiting .lh-cp-generate-phase {
+/* The opaque phases have nothing to count. Reuses the same pulse as the AI panel's long wait
+   rather than inventing a second one. */
+.lh-cp-load-status.lh-cp-load-status--waiting .lh-cp-load-phase {
   animation: lh-pulse 1.1s ease-in-out infinite;
 }
-.lh-cp-generate-status { font-size: 13px; color: var(--lh-ink-mid); min-height: 1.2em; }
+.lh-cp-load-status { font-size: 13px; color: var(--lh-ink-mid); min-height: 1.2em; }
 
-/* ── 주제 판정 결과 (FR-25) ──────────────────────────────────────────────────
-   A block that stays put, unlike the status line the clock rewrites every second. It carries
-   the one thing a refused generation owes the learner: why, and something to press. */
-.lh-cp-generate-advice {
-  margin-top: var(--lh-s3);
+/* A block that stays put, unlike the status line the clock rewrites every second. It carries what
+   a failed load owes the learner: the server's own reason, and on a too-large repository the
+   directories that make it large, each one a control that narrows the scope to it. */
+.lh-cp-load-advice {
+  margin-top: var(--lh-s1);
   padding: var(--lh-s3) var(--lh-s4);
   background: var(--lh-amber-bg);
   border: 1px solid var(--lh-amber-line);
@@ -729,25 +749,28 @@ body {
   display: grid;
   gap: var(--lh-s2);
 }
-.lh-cp-generate-warning { margin: 0; font-size: 13px; line-height: 1.6; color: var(--lh-amber-ink); font-weight: 700; }
-.lh-cp-generate-advice-lead { margin: 0; font-size: 12.5px; color: var(--lh-ink-mid); }
-.lh-cp-generate-suggestions { display: grid; gap: var(--lh-s2); }
-/* Pressing one fills the topic box, so it is a control and reads as one -- a left-aligned block
-   that can wrap, because these are whole sentences and not chips. */
-#app .lh-cp-generate-suggestion {
+.lh-cp-load-warning { margin: 0; font-size: 13px; line-height: 1.6; color: var(--lh-amber-ink); font-weight: 700; overflow-wrap: anywhere; }
+.lh-cp-load-advice-lead { margin: 0; font-size: 12.5px; color: var(--lh-ink-mid); }
+.lh-cp-load-dirs { display: grid; gap: var(--lh-s2); }
+/* The archive row's title-and-meta shape, so a directory reads as a thing to pick, not a caption. */
+#app .lh-cp-load-dir {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lh-s3);
   padding: var(--lh-s2) var(--lh-s3);
   background: var(--lh-surface);
   border: 1px solid var(--lh-amber-line);
   border-radius: var(--lh-r-xs);
   color: var(--lh-ink);
   font-size: 13px;
-  line-height: 1.55;
   text-align: left;
   cursor: pointer;
 }
-/* `background` restated: without it `#app button:hover` wins and floods the suggestion with the
-   accent, which is the defect tests/accent_contrast.test.ts exists to catch. */
-#app .lh-cp-generate-suggestion:hover {
+.lh-cp-load-dir-name { font-family: var(--lh-font-mono); font-weight: 700; overflow-wrap: anywhere; }
+.lh-cp-load-dir-meta { margin-left: auto; font-size: 12px; color: var(--lh-ink-faint); white-space: nowrap; }
+/* `background` restated: without it `#app button:hover` wins and floods the row with the accent,
+   which is the defect tests/accent_contrast.test.ts exists to catch. */
+#app .lh-cp-load-dir:hover {
   background: var(--lh-surface);
   border-color: var(--lh-primary);
   color: var(--lh-primary-strong);
@@ -760,22 +783,18 @@ body {
   .lh-cp-code-scroll { max-height: 50vh; }
 }
 
-/* ── codeproj launcher: proposals + archive, shown before a project is open ──── */
+/* ── codeproj launcher: load + archive, shown before a project is open ─────── */
 
 .lh-cp-launcher { display: grid; gap: var(--lh-s5); max-width: 980px; margin: 0 auto; padding: var(--lh-s5); }
 .lh-cp-launcher-title { margin: 0 0 var(--lh-s3); font-family: var(--lh-font-display); font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--lh-ink); }
 .lh-cp-launcher-empty { margin: 0 0 var(--lh-s3); color: var(--lh-ink-faint); font-size: 13.5px; }
 
-.lh-cp-proposal-list { display: grid; gap: var(--lh-s3); grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
-.lh-cp-proposal { display: flex; flex-direction: column; gap: var(--lh-s2); padding: var(--lh-s4); background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); }
-.lh-cp-proposal-title { margin: 0; font-size: 15.5px; font-weight: 800; color: var(--lh-ink); letter-spacing: -0.01em; }
-.lh-cp-proposal-meta { display: flex; flex-wrap: wrap; gap: var(--lh-s1); }
+/* The launcher's one filled control: loading is the only thing to start from this screen. Sized to its
+   label, and `background` restated on :hover so the kit's `#app button:hover` cannot pick it. */
+#app .lh-cp-launcher-load-btn { justify-self: start; padding: var(--lh-s3) var(--lh-s5); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 14px; font-weight: 700; cursor: pointer; }
+#app .lh-cp-launcher-load-btn:hover { background: var(--lh-primary-strong); }
+/* Kept after the launcher cards went: the concept view and the note popup still wear it. */
 .lh-cp-chip { padding: 2px 10px; background: var(--lh-primary-soft); border-radius: var(--lh-r-pill); font-size: 11.5px; font-weight: 700; color: var(--lh-primary-strong); }
-.lh-cp-proposal-why { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--lh-ink-mid); }
-.lh-cp-proposal-points { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--lh-ink-soft); }
-.lh-cp-proposal-prereq { margin: 0; font-size: 12px; color: var(--lh-ink-faint); }
-#app .lh-cp-start-btn { margin-top: auto; padding: var(--lh-s2) var(--lh-s3); background: var(--lh-primary); border: none; border-radius: var(--lh-r-sm); color: var(--lh-on-primary); font-size: 13.5px; font-weight: 700; cursor: pointer; }
-#app .lh-cp-free-start { margin-top: var(--lh-s3); padding: var(--lh-s2) var(--lh-s4); background: transparent; border: 1px dashed var(--lh-line-strong); border-radius: var(--lh-r-sm); color: var(--lh-ink-mid); font-size: 13px; cursor: pointer; }
 
 .lh-cp-archive-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--lh-s2); }
 #app .lh-cp-archive-btn { display: flex; align-items: baseline; gap: var(--lh-s3); width: 100%; padding: var(--lh-s3) var(--lh-s4); background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r-sm); text-align: left; cursor: pointer; }
@@ -896,13 +915,6 @@ body {
 .lh-db-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--lh-ink-mid); }
 .lh-db-empty { margin: 0; color: var(--lh-ink-faint); font-size: 13.5px; }
 
-/* Launcher section head: title with the propose-then-start note beside it. */
-.lh-cp-launcher-head { display: flex; align-items: baseline; gap: var(--lh-s3); flex-wrap: wrap; margin-bottom: var(--lh-s3); }
-.lh-cp-launcher-head .lh-cp-launcher-title { margin: 0; }
-.lh-cp-launcher-note { margin-left: auto; font-size: 12px; color: var(--lh-ink-faint); }
-/* The start action sits at the card foot but is sized to its label, not the card. */
-#app .lh-cp-start-btn { align-self: flex-start; }
-
 /* Code panel syntax colours. Selection is a background, syntax is a text colour, so the two
    never fight: a selected line keeps its highlighting. */
 .lh-cp-code .tok-k { color: var(--lh-tok-kw); font-weight: 600; }
@@ -1021,6 +1033,9 @@ body {
   font-size: 11px; letter-spacing: 0.02em; border-radius: var(--lh-r-xs); padding: 2px 8px; cursor: pointer;
 }
 #app .lh-cp-note-link:hover, #app .lh-codeproj .lh-cp-note-scrap:hover { color: var(--lh-ink); border-color: var(--lh-primary); background: none; }
+/* Notes on their way: a state, not a control. Disabled in the DOM, so no hover to guard, and the same
+   pulse the waiting screen uses rather than a second animation. */
+#app .lh-cp-note-link.lh-cp-note-link--pending { cursor: default; border-style: dashed; color: var(--lh-ink-faint); animation: lh-pulse 1.6s ease-in-out infinite; }
 
 .lh-cp-code-line.lh-cp-line-scrapped { box-shadow: inset 2px 0 0 var(--lh-primary-line); background: var(--lh-surface-soft); }
 .lh-cp-code-line.lh-cp-line-scrapped.lh-cp-line-selected { background: var(--lh-primary-soft); }

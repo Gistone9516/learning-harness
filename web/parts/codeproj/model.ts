@@ -7,7 +7,7 @@ export interface ProjectFile {
   lang?: string;
 }
 
-export interface GeneratedProject {
+export interface CodeProject {
   title: string;
   summary: string;
   files: ProjectFile[];
@@ -79,154 +79,140 @@ export function canAddScrap(scraps: Scrap[], next: [number, number]): boolean {
   return scrapLineCount(scraps) + (next[1] - next[0] + 1) <= SCRAP_MAX_LINES;
 }
 
-export interface GenerateInput {
-  topic: string;
-  scale: "small" | "medium" | "large";
-  seed?: string;
+/**
+ * What the learner hands over with a repository: where it is, and what they want out of reading it.
+ *
+ * The three reading fields land in different places, which is why they are three fields and not
+ * one box. `scope` is applied by the server before a single file is read, so it decides what
+ * exists at all. `goal` and `focus` go into every annotation prompt, and they decide which files
+ * are annotated before the learner is let in. None is required: a repository with no request is
+ * still worth reading, only in tree order and at the default level.
+ */
+export interface RepoRequest {
+  source: string;
+  ref?: string;
+  /** Why they are reading it and at what level, in their own words. */
+  goal: string;
+  /** What to concentrate on, in their own words. */
+  focus: string;
+  /** Paths or globs to load. Empty loads everything the server's default filters keep. */
+  scope: string[];
+}
+
+/** The scope box holds one path or glob per line. */
+export function parseScope(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/** The part of a request that shapes prompts, as stored with the project. */
+export type ReadingRequest = Pick<RepoRequest, "goal" | "focus" | "scope">;
+
+/**
+ * Where a project came from.
+ *
+ * The request is stored with it rather than kept for the one visit, because annotation continues
+ * after the learner leaves and resumes when they come back: a file annotated on the second visit
+ * has to be written for the same goal as the files annotated on the first.
+ */
+export interface RepoOrigin {
+  kind: "repo";
+  source: string;
+  ref: string | null;
+  commit: string | null;
+  loaded_at: number;
+  request: ReadingRequest;
+}
+
+const EXT_LANG: Record<string, string> = {
+  py: "Python",
+  ts: "TypeScript",
+  tsx: "TypeScript",
+  js: "JavaScript",
+  jsx: "JavaScript",
+  mjs: "JavaScript",
+  cjs: "JavaScript",
+  java: "Java",
+  kt: "Kotlin",
+  go: "Go",
+  rs: "Rust",
+  c: "C",
+  h: "C",
+  cpp: "C++",
+  cc: "C++",
+  hpp: "C++",
+  cs: "C#",
+  rb: "Ruby",
+  php: "PHP",
+  swift: "Swift",
+  scala: "Scala",
+  sql: "SQL",
+  sh: "Shell",
+  vue: "Vue",
+  svelte: "Svelte",
+  dart: "Dart",
+};
+
+/**
+ * The stack label on the archive list: the languages with the most files, most first.
+ *
+ * Derived from extensions rather than asked for, because the label only has to tell two archived
+ * projects apart at a glance, and a model call for that would cost more than the list is worth.
+ * Files in no listed language (Markdown, JSON, config) do not vote.
+ */
+export function stackOf(files: ProjectFile[], max = 3): string {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    const lang = EXT_LANG[ext];
+    if (lang) counts.set(lang, (counts.get(lang) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, max)
+    .map(([lang]) => lang)
+    .join(" · ");
 }
 
 /**
- * The verdict on a topic, taken before the expensive call.
+ * Turn what the server read into the project every other layer consumes.
  *
- * `scale` always carries a value: on `go` it is the scale generation will be bound to, and on a
- * failed or unreadable assessment it is the learner's own pick. Nothing downstream has to handle
- * an absent scale, which is the difference between a gate and a new failure mode.
+ * The summary is built here from facts, never asked of a model: it is the header line the learner
+ * sees on every visit, and it has to say which repository and which commit this is, which only
+ * the loader knows.
  */
-export interface TopicAssessment {
-  verdict: "go" | "reword";
-  scale: GenerateInput["scale"];
-  /** Why the scale moved, or empty when it did not. */
-  scaleReason: string;
-  /** Why the topic was refused, or empty on `go`. */
-  why: string;
-  /** Ready-to-paste replacement topics. Empty on `go`. */
-  suggestions: string[];
-}
-
-const SCALES: readonly GenerateInput["scale"][] = ["small", "medium", "large"];
-
-/**
- * Read the assessment, and FAIL OPEN.
- *
- * A gate that refuses on its own malfunction is worse than no gate: the learner would be locked
- * out of generation by a broken pre-check instead of by a bad topic. So anything unreadable comes
- * back as `go` with the learner's own scale, and the only thing that can stop a generation is the
- * model explicitly saying `reword` with something to say about it.
- */
-export function parseAssessment(text: string, fallback: GenerateInput["scale"]): TopicAssessment {
-  const open: TopicAssessment = { verdict: "go", scale: fallback, scaleReason: "", why: "", suggestions: [] };
-
-  let cleaned = text.trim().replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
-  let raw: unknown;
-  try {
-    raw = JSON.parse(cleaned);
-  } catch {
-    return open;
-  }
-  if (typeof raw !== "object" || raw === null) return open;
-  const o = raw as Record<string, unknown>;
-
-  const str = (k: string): string => (typeof o[k] === "string" ? (o[k] as string).trim() : "");
-  const scale = SCALES.includes(o["scale"] as GenerateInput["scale"])
-    ? (o["scale"] as GenerateInput["scale"])
-    : fallback;
-  const suggestions = Array.isArray(o["suggestions"])
-    ? (o["suggestions"] as unknown[])
-        .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-        .map((s) => s.trim())
-        .slice(0, 3)
-    : [];
-
-  // A refusal with nothing to say is not actionable, so it is not honoured. The learner would be
-  // stopped and told only that they were stopped -- exactly the dead end this feature exists to
-  // remove, rebuilt one layer earlier.
-  const why = str("why");
-  if (str("verdict") === "reword" && why) {
-    return { verdict: "reword", scale, scaleReason: str("scale_reason"), why, suggestions };
-  }
-  return { verdict: "go", scale, scaleReason: str("scale_reason"), why: "", suggestions: [] };
-}
-
-/**
- * Why a reply could not become a project. Three causes wanting three different responses:
- * `parse` means prose or a reply cut off mid-JSON, `shape` means JSON about something else,
- * `empty` means it agreed to the schema and then filled in no files.
- */
-export type ProjectRejection = "parse" | "shape" | "empty";
-
-export type ParsedProject =
-  | { ok: true; project: GeneratedProject }
-  | { ok: false; reason: ProjectRejection; detail?: string };
-
-/**
- * parseProject: tolerant JSON parse — strips markdown code fences, then JSON.parse.
- *
- * Returns a REASON rather than a bare null. Generation is the one call a learner waits minutes
- * for, and until 2026-09-10 every way it could fail reached the screen as the same sentence:
- * nothing downstream could tell a truncated reply from prose from a well-formed answer about the
- * wrong thing. A learner reported burning two or three attempts of tens of minutes each with
- * nothing to go on, which is what that collapse costs.
- *
- * `empty` is a rejection now, not a success. A `files: []` satisfies every check below and used
- * to return a perfectly valid `GeneratedProject`, which then rendered an empty file tree and read
- * as a bug somewhere else entirely.
- */
-export function parseProject(text: string): ParsedProject {
-  let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, "");
-  cleaned = cleaned.replace(/\n?```\s*$/, "");
-  cleaned = cleaned.trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (e) {
-    // The parser's own message says where it broke, which separates prose from a cut-off reply.
-    return { ok: false, reason: "parse", detail: String((e as Error)?.message ?? e) };
-  }
-
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    typeof (parsed as Record<string, unknown>)["title"] !== "string" ||
-    typeof (parsed as Record<string, unknown>)["summary"] !== "string" ||
-    !Array.isArray((parsed as Record<string, unknown>)["files"])
-  ) {
-    // The keys it did send are the fastest way to see what it answered instead.
-    const detail =
-      typeof parsed === "object" && parsed !== null
-        ? Object.keys(parsed as Record<string, unknown>).slice(0, 8).join(", ")
-        : typeof parsed;
-    return { ok: false, reason: "shape", detail };
-  }
-
-  const raw = parsed as Record<string, unknown>;
-  const all = raw["files"] as unknown[];
-  const files: ProjectFile[] = all.filter(
-    (f): f is ProjectFile =>
-      typeof f === "object" &&
-      f !== null &&
-      typeof (f as Record<string, unknown>)["path"] === "string" &&
-      typeof (f as Record<string, unknown>)["content"] === "string",
-  );
-
-  if (files.length === 0) {
-    return { ok: false, reason: "empty", detail: `files: ${all.length}개 중 0개 사용 가능` };
-  }
-
-  const entrypoints = Array.isArray(raw["entrypoints"])
-    ? (raw["entrypoints"] as unknown[]).filter((e): e is string => typeof e === "string")
-    : undefined;
-
+export function projectFromRepo(loaded: {
+  title: string;
+  source: string;
+  ref: string | null;
+  commit: string | null;
+  files: { path: string; content: string }[];
+}): CodeProject {
+  const where = [loaded.source, loaded.ref, loaded.commit ? loaded.commit.slice(0, 7) : null]
+    .filter(Boolean)
+    .join(" · ");
   return {
-    ok: true,
-    project: {
-      title: raw["title"] as string,
-      summary: raw["summary"] as string,
-      files,
-      entrypoints,
-    },
+    title: loaded.title,
+    summary: `${where} · 파일 ${loaded.files.length}개`,
+    files: loaded.files.map((f) => ({ path: f.path, content: f.content })),
   };
+}
+
+/**
+ * The order files are annotated in: the chosen ones first, in the order they were chosen, then
+ * everything else in project order. Unknown and repeated paths in `first` are ignored, so a model
+ * that names a file twice or invents one cannot drop a real file from the pass.
+ */
+export function annotationOrder(paths: string[], first: string[]): string[] {
+  const known = new Set(paths);
+  const head: string[] = [];
+  for (const p of first) {
+    if (known.has(p) && !head.includes(p)) head.push(p);
+  }
+  const chosen = new Set(head);
+  return [...head, ...paths.filter((p) => !chosen.has(p))];
 }
 
 /**
@@ -267,10 +253,10 @@ export function buildTree(files: ProjectFile[]): TreeNode[] {
 }
 
 /**
- * fileByPath: lookup a file by its path in a GeneratedProject.
+ * fileByPath: lookup a file by its path in a CodeProject.
  * Path comparison is case-sensitive and slash-normalized (/ vs \).
  */
-export function fileByPath(project: GeneratedProject, path: string): ProjectFile | undefined {
+export function fileByPath(project: CodeProject, path: string): ProjectFile | undefined {
   const norm = (p: string) => p.replace(/\\/g, "/");
   const target = norm(path);
   return project.files.find((f) => norm(f.path) === target);

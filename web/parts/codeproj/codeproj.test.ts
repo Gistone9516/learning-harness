@@ -2,18 +2,16 @@ import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
 import {
-  parseProject,
   buildTree,
   fileByPath,
   explain,
-  generateProject,
-  type GeneratedProject,
+  type CodeProject,
   type ProjectFile,
 } from "./codeproj";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeProject(files: ProjectFile[]): GeneratedProject {
+function makeProject(files: ProjectFile[]): CodeProject {
   return { title: "Test Project", summary: "A test project.", files };
 }
 
@@ -22,98 +20,10 @@ function makeSession(send: (req: { prompt: string }) => AiResponse): AiSession {
     ai: vi.fn().mockImplementation(async (req) => send(req)),
     health: vi.fn().mockResolvedValue(true),
     problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
+    repos: vi.fn(),
   };
   return new AiSession(client);
 }
-
-// ── parseProject ──────────────────────────────────────────────────────────────
-
-describe("parseProject", () => {
-  const VALID_JSON = JSON.stringify({
-    title: "MyApp",
-    summary: "Does things.",
-    files: [
-      { path: "src/main.py", content: "print('hello')", lang: "python" },
-      { path: "README.md", content: "# MyApp" },
-    ],
-    entrypoints: ["src/main.py"],
-  });
-
-  /** Narrow the union once, so each case reads as one assertion rather than three. */
-  const ok = (text: string) => {
-    const r = parseProject(text);
-    if (!r.ok) throw new Error(`expected a project, got ${r.reason} (${r.detail ?? ""})`);
-    return r.project;
-  };
-  const rejected = (text: string) => {
-    const r = parseProject(text);
-    if (r.ok) throw new Error("expected a rejection, got a project");
-    return r;
-  };
-
-  it("parses plain JSON", () => {
-    const p = ok(VALID_JSON);
-    expect(p.title).toBe("MyApp");
-    expect(p.files).toHaveLength(2);
-    expect(p.entrypoints).toEqual(["src/main.py"]);
-  });
-
-  it("strips ```json fences", () => {
-    expect(ok("```json\n" + VALID_JSON + "\n```").title).toBe("MyApp");
-  });
-
-  it("strips plain ``` fences", () => {
-    expect(ok("```\n" + VALID_JSON + "\n```").title).toBe("MyApp");
-  });
-
-  // The three rejections below are the whole point of the reason field. Before 2026-09-10 they
-  // were one `null`, so a learner who waited minutes was told only that it had not worked -- and
-  // so was anyone reading the code afterwards.
-  it("says `parse` when the reply is prose rather than JSON", () => {
-    const r = rejected("죄송하지만 그 주제로는 만들 수 없습니다.");
-    expect(r.reason).toBe("parse");
-    // The parser's own message, so a truncated reply reads differently from prose.
-    expect(r.detail).toBeTruthy();
-  });
-
-  it("says `shape` when it is JSON about something else, and names the keys it did send", () => {
-    const r = rejected(JSON.stringify({ error: "cannot", explanation: "too vague" }));
-    expect(r.reason).toBe("shape");
-    expect(r.detail).toBe("error, explanation");
-  });
-
-  it("says `shape` for each missing required field", () => {
-    expect(rejected(JSON.stringify({ title: "X" })).reason).toBe("shape");
-    expect(rejected(JSON.stringify({ title: "X", summary: "Y" })).reason).toBe("shape");
-    expect(rejected(JSON.stringify({ title: "X", summary: "Y", files: "bad" })).reason).toBe("shape");
-  });
-
-  it("filters out malformed file entries but keeps valid ones", () => {
-    const p = ok(
-      JSON.stringify({
-        title: "T",
-        summary: "S",
-        files: [{ path: "ok.ts", content: "// ok" }, { missing_path: true, content: "bad" }, 42],
-      }),
-    );
-    expect(p.files).toHaveLength(1);
-    expect(p.files[0].path).toBe("ok.ts");
-  });
-
-  it("refuses a project with no usable files instead of returning an empty one", () => {
-    // This used to be a SUCCESS: `files: []` satisfies every type check above, so the screen got
-    // a valid GeneratedProject, rendered an empty file tree, and read as a bug somewhere else.
-    expect(rejected(JSON.stringify({ title: "T", summary: "S", files: [] })).reason).toBe("empty");
-    const allBad = rejected(JSON.stringify({ title: "T", summary: "S", files: [42, { nope: 1 }] }));
-    expect(allBad.reason).toBe("empty");
-    expect(allBad.detail).toContain("2");
-  });
-
-  it("handles missing entrypoints gracefully", () => {
-    const p = ok(JSON.stringify({ title: "T", summary: "S", files: [{ path: "a.ts", content: "" }] }));
-    expect(p.entrypoints).toBeUndefined();
-  });
-});
 
 // ── buildTree ─────────────────────────────────────────────────────────────────
 
@@ -218,10 +128,11 @@ describe("explain", () => {
       }),
       health: vi.fn().mockResolvedValue(true),
     problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
+    repos: vi.fn(),
     };
     const session = new AiSession(client);
 
-    // Seed session_id by calling send once (simulates prior generation)
+    // Seed session_id by calling send once (simulates the load that minted it)
     await session.send({ prompt: "generate", system: "sys" });
     expect(session.sessionId).toBe("sess-abc");
 
@@ -267,6 +178,7 @@ describe("explain", () => {
       }),
       health: vi.fn().mockResolvedValue(true),
     problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
+    repos: vi.fn(),
     };
     const session = new AiSession(client);
 
@@ -288,6 +200,7 @@ describe("explain", () => {
       }),
       health: vi.fn().mockResolvedValue(true),
     problems: vi.fn().mockResolvedValue({ ok: true, problems: [], error: null }),
+    repos: vi.fn(),
     };
     const session = new AiSession(client);
 
@@ -302,89 +215,6 @@ describe("explain", () => {
   });
 });
 
-// ── generateProject (fake session) ───────────────────────────────────────────
-
-describe("generateProject", () => {
-  const reply = (over: Record<string, unknown>) =>
-    makeSession(() => ({ ok: true, text: "", session_id: "s", error: null, ...over }) as any);
-
-  it("returns a GeneratedProject on success", async () => {
-    const canned: GeneratedProject = {
-      title: "Todo App",
-      summary: "A simple todo app.",
-      files: [{ path: "app.py", content: "# app" }],
-      entrypoints: ["app.py"],
-    };
-    const result = await generateProject(reply({ text: JSON.stringify(canned) }), {
-      topic: "todo app",
-      scale: "small",
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.project.title).toBe("Todo App");
-    expect(result.project.files[0].path).toBe("app.py");
-  });
-
-  // Four failures that used to be one `null`. Each wants a different response from the learner,
-  // which is why each has to arrive distinguishable.
-  it("reports a transport failure as `call`, carrying the server's own message", async () => {
-    const session = makeSession(() => ({ ok: false, text: "", session_id: null, error: "HTTP 502" }));
-    const result = await generateProject(session, { topic: "x", scale: "small" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("call");
-    expect(result.detail).toBe("HTTP 502");
-  });
-
-  it("splits a timeout out of the generic bucket, because it is the actionable one", async () => {
-    // `ai.py` reports its own ceiling this way. A learner can respond to it -- narrower topic,
-    // smaller scale -- which is not true of the others.
-    const session = makeSession(() => ({
-      ok: false,
-      text: "",
-      session_id: null,
-      error: "Timeout after 1800s",
-    }));
-    const result = await generateProject(session, { topic: "x", scale: "large" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("timeout");
-  });
-
-  it("reports prose as `parse`", async () => {
-    const result = await generateProject(reply({ text: "Sorry, I cannot help with that." }), {
-      topic: "x",
-      scale: "small",
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("parse");
-  });
-
-  it("reports a well-formed answer about the wrong thing as `shape`", async () => {
-    const result = await generateProject(reply({ text: JSON.stringify({ answer: "no" }) }), {
-      topic: "x",
-      scale: "small",
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("shape");
-  });
-
-  it("parses fenced JSON from generation response", async () => {
-    const canned = JSON.stringify({
-      title: "Calc",
-      summary: "Calculator.",
-      files: [{ path: "calc.py", content: "# calc" }],
-    });
-    const result = await generateProject(reply({ text: "```json\n" + canned + "\n```" }), {
-      topic: "calculator",
-      scale: "small",
-    });
-    expect(result.ok && result.project.title).toBe("Calc");
-  });
-});
-
 // ── subject_agnostic guard ────────────────────────────────────────────────────
 
 describe("subject_agnostic", () => {
@@ -393,11 +223,9 @@ describe("subject_agnostic", () => {
     // The actual check runs as part of the broader test_subject_agnostic.py gate;
     // this vitest variant checks the runtime exports carry no subject literal in their names.
     const exported = [
-      "parseProject",
       "buildTree",
       "fileByPath",
       "explain",
-      "generateProject",
       "mountCodeproj",
       "AiSession",
       "createAiClient",

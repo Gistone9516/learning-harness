@@ -61,7 +61,7 @@ type AiRequest = {
   prompt: string;                 // required, non-empty
   system?: string;                // optional preamble
   model?: string;                 // the instance decides; the kit names no model
-  effort?: "low"|"medium"|"high"|"xhigh"|"max"; // default "low"; explanations pass "medium", generation "xhigh"
+  effort?: "low"|"medium"|"high"|"xhigh"|"max"; // default "low"; each call passes its own (module specs state it; codeproj is "medium" throughout)
   session_id?: string|null;       // null/absent = new session; a prior id = --resume
 };
 ```
@@ -80,10 +80,10 @@ type AiResponse = {
 - Failure of the underlying call is reported as `ok:false` with `error` (HTTP still `200`); transport/auth/shape errors use `401`/`400`/`404`/`500` with `{"ok":false,"error":...}`.
 
 **Session lifecycle (load-once, then resume)** — the cost lever for codeproj/conceptprob:
-1. First call sends `session_id: null` and the heavy content (generate the project / concept+problems). The whole content is now in that claude session's context.
+1. First call sends `session_id: null` and the heavy content (the loaded codebase / a generated concept+problems). The whole content is now in that claude session's context.
 2. The response's `session_id` is stored by the web client.
 3. Subsequent calls (click-to-explain, deepen) send that `session_id` → `--resume`, so only the small targeted ask is added; the content is not re-sent by the client.
-4. The session is volatile (no server persistence); a new generation starts a new session. The web client owns the id for the lifetime of that artifact view.
+4. The session is volatile (no server persistence); a new load or generation starts a new session. The web client owns the id for the lifetime of that artifact view.
 
 **Config (server env / `.env`)** — `AI_SERVER_TOKEN` (required; server refuses to start without it), `AI_SERVER_HOST` (default `127.0.0.1`), `AI_SERVER_PORT` (default `8765`), `AI_SERVER_ORIGIN` (CORS, default `*`; token gates regardless), `STATE_ROOT` (state folder to mount, §2.2; also accepted as the first CLI argument). Remote access is via a tunnel in front of the local bind only.
 
@@ -141,10 +141,10 @@ Graded answers are scored on the web with **zero AI calls**, reusing the engine'
 
 The web consumes the **same injection source** as the bot (injection-interface), staying subject-agnostic.
 
-- The app loads a **SubjectProfile-equivalent** from the subject's `config` (the web analog of `bot/subject.py`): `areas` taxonomy `[{key,label,icon?,aliases?}]`, `persona`, AI `tasks` templates (e.g. concept-generation, project-generation roles/wording), `output_lang` (default Korean), and the enabled parts list.
+- The app loads a **SubjectProfile-equivalent** from the subject's `config` (the web analog of `bot/subject.py`): `areas` taxonomy `[{key,label,icon?,aliases?}]`, `persona`, AI `tasks` templates (e.g. concept-generation roles/wording), `output_lang` (default Korean), and the enabled parts list.
 - `areas` drives the concept-problem index (§ web-conceptprob). All learner-facing copy and domain wording come from config; web code carries none.
 - Problems/content data (where injected rather than generated) follow `CardDef` (core SoT §1).
-- **AI is optional for the AI parts.** Content may be **pre-baked** (verified and injected) instead of generated: `conceptprob` accepts `concepts` and `codeproj` accepts a `project`. With content pre-baked, a part mounts with **no `ai_server`** (`ai` omitted) and runs fully offline — deterministic grading and navigation are token 0 (§3, §7). Live generation (and its §6.1 intent-first rule) applies only when a session is configured.
+- **AI is optional for the AI parts.** Content may be **pre-baked** (verified and injected) instead of generated: `conceptprob` accepts `concepts` and `codeproj` accepts a `project`. With content pre-baked, a part mounts with **no `ai_server`** (`ai` omitted) and runs fully offline — deterministic grading and navigation are token 0 (§3, §7). Live generation and loading (and the §6.1 intent-first rule) apply only when a session is configured.
 
 ---
 
@@ -175,7 +175,7 @@ type ProgressRecord = {
 
 `web/src/doc` holds the concept-document dialect — its parse tree, its DOM rendering, and the
 `DOC_DIALECT` text a prompt hands the model. Two parts read the same documents (`conceptprob`
-renders a subject's pre-baked concepts, `codeproj` renders the ones an AI wrote about a generated
+renders a subject's pre-baked concepts, `codeproj` renders the ones an AI wrote about a loaded
 codebase), so it lives outside `parts/` for the same reason the flows do. Two consequences bind:
 
 - **A dialect described in two prompts drifts in one of them**, and then the parser agrees with
@@ -185,8 +185,8 @@ codebase), so it lives outside `parts/` for the same reason the flows do. Two co
   in the part that owns them. The deny-list guard (§8) does not catch this on its own — see the
   note there.
 
-- `flow/study.ts` — **proposal → launch → generated project**. Proposals are records the operator AI writes; the learner picks one (or names a topic) and the generation form opens pre-filled. **Generation starts only on the learner's own action** — the operator's autonomy ends at writing a proposal, so nothing may auto-generate on load.
-- `flow/workspace.ts` — the archive: a generated project is stored as a record at generation time and reopened from there. Reopening **resumes the session that already holds the codebase** (the id is kept in its own record), so explanation and questions carry on. Adopting costs no call; whether the server still holds the session only surfaces on the first request, and a lost one is reseeded once per mount.
+- `flow/study.ts` — **load → archive**. A loaded repository is stored as one project record with its origin (source, ref, commit) and the learner's request, so annotation on a later visit is written for the same goal. **Loading starts only on the learner's own action** — the launcher's button opens a form, and nothing reads a repository or calls AI until that form's load is pressed.
+- `flow/workspace.ts` — the archive: a loaded project is stored as a record at load time and reopened from there. Reopening **resumes the session that already holds the codebase** (the id is kept in its own record), so explanation and questions carry on. Adopting costs no call; whether the server still holds the session only surfaces on the first request, and a lost one is reseeded once per mount.
 - Reading an archive must still work with **no `ai_server` at all** (§7): with no session the AI pane is hidden rather than left as dead controls, and the annotation layer keeps working because it is stored, not asked for.
 - `parts/dashboard` — study history, read from **index summaries only** (`history`, `progress`, `projects`), never by opening every record. Token 0: it renders what the store already derived, and computes no aggregate the store does not have.
 
@@ -194,11 +194,11 @@ codebase), so it lives outside `parts/` for the same reason the flows do. Two co
 
 ## 6. AI generation contract (shared shape)
 
-Modules that generate content do one `POST /ai` with `effort:"xhigh"` (generation only — every other call is `"medium"`), the model the instance configured, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (project tree, concept+problems, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
+Modules that generate or load content do one `POST /ai` with the effort their module spec states, the model the instance configured, and (when structured) a `force_json`-style system directive. The **generated problems carry a `CardDef`-compatible `answer_spec`** so the deterministic grader (§3) can score them with zero further AI. Per-module return schemas (concept+problems, annotations, etc.) are defined in the module specs. The safety preamble and `output_lang` discipline (bot `ai_caps.build_preamble`) apply to every call.
 
 ### 6.1 Intent-first generation (operating rule)
 
-The kit ships no subject, so the AI operating it **must elicit the learner's intent before generating**: subject/area, concrete topic, scale/difficulty, and constraints — confirmed in one short round, never assumed. Generating from an assumption is non-conforming. This is both a usability rule and a subject-agnostic guardrail: the learner is the only valid source of subject. The full operating manual for the AI is `web/USAGE.md`.
+The kit ships no subject, so the AI operating it **must elicit the learner's intent before generating**: subject/area, concrete topic (for `codeproj`, the repository), scale/difficulty (for `codeproj`, the stated level and the file scope), and constraints — confirmed in one short round, never assumed. Generating from an assumption is non-conforming. This is both a usability rule and a subject-agnostic guardrail: the learner is the only valid source of subject. The full operating manual for the AI is `web/USAGE.md`.
 
 ---
 

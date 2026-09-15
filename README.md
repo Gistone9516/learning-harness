@@ -188,27 +188,23 @@ cd web && npm run build               # tsc --noEmit + vite production build
   pre-baked concept with no session and grades it with zero AI). For a local visual check,
   `cd web && npm run dev` serves a dev fixture at `localhost:5173` (`#conceptprob` for the offline module).
 
-Three tests are opt-in because they spend money. `parts/codeproj/codeproj.live.test.ts` calls a running
-`ai_server` and forks a real `claude` CLI to generate a whole project at effort `xhigh`;
-`parts/codeproj/assess.live.test.ts` times the pre-flight topic assessment (FR-25) on three topics;
-`parts/codeproj/trace.live.test.ts` resumes a session already holding a project and times one debug
-leg. There is no vitest config in this repo, so the default include glob picks these files up and the
-gate lives inside them — without `LH_LIVE` they are skipped and `npm test` stays at 493 green.
+Two tests are opt-in because they spend money. `parts/codeproj/repo.live.test.ts` reads a real repository
+through a running `ai_server`, loads it into a real `claude` session, and times choosing the first files and
+annotating a few of them; `parts/codeproj/trace.live.test.ts` resumes a session already holding a project
+and times one debug leg. There is no vitest config in this repo, so the default include glob picks these
+files up and the gate lives inside them — without `LH_LIVE` they are skipped and `npm test` stays at 477 green.
 
 ```bash
-cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/codeproj.live.test.ts
-cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/assess.live.test.ts
+cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> LH_LIVE_REPO=<url or folder> npx vitest run parts/codeproj/repo.live.test.ts
 cd web && LH_LIVE=1 LH_LIVE_TOKEN=<ai_server token> npx vitest run parts/codeproj/trace.live.test.ts
 ```
 
 The token goes in the `X-AI-Token` header (`Authorization: Bearer` also works); `ai_server` refuses
 to start without one and rejects every other header name.
 - Env: `LH_LIVE_URL` (default `http://127.0.0.1:8765`), `LH_LIVE_MODEL` (default `claude-opus-5[1m]`),
-  `LH_LIVE_OUT` (where the raw response is written), `LH_LIVE_WATCH` (tree checked for stray writes).
-  It writes the raw response before parsing it, because the response body is the whole point of the run:
-  a generation failure is reported as HTTP 200 with `ok:false`, and the helper that production uses
-  collapses that and an unparseable body into the same bare `null`. Measured 2026-09-02: 279s, 14 files,
-  1158 lines, no fabricated tool-call blocks, nothing written to disk.
+  `LH_LIVE_OUT` (where the measurement is written), and for the repository run `LH_LIVE_REF`, `LH_LIVE_GOAL`,
+  `LH_LIVE_FOCUS`, `LH_LIVE_SCOPE` (comma separated) and `LH_LIVE_ANNOTATE` (files to annotate, default 2).
+  Each step is written as soon as it lands, so a run that dies midway still leaves the numbers it reached.
 
 ## 6. Current status
 
@@ -238,12 +234,12 @@ to start without one and rejects every other header name.
 - Web kit built: a Vite + TS parts kit (subject-agnostic, mirroring the bot's injection model) with four
   parts (sheet, codeproj, dashboard, conceptprob), a shared engine grader port (golden-vector parity with the
   Python engine), an `ai_server` browser client (load-once then resume sessions), a warm study-compendium design layer
-  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first generation). 339 web tests green plus a clean `tsc --noEmit` (measured 2026-09-02).
-  Project generation is now proven end to end against a live CLI, not just against a mock: one opt-in run
-  (§5) returned a 14-file, 1158-line FastAPI project in 279s with no fabricated tool-call blocks and no
-  stray writes. That run also showed `SCALE_GUIDE` is miscalibrated — its `medium` line budget does not
-  count the README, tests, error hierarchy and schemas that `QUALITY_CLAUSE` requires in the same breath,
-  so the two clauses contradict each other and the file-count half is the one models obey.
+  (`src/styles`: serif display, IBM Plex, expressway-green accent on paper), and `web/USAGE.md` (the AI operating manual, intent-first). 477 web tests green plus a clean `tsc --noEmit` (measured 2026-09-15).
+  `codeproj` reads a git repository the learner names rather than generating one: `bot/repo_loader.py` behind
+  `POST /repos/load` shallow-clones a URL or reads a local folder, filters it (ignored dirs, lock files, binaries,
+  the learner's scope) and caps it at 300 files / 1.5MB. The learner's request (goal and level, focus, scope)
+  reaches every annotation prompt; up to 8 files are annotated before entry, chosen for the request, and a
+  one-at-a-time background queue does the rest. Not yet measured against a live CLI with a real repository.
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
   with no Discord dependency. **AI is optional**: the AI parts also run from **pre-baked verified content**
   injected by the instance (`concepts` / `project`) — mounting with no `ai_server` and grading fully
@@ -251,14 +247,14 @@ to start without one and rejects every other header name.
 - Record store and study flows: `bot/state_store.py` plus the `/state` API on `ai_server` give the kit a
   record-per-file store with derived indexes (`_verify` drift check, `_rebuild` full rescan); `web/src/storage`
   is its browser port with an offline buffer (localStorage is a buffer, never the source of truth), and
-  `web/src/flow` holds the proposal→generation study flow and the archived-project workspace.
+  `web/src/flow` holds the load→archive study flow and the archived-project workspace.
   `codeproj` grew to the IDE shape it was specified for: a dependency-free syntax highlighter (`web/src/highlight`,
   no CDN so it works offline), multi-range code scrap, and a composed-answer block system
   (`parts/codeproj/components`, 24 block types covering the 25 catalogue entries — inline and block code
   references share one `ref` type). `session_guard` ends claude sessions so no process is orphaned.
-  Three AI-written layers sit over a generated project, each its own per-project record and each
-  injected into the part rather than stored by it: annotations (`annotations.ts`, Ctrl-hover popups
-  built before the learner arrives), concept documents (`concepts.ts`, background after entry), and
+  Three AI-written layers sit over a loaded project, each its own per-project record and each
+  injected into the part rather than stored by it: annotations (`annotations.ts`, Ctrl-hover popups,
+  the first 8 files built before the learner arrives and the rest behind them), concept documents (`concepts.ts`, background after entry), and
   debug runs (`trace.ts`, one leg per file, started by the learner from a chosen line). All three are
   read back with zero AI calls when an archived project is reopened.
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), the

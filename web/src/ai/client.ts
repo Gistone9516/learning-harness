@@ -1,6 +1,6 @@
 // ai_server browser client (web-contract.md §2). The web reaches the claude subscription only through
 // bot/ai_server.py. This wraps POST /ai (token-gated) and GET /health, plus an AiSession that implements
-// the load-once -> resume lifecycle (generate heavy content once, then resume for small follow-ups).
+// the load-once -> resume lifecycle (load heavy content once, then resume for small follow-ups).
 // The token comes from runtime config (never embedded in the bundle). fetch is injectable for tests.
 
 /** Effort levels the CLI accepts (`--effort`). Callers pick per call kind. */
@@ -50,9 +50,49 @@ export interface GenProblemsResponse {
   dropped?: number;
 }
 
+/**
+ * Read a git repository into text (bot/repo_loader.py). The browser can neither clone nor read a
+ * disk, and the model runs with tools off, so the server does the reading and hands back files.
+ */
+export interface RepoLoadRequest {
+  /** A remote URL (https, ssh, git@, file://) or a folder path on the server's machine. */
+  source: string;
+  ref?: string | null;
+  /** Paths or globs to keep; empty keeps everything that survives the default filters. */
+  include?: string[];
+}
+
+/**
+ * Why a repository could not be read. `call` is added on this side for a request that never got
+ * an answer; every other reason is the server's own.
+ */
+export type RepoLoadFailure = "source" | "clone" | "path" | "too_large" | "empty" | "call";
+
+export type RepoLoadResponse =
+  | {
+      ok: true;
+      title: string;
+      source: string;
+      ref: string | null;
+      commit: string | null;
+      files: { path: string; content: string }[];
+      skipped: Record<string, number>;
+      total_bytes: number;
+    }
+  | {
+      ok: false;
+      reason: RepoLoadFailure;
+      error: string;
+      /** Only on `too_large`: where the bulk is, so the learner can narrow the scope to part of it. */
+      found?: { files: number; bytes: number };
+      limits?: { files: number; bytes: number };
+      dirs?: { dir: string; files: number; bytes: number }[];
+    };
+
 export interface AiClient {
   ai(req: AiRequest): Promise<AiResponse>;
   problems(req: GenProblemsRequest): Promise<GenProblemsResponse>;
+  repos(req: RepoLoadRequest): Promise<RepoLoadResponse>;
   health(): Promise<boolean>;
 }
 
@@ -95,6 +135,20 @@ export function createAiClient(cfg: AiClientConfig): AiClient {
     }
   }
 
+  async function repos(req: RepoLoadRequest): Promise<RepoLoadResponse> {
+    try {
+      const res = await f(`${cfg.baseUrl}/repos/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AI-Token": cfg.token },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) return { ok: false, reason: "call", error: `HTTP ${res.status}` };
+      return (await res.json()) as RepoLoadResponse;
+    } catch (e) {
+      return { ok: false, reason: "call", error: String((e as Error)?.message ?? e) };
+    }
+  }
+
   async function health(): Promise<boolean> {
     try {
       const res = await f(`${cfg.baseUrl}/health`);
@@ -104,7 +158,7 @@ export function createAiClient(cfg: AiClientConfig): AiClient {
     }
   }
 
-  return { ai, problems, health };
+  return { ai, problems, repos, health };
 }
 
 // Load-once then resume. The first send mints a session (server returns session_id); later sends resume

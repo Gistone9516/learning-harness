@@ -30,10 +30,10 @@ bakes a subject the kit is supposed to stay clear of.
 Ask only what changes the output, in one short round (not an interrogation):
 
 - **Subject / area** — which domain or area from the configured taxonomy. Never assume it.
-- **Concrete topic** — the specific thing inside that area ("a small library-management project",
-  "closures", "VLOOKUP across two ranges").
-- **Scale / difficulty** — how big or hard. For `codeproj` this is project scale; for `conceptprob`
-  it is depth; for `sheet` it is the formula range.
+- **Concrete topic** — the specific thing inside that area ("this repository's request flow",
+  "closures", "VLOOKUP across two ranges"). For `codeproj` the learner names the repository itself.
+- **Scale / difficulty** — how big or hard. For `codeproj` this is the stated level and the file scope;
+  for `conceptprob` it is depth; for `sheet` it is the formula range.
 - **Constraints** — anything to include or avoid, prior knowledge, language preference.
 
 Then confirm in one line ("So: a small library system in Python, focused on how the parts connect —
@@ -58,8 +58,9 @@ decided.
   target cells, expected values, optional `require_formula`). Ask: which spreadsheet skill and at what
   range. Grading is the formula engine plus the grader port.
 - **`codeproj`** — top-down code reading. Either inject a pre-baked `project` (offline reading; the
-  explain controls hide) or, with `ai`, `generate` one at the chosen scale and let the learner click
-  lines to `explain` (one session, loaded once then resumed). Navigation is deterministic.
+  explain controls hide) or, with `ai`, let the learner load a git repository (URL or local folder) with
+  a request — goal and level, focus, file scope — which is annotated for that request, then click lines
+  to `explain` (one session, loaded once then resumed). Navigation is deterministic.
 - **`conceptprob`** — area to concept to problem. Inject the `areas` taxonomy and concept outline. Either
   inject pre-baked `concepts` (`{concept_id: GeneratedConcept}`, rendered + graded offline) or, with
   `ai`, `generate` a concept on demand and optionally `deepen` it. Problems carry a `CardDef`-compatible

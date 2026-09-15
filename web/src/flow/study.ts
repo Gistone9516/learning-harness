@@ -2,8 +2,7 @@
 // (which only render and emit events) and the storage adapters (which only move records).
 //
 // Collections, all one-record-per-file behind a derived index:
-//   proposals  what the operator suggests studying next; a learner starts one, never the AI
-//   projects   generated projects, archived so they can be reopened offline
+//   projects   loaded repositories with the learner's request, archived so they can be reopened offline
 //   progress   one record per project holding which files have been read
 //   history    one record per study session: what was read, asked and explained
 //   ai-sessions one record per project: which AI session already holds its codebase
@@ -16,7 +15,6 @@ import type { IndexEntry, StoragePort, StorageRecord } from "../storage/port";
 import { makeRecord } from "../storage/port";
 
 export const COLLECTIONS = {
-  proposals: "proposals",
   projects: "projects",
   progress: "progress",
   history: "history",
@@ -27,45 +25,36 @@ export const COLLECTIONS = {
   conversations: "conversations",
 } as const;
 
-export type ProposalStatus = "open" | "started" | "archived";
-
-export interface ProposalBriefing {
-  why: string;
-  learning_points: string[];
-  prerequisites?: string[];
-}
-
-export interface ProposalData {
-  topic: string;
-  seed?: string;
-  briefing: ProposalBriefing;
-  started_project_id?: string | null;
-}
-
-export interface Proposal {
-  id: string;
-  title: string;
-  stack: string;
-  scale: "small" | "medium" | "large";
-  status: ProposalStatus;
-  order: number;
-  data: ProposalData;
-}
-
 export interface ArchivedProject {
   id: string;
   title: string;
-  topic: string;
+  /** Where the code came from: a repository URL or a folder path. */
+  source: string;
   stack: string;
-  scale: string;
   file_count: number;
   updated_at: number;
 }
 
-/** Anything the flow stores about a project's generated content. Structural, not a kit type. */
+/**
+ * Where a project's code came from and what the learner asked of it. Structural, not a kit type.
+ *
+ * The request is kept because annotation outlives the visit that started it: files left
+ * unannotated when the learner walked away are annotated on a later visit, and have to be written
+ * for the same goal as the rest.
+ */
+export interface ProjectOrigin {
+  kind: "repo";
+  source: string;
+  ref: string | null;
+  commit: string | null;
+  loaded_at: number;
+  request: { goal: string; focus: string; scope: string[] };
+}
+
+/** Anything the flow stores about a project's content. Structural, not a kit type. */
 export interface ProjectPayload {
   project: { title: string; summary: string; files: { path: string; content: string }[] };
-  origin: { proposal_id: string | null; generated_at: number; model?: string };
+  origin: ProjectOrigin;
 }
 
 /**
@@ -90,7 +79,7 @@ export interface AnnotationSetData {
 }
 
 /**
- * The concept layer for one project: what the generated codebase teaches, written out.
+ * The concept layer for one project: what the loaded codebase teaches, written out.
  *
  * Same record shape as the annotation layer and for the same reason -- one project, one record,
  * replaced whole. Unlike annotations it is written more than once per project: the documents
@@ -162,12 +151,6 @@ export function conversationDayId(at: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** The subset of `tuning.json` that actually reaches a prompt. */
-export interface TuningDefaults {
-  scale?: "small" | "medium" | "large";
-  stack_hint?: string;
-}
-
 export interface HistoryCounters {
   explains: number;
   questions: number;
@@ -206,45 +189,17 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
   const token = cfg.token ?? (() => Math.random().toString(36).slice(2, 8));
 
   return {
-    /** Open proposals, in the operator's stated order. */
-    async listProposals(): Promise<Proposal[]> {
-      const entries = await storage.list(COLLECTIONS.proposals);
-      const proposals: Proposal[] = [];
-      for (const entry of entries) {
-        const record = await storage.get<ProposalData>(COLLECTIONS.proposals, entry.id);
-        if (!record) continue;
-        proposals.push({
-          id: entry.id,
-          title: str(entry.summary["title"], entry.id),
-          stack: str(entry.summary["stack"]),
-          scale: (str(entry.summary["scale"], "medium") as Proposal["scale"]),
-          status: (str(entry.summary["status"], "open") as ProposalStatus),
-          order: num(entry.summary["order"], 0),
-          data: {
-            topic: str(record.data?.topic),
-            seed: record.data?.seed,
-            briefing: record.data?.briefing ?? { why: "", learning_points: [] },
-            started_project_id: record.data?.started_project_id ?? null,
-          },
-        });
-      }
-      return proposals.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-    },
-
-    async openProposals(): Promise<Proposal[]> {
-      return (await this.listProposals()).filter((p) => p.status === "open");
-    },
-
     /**
-     * Archive a freshly generated project and open a session for it.
-     * Called only after the learner started generation, never on its own.
+     * Archive a freshly loaded repository and open a session for it.
+     * Called only after the learner pressed load, never on its own.
+     *
+     * `loaded_at` is stamped here rather than taken from the caller, so the project, its progress
+     * and its first session record carry one moment, not three.
      */
     async startProject(input: {
       project: ProjectPayload["project"];
-      topic: string;
+      origin: Omit<ProjectOrigin, "loaded_at">;
       stack: string;
-      scale: string;
-      proposalId?: string | null;
     }): Promise<{ projectId: string; historyId: string }> {
       const stamp = now();
       const projectId = makeId("prj", stamp, token());
@@ -256,14 +211,13 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
           projectId,
           {
             title: input.project.title,
-            topic: input.topic,
+            source: input.origin.source,
             stack: input.stack,
-            scale: input.scale,
             file_count: input.project.files.length,
           },
           {
             project: input.project,
-            origin: { proposal_id: input.proposalId ?? null, generated_at: stamp },
+            origin: { ...input.origin, loaded_at: stamp },
           },
         ),
       );
@@ -278,22 +232,22 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         ),
       );
 
-      // Same stamp as the two records above: one generation produces one moment, not three.
+      // Same stamp as the two records above. The history row's `topic` is the repository's name:
+      // the dashboard shows that column as the name of what was studied.
       const historyId = await this.beginSession({
         projectId,
-        topic: input.topic,
+        topic: input.project.title,
         stack: input.stack,
         at: stamp,
       });
 
-      if (input.proposalId) await this.markProposalStarted(input.proposalId, projectId);
       return { projectId, historyId };
     },
 
     /**
      * Open a study session record for a project that already exists.
      *
-     * Generation calls this as part of startProject; reopening an archived project calls it
+     * Loading a repository calls this as part of startProject; reopening an archived project calls it
      * directly. A revisit where questions are possible is a study session too, and without its
      * own record every exchange in that visit is written to nothing.
      */
@@ -487,35 +441,6 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
       );
     },
 
-    /**
-     * Operator-set defaults for the generation form.
-     *
-     * Only the two fields that actually reach a prompt are read. `tuning.json` documents more
-     * (output_lang, plan.focus, plan.note, quality_profile), but nothing consumes them, and
-     * reading a field that changes nothing would suggest editing it has an effect.
-     */
-    async readTuning(): Promise<TuningDefaults> {
-      const doc = await storage.getDoc<{ defaults?: Record<string, unknown> }>("tuning");
-      const defaults = doc?.defaults ?? {};
-      const scale = defaults["scale"];
-      const hint = defaults["stack_hint"];
-      return {
-        scale: scale === "small" || scale === "medium" || scale === "large" ? scale : undefined,
-        // An empty hint is the same as no hint; forwarding "" would put a stray clause in the prompt.
-        stack_hint: typeof hint === "string" && hint.trim() ? hint : undefined,
-      };
-    },
-
-    async markProposalStarted(proposalId: string, projectId: string): Promise<void> {
-      const record = await storage.get<ProposalData>(COLLECTIONS.proposals, proposalId);
-      if (!record) return;
-      await storage.put(COLLECTIONS.proposals, {
-        ...record,
-        summary: { ...record.summary, status: "started" },
-        data: { ...record.data, started_project_id: projectId },
-      });
-    },
-
     /** Read flags are per project, so this record stays bounded by the project's file count. */
     async recordFileSeen(projectId: string, path: string): Promise<void> {
       const record = await storage.get<{ seen_paths: string[] }>(COLLECTIONS.progress, projectId);
@@ -597,9 +522,8 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         .map((e: IndexEntry) => ({
           id: e.id,
           title: str(e.summary["title"], e.id),
-          topic: str(e.summary["topic"]),
+          source: str(e.summary["source"]),
           stack: str(e.summary["stack"]),
-          scale: str(e.summary["scale"]),
           file_count: num(e.summary["file_count"]),
           updated_at: e.updated_at,
         }))
@@ -627,10 +551,6 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
      *   there is no per-project unit to remove -- and the design treats the originals as the thing
      *   a failed summary falls back on, never as something to prune.
      *
-     * A proposal that was started on this project is walked back to `open` rather than left
-     * pointing at a corpse. Nothing else ever writes that status back, so without this the
-     * proposal would be permanently invisible: `openProposals` only offers `open` ones.
-     *
      * The project record is deleted FIRST and a failure there aborts the rest. The offline buffer
      * has no tombstone for a delete, so when the server is unreachable `remove` returns false and
      * the record survives the source of truth; carrying on would strip a live project of its notes
@@ -647,18 +567,6 @@ export function createStudyFlow(cfg: StudyFlowConfig) {
         COLLECTIONS.traces,
       ]) {
         await storage.remove(collection, projectId);
-      }
-
-      // Index summaries only -- the payloads are never opened to find this.
-      for (const entry of await storage.list(COLLECTIONS.proposals)) {
-        if (str(entry.summary["status"]) !== "started") continue;
-        const record = await storage.get<ProposalData>(COLLECTIONS.proposals, entry.id);
-        if (record?.data?.started_project_id !== projectId) continue;
-        await storage.put(COLLECTIONS.proposals, {
-          ...record,
-          summary: { ...record.summary, status: "open" },
-          data: { ...record.data, started_project_id: null },
-        });
       }
       return true;
     },

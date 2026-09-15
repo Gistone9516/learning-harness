@@ -1,46 +1,63 @@
 # Web Module — Project Code Comprehension (`web-codeproj`)
 
 > buildflow ② per-folder contract. **Conforms to `web-contract.md` (Web SoT) and the core SoT; on conflict the Web SoT, then the core SoT, win.**
-> Scope: `web/parts/codeproj/` — top-down comprehension of an AI-generated project. The learner reads the whole codebase and learns where to change things; no authoring, no execution. Plan: `docs/기획_web.md` §2 module ②.
+> Scope: `web/parts/codeproj/` — top-down comprehension of a git repository the learner brings. The learner reads the whole codebase and learns where to change things; no authoring, no execution. Plan: `docs/기획_web.md` §2 module ②.
 
 ---
 
 ## 0. Conformance and shape
 
 - **Comprehension, not execution** — v1 has no code sandbox. The learner reads; AI explains. (A sandbox is backlog.)
-- **AI-centric** — project generation and explanations go through `ai_server` (Web SoT §2); navigation and rendering are token 0.
-- **Session load-once → resume** (Web SoT §2 lifecycle) is the cost model: generate the project once (codebase enters the session context), then each click resumes that session for a small targeted explanation. The instance names the model; the kit does not. Generation runs at `xhigh` and everything else at `medium`. Project scale is the difficulty knob and the natural ceiling.
-- Subject-agnostic: topic/scale/seed are injected or user-chosen; the part carries no subject literal.
+- **The code comes from the learner.** They name a git repository (a remote URL or a folder on the server's machine) plus a request, and the part annotates that code. Nothing is generated.
+- **AI-centric** — loading, annotation and explanations go through `ai_server` (Web SoT §2); navigation and rendering are token 0.
+- **Session load-once → resume** (Web SoT §2 lifecycle) is the cost model: load the codebase once (it enters the session context), then each annotation and click resumes that session for a small targeted call. The instance names the model; the kit does not. Every call runs at `medium`.
+- Subject-agnostic: the repository and the request are injected or user-typed; the part carries no subject literal.
 
 ---
 
-## 1. Project generation contract
+## 1. Loading contract
 
-One `POST /ai` (force_json) generates a coherent project and seeds the session.
+### 1.1 Reading the repository — `POST /repos/load`
 
-**Input** (web → `/ai`):
-- `system`: generator role (from config `tasks.codeproj`, subject-agnostic) + the §6 JSON directive.
-- `prompt`: `{ topic, scale, seed? }` rendered to text — `topic` (what the project does), `scale` (difficulty, §4), optional `seed` (constraints/stack).
-- `session_id: null` (new session), `effort:"xhigh"`, model from the instance config.
+The browser cannot read a disk or run git, and the CLI runs with tools off, so `bot/repo_loader.py` reads the repository and returns text.
 
-**Return** (parsed from `text`):
+- **Request** `{ source, ref?, include?[] }`. `source` starting with `http://`, `https://`, `ssh://`, `git://`, `git@` or `file://` is remote (shallow clone into a temp dir removed on every exit path, tracked by `session_guard`); anything else is a local folder, where `ref` is ignored.
+- **Filtering**, in order: ignored directories (`.git`, `node_modules`, `dist`, `build`, `vendor`, `.venv`, …), symlinks, lock files and minified bundles, binary extensions, paths outside `include`, NUL or non-UTF-8 content, files over 200KB. `include` is applied **before** a file is opened, because the scope exists for repositories too large to take whole. A pattern matches as a glob, as an exact path, or as a directory prefix.
+- **Limits** after filtering: 300 files, 1.5MB total (env `REPO_MAX_FILES`, `REPO_MAX_BYTES`, `REPO_MAX_FILE_BYTES`, `REPO_CLONE_TIMEOUT`). The codebase later travels as one `/ai` body under the server's 4MB cap and sits whole in one session.
+- **Response**: `{ok:true, title, source, ref, commit, files[{path, content}], skipped{reason: count}, total_bytes}` or `{ok:false, reason, error, found?, limits?, dirs?}`. `reason` is `source` | `clone` | `path` | `too_large` | `empty`; the client adds `call` for a request that never got an answer. On `too_large`, `dirs` lists the first path segment's file count and bytes, largest first, so the learner can narrow the scope to part of it.
+- Invalid `source`/`ref` (leading `-`, or a `ref` outside `A-Za-z0-9._/-`) is `source`, so user input can never reach git's argv as a flag.
+
+### 1.2 The request
+
 ```ts
-type ProjectFile = { path: string; content: string; lang?: string };  // lang for highlighting
-type GeneratedProject = {
-  title: string;
-  summary: string;            // one-paragraph overview of the whole project
-  files: ProjectFile[];       // the full codebase (paths form the tree)
-  entrypoints?: string[];     // suggested reading order (file paths)
-};
+type RepoRequest = { source: string; ref?: string; goal: string; focus: string; scope: string[] };
+type ReadingRequest = Pick<RepoRequest, "goal" | "focus" | "scope">;
 ```
-- The web stores the response `session_id`; the codebase is now in that session's context.
-- The web builds the left tree from `files[].path`. No file is fetched again from AI; the content is already in `files`.
+- `scope` becomes `include` and decides what exists at all.
+- `goal` (why and at what level) and `focus` (what to concentrate on) are passed verbatim into every annotation prompt as a `[학습자 요청]` section, into choosing the files read first, and into the concept outline. With both empty the section is omitted: an empty heading still reads as an instruction, and the shared audience clause is then the right default. A stated level outranks that clause.
+- The request is stored with the project (`origin.request`), because annotation continues on later visits and must be written for the same goal.
 
----
+### 1.3 Into the session, then annotated before entry
 
-### 1.1 Generation quality clause (mandatory)
+1. `reseedSession` loads the codebase into a fresh session (the same call a lost session uses later; its system text forbids writing, rewriting or summarising). A failure stops here and nothing is archived.
+2. `onProjectLoaded(project, origin)` fires before rendering so the owner can archive first.
+3. If the project has more than `ENTRY_ANNOTATE_MAX` (8) files and `goal` or `focus` is set, `pickFocusFiles` asks the session which files to read first. Unknown and repeated paths are dropped; any failure returns `[]` and project order stands. It reorders the first minutes; it never gates.
+4. `annotationOrder(paths, picked)` puts the picked files first. The first 8 are annotated before entry — about 37s each (measured 2026-09-02), so the wait is bounded whatever the repository's size — and the first of them is the file opened on entry.
 
-The generator preamble carries a fixed quality clause (`prompts.ts` `QUALITY_CLAUSE`), because the learner is reading this code *to learn from it*: code that teaches bad habits fails the module's purpose. It requires the generated project to imitate how professionals ship software in the chosen stack (conventional layout, naming, config separated from code, error handling, validation, logging, a test file, a README), to keep layers apart (entry point / domain / storage / config), to persist data as one record per file behind an index rather than appending to one growing file, and to avoid toy or textbook-abridged code. The clause is subject-agnostic; topic, scale and stack always arrive as injected input.
+```ts
+type ProjectFile = { path: string; content: string; lang?: string };  // lang optional; the highlighter falls back to the extension
+type CodeProject = { title: string; summary: string; files: ProjectFile[]; entrypoints?: string[] };
+```
+`projectFromRepo` builds it from facts: `title` is the repository name, `summary` is `source · ref · commit(7) · 파일 N개` with unknown segments omitted rather than filled.
+
+### 1.4 Behind the learner — one background queue
+
+`background.ts` runs **one job at a time** for everything written after entry: the concept outline, each concept document, and each remaining file's annotations. Two concurrent resumes of one session were measured once and both returned (2026-09-03); three never were, and the learner's own request takes the second slot.
+
+- On entry the queue holds the outline and the remaining files in order. When the outline lands, its documents go to the **front**: a concept set is minutes, the rest of a large repository can be hours.
+- Opening a file with no notes moves its job to the front, so the wait is the job in flight. Retry and make controls push to the front too.
+- The note slot in the code panel head shows `설명 만드는 중` (disabled) while a file's job is queued or running, `설명 다시 만들기` for a failed file, and `설명 만들기` for a file never annotated. Pending is read from the queue, never stored.
+- The queue lives for one visit. A reopened project starts no calls; files still without notes are made one at a time from the `make` control, with the stored request.
 
 ---
 
@@ -75,7 +92,7 @@ type AskRequest = {
 - **Right, AI**: lens picker plus explain button, a thread of exchanges (explanations and questions in order), and a free-form question box at the bottom. With no session the pane is hidden entirely rather than left as dead controls, and reading keeps working.
 - Panes stack into one column on narrow screens. Korean UI from config/defaults (subject-agnostic).
 
-**Module layout** (one concern per file, so the view can change without touching prompts or transport): `model.ts` pure types/parse/tree, `prompts.ts` all wording including the quality clause and lens formats, `session.ts` the three AI calls, `view.ts` the three panel factories, `launcher.ts` the proposal and archive entry screen, `components/` the composed-answer block system (§3.2), `codeproj.ts` assembly plus the public surface.
+**Module layout** (one concern per file, so the view can change without touching prompts or transport): `model.ts` pure types/parse/tree, `prompts.ts` all wording including the request clause and lens formats, `session.ts` the AI calls, `background.ts` the one-at-a-time queue, `view.ts` the three panel factories, `launcher.ts` the load and archive entry screen, `components/` the composed-answer block system (§3.2), `codeproj.ts` assembly plus the public surface.
 
 ### 3.1 Code rendering — highlighting and scrap
 
@@ -94,100 +111,65 @@ An explanation is not free prose. The model returns `{blocks: [...]}` and the re
 
 ---
 
-## 4. Difficulty = project scale
+## 4. Difficulty = what the learner brings
 
-- A `scale` parameter maps to generation targets. Current bands, from `SCALE_GUIDE` in
-  `prompts.ts`: `small` 6-9 files / ~500 lines, `medium` 10-16 / ~1100, `large` 18-30 / ~2000.
-  (They were 3-6 / ≤300 for `small` until 2026-09-02, when a measured run showed six files is the
-  floor `QUALITY_CLAUSE` itself implies — the old range left no room for domain code at all.)
-- Scale is the only difficulty axis in v1 (more files, more cross-file flow to trace).
-- **The learner's pick is a recommendation; the pre-flight assessment settles it** (§4.1). What
-  generation is handed is still a hard bound — that sentence is a dated fix (2026-09-02: a `small`
-  asking 6-9 files returned 16) and softening it would reinstate the overshoot. Discretion sits in
-  front of generation so generation itself stays deterministic.
-
-### 4.1 Pre-flight assessment (FR-25)
-
-One short call before the expensive one, added 2026-09-10 after a learner lost two or three
-attempts of tens of minutes each and could not tell why any of them failed.
-
-- **It judges buildability, not worth**: does a layered codebase fall out of this sentence — entry
-  point, domain, storage, config in separate files, with tests and a README. The shape that fails
-  is a topic naming a practice rather than a program (`무중단 배포 및 Chaos Engineering 실습`):
-  `QUALITY_CLAUSE`'s layering has nothing to attach to, so the model must invent a subject first.
-- **It errs toward allowing.** Only a refusal that also says why is honoured; an ambiguous or
-  unreadable verdict passes. And it **fails open** in every direction — a failed call, unparseable
-  JSON, or a refusal with no reason all become `go` with the learner's own scale. A gate that can
-  lock someone out of generating on its own malfunction is a worse failure than the one it prevents.
-- **A refusal owes the learner something to press**: the reason, and two or three complete topic
-  sentences that can be pasted straight in. Advice they have to rewrite is a second puzzle.
-- **Measured 2026-09-10** against the live model: 11.7s to refuse the real failing topic with
-  three usable alternatives; 6.9s to pass a normal REST API untouched; 7.4s to pass a trivial
-  calculator while lowering `large` to `small` with a stated reason. Set against a generation whose
-  only measured full run is 279s.
-- Evidence: `Coding-GO/docs/verification/2026-09-10-fr25/`. Re-runnable with
-  `LH_LIVE=1 npx vitest run parts/codeproj/assess.live.test.ts`.
-
-### 4.2 A failed generation says which failure it was
-
-`generateProject` returns a reason, not a bare null: `call` (transport, carrying the server's own
-message), `timeout` (split out because it is the one a learner can act on — smaller scale, narrower
-topic), `parse` (prose instead of JSON), `shape` (JSON about something else), `empty` (agreed to
-the schema and filled in no files, which used to be a *success* that rendered an empty file tree).
-The screen keeps the elapsed clock and the chosen scale on a failure; both used to be wiped, so
-"it failed" arrived without even the facts already on screen.
+- There is no difficulty knob in the part. Difficulty is the repository the learner chooses and the level they state in `goal`; the scope narrows how much of it is read.
+- A failed load says which failure it was (`source`, `clone`, `path`, `too_large`, `empty`, `call`), plus `session` when the codebase could not be loaded into the session. The screen keeps the elapsed clock on a failure and never clears the form.
 
 ---
 
 ## 5. Progress and (fast-follow) scored tasks
 
 - v1 is exploratory: optionally store `read`/seen flags per file (Web SoT §5) so the learner tracks coverage. No binary grade in v1.
-- **Fast-follow (backlog)**: scored comprehension tasks — "to change X, which file/function?" The learner points at a file/symbol; graded **deterministically** by comparing to a known answer pointer (token 0). The answer pointer is produced at generation time alongside the project (a `tasks` array with `answer: {path, symbol}`), so grading needs no AI.
+- **Fast-follow (backlog)**: scored comprehension tasks — "to change X, which file/function?" The learner points at a file/symbol; graded **deterministically** by comparing to a known answer pointer (token 0). The answer pointers would be written once per project after loading (a `tasks` array with `answer: {path, symbol}`), so grading needs no AI.
 
 ---
 
-## 6. JSON directive (generation)
+## 6. JSON directives
 
-The generator system preamble forces the §1 `GeneratedProject` JSON only (no prose outside it), in addition to the shared safety preamble and `output_lang` (code stays code; `summary`/comments may be localized per config). Parse tolerantly (strip fences); on parse failure, show a regenerate action (no partial project).
+Every structured call (annotation, file choice, concept outline and documents, trace legs) forces JSON only and is parsed tolerantly (`carveJson` strips prose and fences). Loading is not structured: the reply is one confirmation line and only `ok` is read.
 
 ---
 
 ## 7. Part header and index
 
 `web/parts/codeproj/codeproj.ts` header (Web SoT §1):
-- `WHAT` AI-generated project, read-only comprehension with session-based click explanations.
+- `WHAT` a git repository read in an IDE shape, with an annotation layer written for the learner's request, plus session-based explanations and questions.
 - `DEPS` shell + `web/src/ai` (ai_server client) + `web/src/highlight` (own highlighter; no third-party editor, no CDN) + `web/src/storage` (record store port).
-- `INPUT` `{topic, scale, seed?}`; consumes `GeneratedProject`, plus the three injected layers
+- `INPUT` a pre-baked `project`, or a repository + request through `loadRepo`; `request` for a reopened project; plus the three injected layers
   `annotations` (AnnotationSet), `concepts` (ConceptSet) and `traces` (TraceSet) — rendered, never
   stored here, because every record is keyed by a project id only the flow holds.
-- `EVENTS` file-seen flags; `onAnnotations` / `onConcepts` / `onTraces` hand each layer back to the
+- `EVENTS` file-seen flags; `onProjectLoaded`; `onAnnotations` / `onConcepts` / `onTraces` hand each layer back to the
   owner as it is built (and, fast-follow, scored-task verdicts).
-- `AI` yes — generation (`/ai` new session) + explanations (`/ai` resume).
-- `CONSTRAINTS` `subject-agnostic, secrets-gated, session-resume`.
-- `DEMO` standalone with a canned `GeneratedProject` (no live AI) for the tree + viewer + lens UI.
+- `AI` yes — loading (`/repos/load`, then `/ai` new session) + annotation and explanations (`/ai` resume).
+- `CONSTRAINTS` `subject-agnostic, secrets-gated, session-resume`; at most one background call beside the learner's own.
+- `DEMO` standalone with a canned `CodeProject` (no live AI) for the tree + viewer + lens UI.
 Add the matching `web/parts/index.json` row (`ai: true`).
 
 ---
 
 ## 8. Tests (headless, gate)
 
-- `project_model` — parse a canned `GeneratedProject`, build the tree from paths, file lookup.
+- `project_model` — build the tree from paths, file lookup; `repo.test.ts` for `parseScope`, `stackOf`, `projectFromRepo`, `annotationOrder`, `pickFocusFiles` and `client.repos`.
 - `explain_request` — `ExplainRequest` → request shape carries `session_id` and lens; resume path asserted against a mock `/ai` (no live claude).
+- `background.test.ts` — one at a time, front push and bump, a throwing job does not stop the queue.
+- `repoload.dom.test.ts` — nothing sent before load; the load sequence; 8 before entry and the rest behind; concepts ahead of remaining notes; failure reasons and the too-large directory controls; the reopen `make` path.
+- `bot/tests/test_repo_loader.py` — each filter's firing and silent case, limits, remote clone and temp-dir cleanup, input validation, no orphan git process.
 - `subject_agnostic` — no subject literal in `parts/codeproj/`.
-- Generation/explanation quality is live-smoke only (needs the real model), not a unit gate.
+- Annotation quality and real timings are live only (`repo.live.test.ts`, opt-in), not a unit gate.
 
 ## 개념 문서 (FR-23)
 
 The part carries a second AI-written layer beside the annotations: concept documents about what
-the generated codebase teaches, read in a `개념` view that shares the study grid.
+the loaded codebase teaches, read in a `개념` view that shares the study grid.
 
 - **Two calls.** An outline (`buildConceptOutlineSystem`) returns seeds only; each document is its
   own resumed call (`buildConceptDocSystem`). One call for a whole set is far past the 180s
   follow-up cap. Measured 2026-09-03 on a 9-file project: outline 12.2s for 8 concepts, one
   document 33.0s for 2,088 characters.
-- **Background, after entry.** Unlike the annotation pass this does not gate the learner. Notes
+- **Background, after entry, ahead of the remaining notes** (§1.4). Unlike the first annotations this does not gate the learner: notes
   attach to the code being read and are needed immediately; a concept page is elsewhere on screen.
-- **`effort: "medium"`**, like every other resumed call. Generation stays the only `xhigh` one.
+- **`effort: "medium"`**, like every other call.
 - **The document dialect is `src/doc`**, shared verbatim with conceptprob — same `DOC_DIALECT` in
   the prompt, same `parseBody`, same `renderBlock`. What is not shared: `problems`, grading, tiers,
   and every exam literal. A subject with no exam behind it must not carry that structure.
@@ -202,8 +184,8 @@ the generated codebase teaches, read in a `개념` view that shares the study gr
 ## 디버그 실행 (FR-24)
 
 A third AI-written layer: a step-by-step walkthrough of where control goes from a line the learner
-picks, replayed locally. **The code does not run.** Nothing in the browser can execute a generated
-FastAPI project, so this is the model's *prediction* of an execution order — which is why the popup
+picks, replayed locally. **The code does not run.** Nothing in the browser can execute the loaded
+repository, so this is the model's *prediction* of an execution order — which is why the popup
 carries a standing `예측` label and why every name in `trace.ts` says trace and none says execution.
 
 - **Legs, one file each.** A leg restates one file with `000|` line-number prefixes and asks for the

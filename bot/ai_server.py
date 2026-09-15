@@ -11,8 +11,11 @@ secrets. To reach it from another device, put a tunnel (Cloudflare Tunnel / ngro
 port; the token still gates every request.
 
 Besides /ai it exposes a generic state store (state_store.py) so a browser can persist instance
-state as one-record-per-file collections that an operator can also read and write directly, and
-/sessions for observing in-flight claude processes.
+state as one-record-per-file collections that an operator can also read and write directly,
+/sessions for observing in-flight claude processes, and /repos/load (repo_loader.py) which reads a
+learner-given git repo (remote URL or local folder) and returns its filtered file contents as text
+-- the browser cannot read disks or clone, and the claude CLI runs with tools disabled, so this
+server is the only place that touches the filesystem or spawns `git` for that flow.
 
 Config (env / .env):
     AI_SERVER_TOKEN   required shared secret; without it the server refuses to start.
@@ -39,6 +42,7 @@ from env_load import load_instance_env
 
 import ai
 import probgen
+import repo_loader
 import session_guard
 from state_store import StateError, StateStore
 
@@ -219,7 +223,7 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                 return
 
             is_state = path == "/state" or path.startswith("/state/")
-            is_ai = method == "POST" and path in ("/ai", "/problems")
+            is_ai = method == "POST" and path in ("/ai", "/problems", "/repos/load")
             is_sessions = method == "GET" and path == "/sessions"
             if not (is_state or is_ai or is_sessions):
                 writer.write(_response("404 Not Found", b'{"ok":false,"error":"not found"}', origin))
@@ -252,6 +256,23 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                           405: "405 Method Not Allowed", 500: "500 Internal Server Error",
                           503: "503 Service Unavailable"}.get(status, "500 Internal Server Error")
                 writer.write(_response(reason, _json_bytes(result), origin))
+                await writer.drain()
+                return
+
+            # Repo intake: the browser sends a git URL or local path, this server reads and
+            # filters it, and the result is folded into a later /ai call by the caller.
+            if path == "/repos/load":
+                source = payload.get("source")
+                if not isinstance(source, str):
+                    writer.write(_response("400 Bad Request", b'{"ok":false,"error":"missing source"}', origin))
+                    await writer.drain()
+                    return
+                result = await repo_loader.load(
+                    source,
+                    ref=payload.get("ref"),
+                    include=payload.get("include"),
+                )
+                writer.write(_response("200 OK", _json_bytes(result), origin))
                 await writer.drain()
                 return
 

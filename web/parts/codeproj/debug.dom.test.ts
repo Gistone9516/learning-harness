@@ -10,13 +10,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
 import { mountCodeproj } from "./codeproj";
-import type { GeneratedProject } from "./model";
+import type { CodeProject } from "./model";
 import type { TraceRun, TraceSet } from "./trace";
 
 const lines = (n: number, tag: string) =>
   Array.from({ length: n }, (_, i) => `${tag}_${i + 1}()`).join("\n");
 
-const PROJECT: GeneratedProject = {
+const PROJECT: CodeProject = {
   title: "도서 대출",
   summary: "요약",
   files: [

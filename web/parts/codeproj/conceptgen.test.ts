@@ -6,8 +6,8 @@
 import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
-import { outlineConcepts, writeConcept, writeConcepts } from "./session";
-import { conceptProgress, type ConceptSeed, type ConceptSet } from "./concepts";
+import { outlineConcepts, writeConcept } from "./session";
+import type { ConceptSeed } from "./concepts";
 
 const seed = (id: string, title = "제목"): ConceptSeed => ({ area: "structure", concept_id: id, title });
 
@@ -25,6 +25,7 @@ function scripted(reply: (n: number, req: any) => Partial<AiResponse>) {
       return { ok: true, text: "", session_id: "s1", error: null, ...reply(sent.length, req) } as AiResponse;
     }),
     problems: vi.fn(),
+    repos: vi.fn(),
     health: vi.fn(async () => true),
   } as unknown as AiClient;
   return { client, sent };
@@ -65,7 +66,7 @@ describe("writeConcept", () => {
   });
 
   it("sends the seed and asks for medium effort", async () => {
-    // Generation is the only xhigh call in this part; everything resumed is medium.
+    // Every call in this part is medium; the measured floor is the same at any effort.
     const { client, sent } = scripted(() => ({ text: docReply("ttl-cache") }));
     await writeConcept(new AiSession(client), seed("ttl-cache", "TTL 캐시"));
     expect(sent[0].effort).toBe("medium");
@@ -74,62 +75,11 @@ describe("writeConcept", () => {
   });
 });
 
-describe("writeConcepts", () => {
-  it("makes one call per concept", async () => {
-    const { client, sent } = scripted((n) => ({ text: docReply("c-" + n) }));
-    await writeConcepts(new AiSession(client), [seed("a"), seed("b"), seed("c")], () => undefined);
-    expect(sent).toHaveLength(3);
-  });
-
-  it("publishes the set after every document, not only at the end", async () => {
-    // The learner is already on the screen. A set that only appears at the end would leave the
-    // list empty for minutes and lose everything if they navigate away.
-    const { client } = scripted(() => ({ text: docReply("x") }));
-    const snapshots: { done: number; total: number }[] = [];
-    await writeConcepts(new AiSession(client), [seed("a"), seed("b")], (set: ConceptSet) => {
-      const p = conceptProgress(set);
-      snapshots.push({ done: p.done, total: p.total });
-    });
-    // Two per concept: one when it starts being written, one when it lands.
-    expect(snapshots).toEqual([
-      { done: 0, total: 2 },
-      { done: 1, total: 2 },
-      { done: 1, total: 2 },
-      { done: 2, total: 2 },
-    ]);
-  });
-
-  it("marks exactly one concept as being written, and never two", async () => {
-    // The list shows one 작성 중 tag at a time. Two at once would give the eye nowhere to settle,
-    // and would also be a lie: the pass is one document per call by construction.
-    const { client } = scripted(() => ({ text: docReply("x") }));
-    const counts: number[] = [];
-    const writing: string[] = [];
-    await writeConcepts(new AiSession(client), [seed("a"), seed("b")], (set) => {
-      const w = set.entries.filter((e) => e.status === "writing");
-      counts.push(w.length);
-      if (w.length) writing.push(w[0].seed.concept_id);
-    });
-    expect(Math.max(...counts)).toBe(1);
-    expect(writing).toEqual(["a", "b"]);
-  });
-
-  it("isolates a failure to its own concept", async () => {
-    // One document failing is a row the learner can retry, not a lost set.
-    const { client } = scripted((n) => (n === 2 ? { ok: false, error: "boom" } : { text: docReply("x") }));
-    const set = await writeConcepts(
-      new AiSession(client),
-      [seed("a"), seed("b"), seed("c")],
-      () => undefined,
-    );
-    expect(set.entries.map((e) => e.status)).toEqual(["ok", "failed", "ok"]);
-    expect(set.entries[1].reason).toBe("call");
-    expect(conceptProgress(set)).toEqual({ done: 2, total: 3, failed: 1 });
-  });
-
+describe("writeConcept keeps its seed", () => {
   it("keeps the seed's id even when the model answers about something else", async () => {
+    // The id is the join key the queue and the stored set use; a reply cannot be allowed to move it.
     const { client } = scripted(() => ({ text: docReply("완전히-다른-것") }));
-    const set = await writeConcepts(new AiSession(client), [seed("ttl-cache")], () => undefined);
-    expect(set.entries[0].doc!.concept_id).toBe("ttl-cache");
+    const { doc } = await writeConcept(new AiSession(client), seed("ttl-cache"));
+    expect(doc!.concept_id).toBe("ttl-cache");
   });
 });

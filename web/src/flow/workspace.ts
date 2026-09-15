@@ -2,19 +2,21 @@
 // study flow. The part stays presentational (it renders and emits), the flow stays persistence-only
 // (it moves records), and the sequencing lives here.
 
-import { mountCodeproj, type ExchangeEvent, type GeneratedProject } from "../../parts/codeproj/codeproj";
+import { mountCodeproj, stackOf, type ExchangeEvent, type CodeProject } from "../../parts/codeproj/codeproj";
 import type { CodeprojHandle, CodeprojView, ConceptSet } from "../../parts/codeproj/codeproj";
 import type { AnnotationSet } from "../../parts/codeproj/annotations";
 import type { TraceSet } from "../../parts/codeproj/trace";
 import { renderLauncher } from "../../parts/codeproj/launcher";
-import type { AiSession } from "../ai/client";
-import type { ArchivedProject, Proposal, StudyFlow } from "./study";
+import type { AiSession, RepoLoadRequest, RepoLoadResponse } from "../ai/client";
+import type { ArchivedProject, StudyFlow } from "./study";
 
 export interface WorkspaceConfig {
   container: HTMLElement;
   flow: StudyFlow;
-  /** Live session factory; a fresh session per generated project (load-once then resume). */
+  /** Live session factory; a fresh session per loaded project (load-once then resume). */
   newSession: () => AiSession | null;
+  /** Reads a repository through the server. Absent on an instance with no ai_server. */
+  loadRepo?: (req: RepoLoadRequest) => Promise<RepoLoadResponse>;
 }
 
 export function createWorkspace(cfg: WorkspaceConfig) {
@@ -63,14 +65,14 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     projectId = null;
     seenCount = 0;
 
-    const [proposals, archived] = await Promise.all([flow.openProposals(), flow.listArchived()]);
+    const archived = await flow.listArchived();
     renderLauncher(
       container,
-      { proposals, archived },
+      { archived },
       {
-        onStartProposal: (proposal) => void startFromProposal(proposal),
+        // Offered only where pressing it can work: loading needs both the server and a session.
+        onLoadRepo: cfg.loadRepo && cfg.newSession() ? () => mountStudy() : undefined,
         onOpenArchived: (project) => void openArchived(project),
-        onFreeStart: () => void startFree(),
         onDeleteArchived: (project) => void removeArchived(project),
       },
     );
@@ -78,9 +80,6 @@ export function createWorkspace(cfg: WorkspaceConfig) {
 
   /**
    * Delete a project the learner has already confirmed, then redraw the launcher.
-   *
-   * The redraw is a full `showLauncher`, not a spliced-out row: a delete also reopens whichever
-   * proposal had been started on that project, and that list is on the same screen.
    *
    * A failure is reported rather than swallowed. The offline buffer has no tombstone for a delete,
    * so with the server unreachable the record outlives the call and would simply reappear -- a row
@@ -93,31 +92,6 @@ export function createWorkspace(cfg: WorkspaceConfig) {
       return;
     }
     await showLauncher();
-  }
-
-  /**
-   * A proposal only pre-fills the form; the learner still presses generate (FR-14).
-   *
-   * Precedence is proposal > tuning > kit fallback. A proposal always carries a scale (the flow
-   * defaults it when reading the index), so tuning only ever supplies the stack hint here.
-   */
-  async function startFromProposal(proposal: Proposal): Promise<void> {
-    const tuning = await flow.readTuning();
-    mountStudy({
-      initialInput: {
-        topic: proposal.data.topic,
-        scale: proposal.scale,
-        seed: proposal.data.seed ?? tuning.stack_hint,
-      },
-      proposalId: proposal.id,
-      stack: proposal.stack,
-    });
-  }
-
-  /** No proposal, so the operator's tuning defaults are what pre-fills the form. */
-  async function startFree(): Promise<void> {
-    const tuning = await flow.readTuning();
-    mountStudy({ initialInput: { scale: tuning.scale, seed: tuning.stack_hint } });
   }
 
   async function openArchived(project: ArchivedProject): Promise<void> {
@@ -135,7 +109,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     // A revisit where questions are possible is a study session too. Without its own history
     // record every exchange in this visit would be written to nothing.
     historyId = session
-      ? await flow.beginSession({ projectId: project.id, topic: project.topic, stack: project.stack })
+      ? await flow.beginSession({ projectId: project.id, topic: project.title, stack: project.stack })
       : null;
 
     // Files read in THIS visit, not the accumulated total on disk. endSession stamps this number
@@ -156,8 +130,12 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     activeView = "code";
     const handle = mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
       session,                              // null on an offline instance; the AI pane hides itself
-      project: record.data.project as GeneratedProject,
+      project: record.data.project as CodeProject,
+      // Files the first visit did not get to are annotated for the same request as the rest.
+      request: record.data.origin?.request,
       annotations: annotations ?? undefined,
+      // Annotation can resume on a reopened project, so this needs a write-back here too.
+      onAnnotations: (set) => writeAnnotationSet(project.id, set),
       concepts: concepts ?? undefined,
       traces: traces ?? undefined,
       onFileSeen: (path) => void onFileSeen(mine, path),
@@ -185,6 +163,14 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     });
   }
 
+  /** Store the annotation layer, on the same terms and for the same reason. */
+  function writeAnnotationSet(id: string, set: AnnotationSet): void {
+    void serialize(async () => {
+      await sessionReady;
+      await flow.writeAnnotations(id, set);
+    });
+  }
+
   /** Store the trace layer, on the same terms and for the same reason. */
   function writeTraceSet(id: string, set: TraceSet): void {
     void serialize(async () => {
@@ -193,11 +179,7 @@ export function createWorkspace(cfg: WorkspaceConfig) {
     });
   }
 
-  function mountStudy(opts: {
-    initialInput?: { topic?: string; scale?: "small" | "medium" | "large"; seed?: string };
-    proposalId?: string;
-    stack?: string;
-  }): void {
+  function mountStudy(): void {
     const session = cfg.newSession();
     const mine = ++visit;
     // Captured for this visit alone. The annotation pass finishes minutes later, and by then the
@@ -207,16 +189,10 @@ export function createWorkspace(cfg: WorkspaceConfig) {
 
     const handle: CodeprojHandle = mountCodeproj(container.querySelector(".lh-cp-host") as HTMLElement, {
       session,
-      initialInput: opts.initialInput,
-      onProjectGenerated: (project, input) => {
+      loadRepo: cfg.loadRepo,
+      onProjectLoaded: (project, origin) => {
         sessionReady = flow
-          .startProject({
-            project,
-            topic: input.topic,
-            stack: opts.stack ?? input.seed ?? "",
-            scale: input.scale,
-            proposalId: opts.proposalId ?? null,
-          })
+          .startProject({ project, origin, stack: stackOf(project.files) })
           .then(async (started) => {
             myProjectId = started.projectId;
             projectId = started.projectId;

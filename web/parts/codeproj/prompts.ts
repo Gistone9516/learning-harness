@@ -1,12 +1,12 @@
 // Prompt layer for the codeproj part. Everything the AI is told lives here, separated from the
 // view and from the transport, so wording is reviewable and testable in one place.
 //
-// Subject-agnostic: these strings describe software quality and explanation shape only. The topic,
-// stack and constraints always arrive as injected input, never as a literal in this file.
+// Subject-agnostic: these strings describe explanation shape only. The repository and the learner's
+// request always arrive as injected input, never as a literal in this file.
 
 import { DOC_DIALECT } from "../../src/doc/doc";
 import { CONCEPT_MAX, CONCEPT_MIN } from "./concepts";
-import type { AskRequest, ExplainRequest, GenerateInput, GeneratedProject, Lens, Scrap } from "./model";
+import type { AskRequest, ExplainRequest, CodeProject, Lens, ReadingRequest, Scrap } from "./model";
 import { buildComponentDirective } from "./components/catalog";
 
 export const LENS_LABELS: Record<Lens, string> = {
@@ -35,43 +35,6 @@ const CONCEPT_LENS_FORMAT = [
 ].join("\n");
 
 /**
- * Quality clause injected into every generation call.
- *
- * The learner reads this code to learn from it, so it has to look like code a professional would
- * ship: layered, conventional for its stack, and persisting data as one record per file behind an
- * index rather than appending to one growing file. Toy code teaches the wrong habits, which is why
- * this is part of the contract rather than a nice-to-have.
- */
-export const QUALITY_CLAUSE = [
-  "Code quality requirements (mandatory):",
-  "- Imitate how professionals and companies actually write software in the chosen stack:",
-  "  conventional directory layout, naming, configuration separated from code, error handling,",
-  "  input validation, logging, at least one test file, and a README.",
-  "- Separate layers: entry point, domain/service logic, storage/adapters and configuration must",
-  "  not be mixed into one file.",
-  "- If the project persists data, store one record per file with a separate index; never append",
-  "  records into a single growing file.",
-  "- No toy or textbook-abridged code. Write it as real service code, scaled down only in size.",
-  "- Code stays in the project's language; explanatory prose (summary, comments) follows the",
-  "  configured output language.",
-].join("\n");
-
-/**
- * Line budgets counted the domain code and forgot everything QUALITY_CLAUSE asks for in the
- * same breath. Measured 2026-09-02: a medium project came back at 14 files and 1158 lines,
- * squarely inside the file range and 258 past the line one -- and the overflow was not padding,
- * it was the README (84), the tests (171), the error hierarchy (94) and the schemas (69) that
- * the clause requires. The two halves of the instruction contradicted each other, and the
- * model obeyed the file count. `small` was the worst of the three: six files is the floor
- * QUALITY_CLAUSE implies, so 3-6 left no room for domain code at all.
- */
-const SCALE_GUIDE: Record<string, string> = {
-  small: "6-9 files, ~500 lines total",
-  medium: "10-16 files, ~1100 lines total",
-  large: "18-30 files, ~2000 lines total",
-};
-
-/**
  * Who every explanation is written for.
  *
  * Stated once and shared by the annotation pass, the short answer and the full one, because a
@@ -89,94 +52,72 @@ export const AUDIENCE_CLAUSE = [
   "- 한 문장에 개념 하나. 여러 개를 겹치면 이미 아는 사람만 읽힙니다.",
   "- 쉽게 쓰되 줄이지 마세요. 어려운 것을 생략하는 것이 아니라, 모르는 사람이 따라올 수 있게 적는 것입니다.",
 ].join("\n");
-export function buildGenerateSystem(): string {
-  return (
-    "You are a project generator. Output ONLY valid JSON matching the GeneratedProject schema: " +
-    '{ "title": string, "summary": string, "files": [{path, content, lang?}], "entrypoints"?: string[] }. ' +
-    "No prose, no markdown outside the JSON. The codebase must be complete, coherent, and self-consistent.\n" +
-    // The server runs an agent CLI, so it has to be told the project belongs in the response and
-    // not on disk; without this it writes the files somewhere and reports back in prose.
-    "Return the project as JSON only: do not create, write or edit any file, and do not call tools.\n\n" +
-    QUALITY_CLAUSE
+// ── 학습자 요청 ──────────────────────────────────────────────────────────────
+//
+// The learner's own words about why they are reading this repository and what to look at. Passed
+// through untouched, like a question: rewriting them into a template would put this file's idea of
+// what they meant between them and the model.
+
+/**
+ * The request as a prompt section, or "" when both boxes were left empty.
+ *
+ * Nothing rather than "(없음)": an empty heading still reads as an instruction, and for a request
+ * that says nothing the reader level in AUDIENCE_CLAUSE is already the right answer.
+ */
+export function requestClause(req?: Pick<ReadingRequest, "goal" | "focus">): string {
+  const goal = req?.goal.trim() ?? "";
+  const focus = req?.focus.trim() ?? "";
+  if (!goal && !focus) return "";
+  const lines = ["[학습자 요청]"];
+  if (goal) lines.push(`학습 목적과 수준: ${goal}`);
+  if (focus) lines.push(`집중할 곳: ${focus}`);
+  lines.push(
+    "설명의 깊이와 강조점을 이 요청에 맞춘다. 수준을 밝혔으면 [읽는 사람]보다 이 요청을 따른다.",
+    "집중할 곳과 닿는 부분은 더 자세히 쓰되, 닿지 않는 부분을 빼지는 않는다.",
   );
-}
-
-export function buildGeneratePrompt(input: GenerateInput): string {
-  // The scale was a parenthetical aside and got treated like one: measured 2026-09-02, a
-  // `small` asking for 6-9 files came back with 16. The screen tells the learner that number,
-  // so it has to bind -- it is stated as its own requirement, not as a gloss on a word.
-  const guide = SCALE_GUIDE[input.scale] ?? input.scale;
-  const seed = input.seed ? `\n\nConstraints/stack: ${input.seed}` : "";
-  return (
-    `Generate a project: topic="${input.topic}", scale=${input.scale}.\n\n` +
-    `File count is a hard requirement, not a suggestion: ${guide}. Do not exceed it. ` +
-    "If the design seems to need more files, merge related ones instead." +
-    seed
-  );
-}
-// ── 주제 사전 판정 (FR-25) ───────────────────────────────────────────────────
-//
-// One short call before the expensive one. Generation is `xhigh` and takes minutes -- the only
-// measured full run is 279s for 14 files (2026-09-02) -- and until 2026-09-10 a topic it could
-// not build burned that whole wait and then said one generic sentence. A learner reported losing
-// two or three attempts of tens of minutes each that way.
-//
-// The judgement is narrow on purpose: not "is this a good thing to learn", which is not the
-// model's call, but "does a layered codebase fall out of this sentence". `무중단 배포 및 Chaos
-// Engineering 실습` is the shape that fails -- it names a practice to carry out, not a program
-// that does something, so QUALITY_CLAUSE's entry point / domain / storage / config layering has
-// nothing to attach to and the model has to invent a subject before it can start.
-//
-// The scale comes back from here too. The learner's pick is a recommendation and the model may
-// move it, but generation itself keeps treating whatever scale it is handed as a hard bound --
-// that sentence is a dated fix (2026-09-02: a `small` asking 6-9 files returned 16) and softening
-// it would reinstate the overshoot. Discretion moves in front of generation; generation stays
-// deterministic.
-
-export function buildAssessSystem(): string {
-  return [
-    "너는 학습용 프로젝트 생성을 시작하기 전에, 주어진 주제로 코드베이스를 만들 수 있는지 판정한다.",
-    "",
-    "[판정 기준]",
-    "만들 수 있는 주제는 '무엇을 하는 프로그램'이다. 진입점, 도메인·서비스 로직, 저장소, 설정이",
-    "각각 다른 파일로 갈라지고, 테스트와 README가 붙는 형태로 떨어져야 한다.",
-    "만들 수 없는 주제는 이런 것들이다.",
-    "- 프로그램이 아니라 운영 방식이나 실습 과정을 가리키는 것 (배포 절차, 장애 주입 훈련, 성능 튜닝 실습)",
-    "- 도메인이 없어서 무엇을 다루는 프로그램인지 정해지지 않는 것",
-    "- 언어나 라이브러리 자체를 익히는 것처럼, 코드베이스가 아니라 예제 모음이 되는 것",
-    "- 여러 대의 장비나 외부 인프라가 있어야만 성립하는 것",
-    "판정이 애매하면 만들 수 있다고 본다. 막는 것은 확실히 안 되는 경우뿐이다.",
-    "",
-    "[규모]",
-    "학습자가 고른 규모는 권장일 뿐이다. 주제에 견주어 맞지 않으면 네가 조정하고 왜인지 밝혀라.",
-    "small은 6~9파일, medium은 10~16파일, large는 18~30파일이다.",
-    "주제가 담고 있는 책임이 적으면 내리고, 계층이 여럿 필요하면 올린다.",
-    "",
-    "[막을 때]",
-    "왜 안 되는지 한 문장으로 말하고, 학습자의 의도를 최대한 살린 대안 주제를 2~3개 준다.",
-    "대안은 그대로 입력하면 바로 생성되는 완성된 문장이어야 한다. 조언이 아니라 붙여넣을 문장이다.",
-    "",
-    "[출력]",
-    'JSON 하나만 출력한다. {"verdict":"go"|"reword","scale":"small"|"medium"|"large",',
-    '"scale_reason":"한 문장 또는 빈 문자열","why":"막은 이유 한 문장 또는 빈 문자열",',
-    '"suggestions":["대안 주제 문장"]}',
-    "verdict가 go면 why는 빈 문자열이고 suggestions는 빈 배열이다.",
-    "규모를 학습자 선택 그대로 둘 때는 scale_reason을 빈 문자열로 둔다.",
-    "설명 문장이나 코드펜스 없이 JSON만 출력한다.",
-  ].join("\n");
-}
-
-export function buildAssessPrompt(input: GenerateInput): string {
-  const seed = input.seed ? `\n제약/스택: ${input.seed}` : "\n제약/스택: (지정 없음)";
-  return `[주제 판정]\n주제: ${input.topic}\n학습자가 고른 규모: ${input.scale}${seed}`;
+  return lines.join("\n");
 }
 
 /**
- * System clause for a reseed: put a codebase back into a fresh session so questions can carry on.
+ * Choose which files to annotate before the learner is let in.
  *
- * QUALITY_CLAUSE is deliberately absent. It governs code the model writes, and a reseed writes
- * none -- handing it over would invite the model to "improve" the project the learner is reading.
- * That absence is what keeps this path structurally separate from generation.
+ * A model call rather than a path match because `focus` is a sentence ("인증 흐름 위주"), not a
+ * glob, and the session already holds the code that says which files that sentence is about. The
+ * paths are listed verbatim so the answer can be compared as strings; `annotationOrder` drops
+ * anything that is not on the list.
+ */
+export function buildFocusSystem(): string {
+  return [
+    "너는 학습자가 저장소를 읽기 시작하기 전에, 먼저 읽을 파일을 고른다.",
+    "Do not create, write or edit any file, and do not call tools.",
+    "",
+    "[고르는 기준]",
+    "- 학습자 요청에 가장 직접 닿는 파일을 먼저 고른다.",
+    "- 요청이 흐름을 말하면, 그 흐름이 시작되는 진입점과 핵심 처리 파일을 함께 고른다.",
+    "- 설정, 테스트, 문서는 요청이 그것을 가리킬 때만 고른다.",
+    "- 아래 목록에 있는 경로만, 문자열 그대로 쓴다.",
+    "",
+    "[출력]",
+    'JSON 하나만 출력한다. {"paths": ["경로"]}',
+    "읽을 순서대로 늘어놓는다. 설명 문장이나 코드펜스 없이 JSON만 출력한다.",
+  ].join("\n");
+}
+
+export function buildFocusPrompt(paths: string[], req: ReadingRequest, max: number): string {
+  return (
+    `${requestClause(req)}\n\n` +
+    `이 저장소의 파일:\n${paths.join("\n")}\n\n` +
+    `먼저 읽을 파일을 최대 ${max}개 골라라.`
+  );
+}
+
+/**
+ * System clause for loading a codebase into a fresh session: once when a repository is first
+ * loaded, and again whenever a lost session has to be put back.
+ *
+ * It spends three lines on what not to do because the server runs an agent CLI, and one handed a
+ * codebase with no instruction treats it as work: it rewrites, summarises or writes files, and
+ * the learner ends up reading something other than the repository they gave.
  */
 export function buildReseedSystem(): string {
   return (
@@ -188,7 +129,7 @@ export function buildReseedSystem(): string {
 }
 
 /** The whole project as one message. This is the expensive call the resume model exists to avoid. */
-export function buildReseedPrompt(project: GeneratedProject): string {
+export function buildReseedPrompt(project: CodeProject): string {
   const files = project.files.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
   return (
     `[코드베이스 적재] ${project.title}\n\n` +
@@ -196,9 +137,8 @@ export function buildReseedPrompt(project: GeneratedProject): string {
   );
 }
 /**
- * The annotation pass explains code that already exists. QUALITY_CLAUSE is absent for the same
- * reason as in the reseed: nothing is being written, and offering the clause invites the model
- * to improve the project the learner is about to read.
+ * The annotation pass explains code that already exists, so it repeats the reseed's prohibitions:
+ * nothing is being written, and a model left to its defaults improves what it is shown.
  */
 export function buildAnnotateSystem(): string {
   return (
@@ -218,15 +158,19 @@ export function buildAnnotateSystem(): string {
  * with the source restated this way, a 61-line file produced 14 notes in 37s with zero ranges
  * outside the file.
  */
-export function buildAnnotatePrompt(path: string, content: string): string {
+export function buildAnnotatePrompt(path: string, content: string, request?: ReadingRequest): string {
   const lines = content.split("\n");
   const numbered = lines
     .map((line, i) => `${String(i + 1).padStart(3, "0")}| ${line}`)
     .join("\n");
+  // Every call restates the request. Annotation resumes across visits, and a file annotated on a
+  // later one must be written for the same goal as the first -- the session may not be the same.
+  const asked = requestClause(request);
   return (
     `[주석 생성 요청]\n대상 파일: ${path}\n\n` +
     `아래가 그 파일의 전체 내용이다. 각 줄 앞의 번호가 파일의 실제 줄 번호다.\n\n` +
     `${numbered}\n\n` +
+    (asked ? `${asked}\n\n` : "") +
     "이 파일에 주석 5~15개를 만들어라. 파일이 짧으면 그에 맞게 줄여라.\n" +
     "대상은 파일 전체 역할 하나, import 묶음 하나, 각 클래스와 함수와 메서드 정의, " +
     "그리고 눈에 띄는 문장(상수, 설정값, 까다로운 한 줄, 예외 처리 지점)이다.\n" +
@@ -309,7 +253,7 @@ export function buildScrapExplainPrompt(scraps: Scrap[], lens: Lens): string {
 /** Ask what this codebase teaches. Returns seeds only -- no prose, so it stays cheap. */
 export function buildConceptOutlineSystem(): string {
   return [
-    "너는 방금 이 세션에서 만든 코드베이스를 읽고, 그 코드가 실제로 쓰는 개념의 목록을 뽑는다.",
+    "너는 이 세션에 적재된 코드베이스를 읽고, 그 코드가 실제로 쓰는 개념의 목록을 뽑는다.",
     "",
     "[무엇을 뽑는가]",
     "- 이 코드베이스가 실제로 쓰는 것만 뽑는다. 쓰지 않은 일반론은 넣지 않는다.",
@@ -327,8 +271,12 @@ export function buildConceptOutlineSystem(): string {
   ].join("\n");
 }
 
-export function buildConceptOutlinePrompt(): string {
-  return "이 프로젝트의 개념 목록을 뽑아라.";
+/** The learner's request, when there is one, decides which of the codebase's concepts come first. */
+export function buildConceptOutlinePrompt(request?: ReadingRequest): string {
+  const asked = requestClause(request);
+  return asked
+    ? `${asked}\n\n이 프로젝트의 개념 목록을 뽑아라. 요청과 닿는 개념을 앞에 둔다.`
+    : "이 프로젝트의 개념 목록을 뽑아라.";
 }
 
 /**
@@ -340,7 +288,7 @@ export function buildConceptOutlinePrompt(): string {
  */
 export function buildConceptDocSystem(): string {
   return [
-    "너는 방금 이 세션에서 만든 코드베이스를 근거로, 요청받은 개념 하나에 대한 해설 문서를 쓴다.",
+    "너는 이 세션에 적재된 코드베이스를 근거로, 요청받은 개념 하나에 대한 해설 문서를 쓴다.",
     "",
     "[무엇을 쓰는가]",
     "- 이 코드베이스에서 그 개념이 실제로 어떻게 쓰였는지를 중심에 둔다. 파일과 함수 이름을 든다.",
@@ -409,9 +357,9 @@ export function buildConceptDocPrompt(seed: { area: string; concept_id: string; 
 // would leave the model guessing which it meant.
 
 /**
- * The trace pass predicts an order of execution over code that already exists, so QUALITY_CLAUSE
- * is absent for the same reason as in the reseed and the annotation pass: nothing is being
- * written, and offering it invites the model to improve the project instead of walking it.
+ * The trace pass predicts an order of execution over code that already exists, so it carries the
+ * same prohibitions as the reseed and the annotation pass: nothing is being written, and a model
+ * left to its defaults improves the project instead of walking it.
  */
 export function buildTraceSystem(): string {
   return (

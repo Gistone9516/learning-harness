@@ -12,9 +12,8 @@ import type { ArchivedProject } from "../../src/flow/study";
 const archived = (over: Partial<ArchivedProject> = {}): ArchivedProject => ({
   id: "prj-one",
   title: "도서 대출 관리 REST API",
-  topic: "도서 대출",
-  stack: "FastAPI + SQLite",
-  scale: "small",
+  source: "https://example.test/o/library-api",
+  stack: "Python",
   file_count: 10,
   updated_at: 100,
   ...over,
@@ -25,12 +24,10 @@ function mount(opts: { onDelete?: (p: ArchivedProject) => void } = {}) {
   host.id = "app";
   document.body.appendChild(host);
   const handlers = {
-    onStartProposal: vi.fn(),
     onOpenArchived: vi.fn(),
-    onFreeStart: vi.fn(),
     ...(opts.onDelete ? { onDeleteArchived: opts.onDelete } : {}),
   };
-  renderLauncher(host, { proposals: [], archived: [archived(), archived({ id: "prj-two", title: "두 번째" })] }, handlers);
+  renderLauncher(host, { archived: [archived(), archived({ id: "prj-two", title: "두 번째" })] }, handlers);
   return { host, handlers };
 }
 

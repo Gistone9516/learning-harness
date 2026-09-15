@@ -585,6 +585,7 @@ describe("conceptprob problem-practice features", () => {
       ai: async () => ({ ok: true, text: "", session_id: null, error: null }),
       health: async () => true,
       problems: async () => ({ ok: true, problems: [genned], error: null, dropped: 0 }),
+      repos: async () => ({ ok: false, reason: "call", error: "unused" }),
     };
     mount(client); await tick();
     const before = container.querySelectorAll('.lh-cp-prob-list .lh-cp-prob').length;

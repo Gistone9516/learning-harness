@@ -4,7 +4,7 @@
 
 import { buildLineIndex, fileNote, type Annotation } from "./annotations";
 import { createNotePopup, type DebugView } from "./notepopup";
-import type { GeneratedProject, Lens, TreeNode } from "./model";
+import type { CodeProject, Lens, TreeNode } from "./model";
 import { LENS_LABELS, LENS_ORDER } from "./prompts";
 import { highlightLines } from "../../src/highlight/highlight";
 
@@ -23,7 +23,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 
 export interface FilePanel {
   root: HTMLElement;
-  render(project: GeneratedProject, tree: TreeNode[]): void;
+  render(project: CodeProject, tree: TreeNode[]): void;
   markSelected(path: string): void;
   markSeen(paths: Iterable<string>): void;
 }
@@ -115,10 +115,14 @@ export interface CodePanel {
    */
   setAnnotations(items: Annotation[]): void;
   /**
-   * Offer to build this file's notes again. Shown only when they failed AND something can
-   * actually do it, so the control never appears where pressing it would do nothing.
+   * What the note slot offers when the selected line has no note to show.
+   *
+   * `retry` for a file whose notes failed, `make` for one that was never annotated, `pending` while
+   * its notes are queued or being written (shown, not pressable), `none` otherwise. The mount only
+   * passes a pressable state where something can actually run it, so the control never appears
+   * where pressing it would do nothing.
    */
-  offerAnnotationRetry(show: boolean, run: () => void): void;
+  setAnnotationAction(state: AnnotationAction, run: () => void): void;
   /** A reference followed from inside a note; the mount owns moving between files. */
   onNoteRef(cb: (path: string, line?: number) => void): void;
   /**
@@ -152,6 +156,14 @@ export interface CodePanel {
    */
   setDebugControl(state: "hidden" | "ready" | "loading" | "running", run: () => void): void;
 }
+
+export type AnnotationAction = "none" | "retry" | "make" | "pending";
+
+const ACTION_LABELS: Record<Exclude<AnnotationAction, "none">, string> = {
+  retry: "설명 다시 만들기",
+  make: "설명 만들기",
+  pending: "설명 만드는 중",
+};
 
 export function createCodePanel(): CodePanel {
   const root = el("div", "lh-cp-panel lh-cp-code-panel");
@@ -195,7 +207,8 @@ export function createCodePanel(): CodePanel {
   let refListener: ((path: string, line?: number) => void) | null = null;
   let expandListener: ((lines: [number, number], what: string) => void) | null = null;
   let closeTimer: number | null = null;
-  let retry: (() => void) | null = null;
+  let action: AnnotationAction = "none";
+  let actionRun: (() => void) | null = null;
   // Where a debug run stands in the file currently shown. Deliberately outside `show()`'s reset
   // block: the mount owns the run and reapplies these after every file switch.
   let debugStart: number | null = null;
@@ -253,12 +266,20 @@ export function createCodePanel(): CodePanel {
     // The keyboard and touch way in. It is a label rather than a header button because the head
     // is a single nowrap row with overflow hidden, and a fifth control there is simply clipped.
     // One slot, two states that cannot both hold: a file whose notes failed has none on any line.
+    // 설명 for the states that build notes, 주석 for looking at one that exists: the split the
+    // retry label and the waiting screen already used before the two new states joined them.
+    noteLink.disabled = false;
+    noteLink.classList.remove("lh-cp-note-link--pending");
     if (selected >= 0) {
       noteLink.hidden = false;
       noteLink.textContent = "주석 보기 (Alt+Enter)";
-    } else if (retry) {
+    } else if (action !== "none") {
       noteLink.hidden = false;
-      noteLink.textContent = "설명 다시 만들기";
+      noteLink.textContent = ACTION_LABELS[action];
+      if (action === "pending") {
+        noteLink.disabled = true;
+        noteLink.classList.add("lh-cp-note-link--pending");
+      }
     } else {
       noteLink.hidden = true;
     }
@@ -487,7 +508,7 @@ export function createCodePanel(): CodePanel {
       openNoteAt(range[0]);
       return;
     }
-    retry?.();
+    if (action === "retry" || action === "make") actionRun?.();
   });
 
   clearBtn.addEventListener("click", () => {
@@ -514,7 +535,7 @@ export function createCodePanel(): CodePanel {
       lineCount = lines.length;
       // Highlight the whole file at once so multi-line constructs (docstrings, block comments) are
       // recognised, then take it back apart with tags balanced per row. The language comes from the
-      // file's own `lang` when the generator set one, otherwise from its extension.
+      // file's own `lang` when one was set, otherwise from its extension.
       const highlighted = highlightLines(content, lang || path);
       lines.forEach((text, i) => {
         const n = i + 1;
@@ -556,8 +577,9 @@ export function createCodePanel(): CodePanel {
     onNoteExpand(cb) {
       expandListener = cb;
     },
-    offerAnnotationRetry(show, run) {
-      retry = show ? run : null;
+    setAnnotationAction(state, run) {
+      action = state;
+      actionRun = state === "none" ? null : run;
       paint();
     },
     setAnnotations(items) {
@@ -671,7 +693,7 @@ export interface AiPanel {
     setFooter(label: string, run: () => void): void;
     /**
      * Replace the pending text and mark it as a long wait. The ordinary 5-13s call keeps the
-     * quiet static line; this is for the rare generation-class wait, where unchanging grey text
+     * quiet static line; this is for the rare load-class wait, where unchanging grey text
      * beside greyed buttons is indistinguishable from a hang.
      */
     setWaiting(text: string): void;

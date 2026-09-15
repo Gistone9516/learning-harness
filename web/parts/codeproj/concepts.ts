@@ -1,4 +1,4 @@
-// The concept layer: what a generated codebase teaches, written out as documents.
+// The concept layer: what a loaded codebase teaches, written out as documents.
 //
 // The annotation layer (FR-21) explains one place in one file. This explains the ideas that run
 // across files -- why the code is split the way it is, what a pattern in it is called, what would

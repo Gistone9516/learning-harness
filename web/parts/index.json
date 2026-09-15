@@ -14,7 +14,7 @@
       "id": "codeproj",
       "dir": "parts/codeproj",
       "entry": "parts/codeproj/codeproj.ts",
-      "what": "AI-generated project, IDE-shaped read-only comprehension with session-based explanations, questions and concept documents.",
+      "what": "A learner-given git repository, IDE-shaped read-only comprehension with request-shaped annotations, session-based explanations, questions and concept documents.",
       "deps": ["src/doc"],
       "ai": true,
       "constraints": ["subject-agnostic", "secrets-gated", "session-resume"]

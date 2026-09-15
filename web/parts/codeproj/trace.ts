@@ -1,6 +1,6 @@
 // The debug layer's model: parsing one leg's reply, and the variable diff. No DOM, no transport.
 //
-// This code does not run. The learner reads an AI-generated project in a browser, so a "debug run"
+// This code does not run. The learner reads a loaded repository in a browser, so a "debug run"
 // is the model's *prediction* of where control goes and what is live at each point, replayed
 // locally. That is why every name here says trace and none says execution, and why the popup
 // carries a standing label rather than a per-step confidence flag: a flag on some steps would read

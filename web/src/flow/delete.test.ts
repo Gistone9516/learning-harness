@@ -6,8 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { createLocalStorage } from "../storage/local";
 import type { StoragePort } from "../storage/port";
-import { COLLECTIONS, createStudyFlow, type ProposalData } from "./study";
-import { makeRecord } from "../storage/port";
+import { COLLECTIONS, createStudyFlow } from "./study";
 
 function memStorage(): Storage {
   const map = new Map<string, string>();
@@ -30,18 +29,17 @@ function setup() {
 
 const PROJECT = { title: "도서 관리", summary: "s", files: [{ path: "a.py", content: "x" }] };
 
-async function seedProposal(storage: StoragePort, id: string) {
-  await storage.put(
-    COLLECTIONS.proposals,
-    makeRecord<ProposalData>("proposal", id,
-      { title: "3계층 REST", stack: "FastAPI", scale: "small", status: "open", order: 1 },
-      { topic: "REST", seed: "FastAPI", briefing: { why: "계층 분리를 코드로 보려고", learning_points: ["라우터와 서비스 분리"] } }),
-  );
-}
+const ORIGIN = {
+  kind: "repo" as const,
+  source: "https://example.test/o/repo",
+  ref: null,
+  commit: null,
+  request: { goal: "", focus: "", scope: [] },
+};
 
 /** A project with every per-project record it can accumulate, plus a session and a conversation. */
 async function seed(flow: ReturnType<typeof createStudyFlow>, storage: StoragePort) {
-  const started = await flow.startProject({ project: PROJECT, topic: "도서 대출", scale: "small", stack: "FastAPI" });
+  const started = await flow.startProject({ project: PROJECT, origin: ORIGIN, stack: "FastAPI" });
   const id = started.projectId;
   await flow.rememberSession(id, "sid-1");
   await flow.writeAnnotations(id, { files: { "a.py": { status: "ok", items: [{}] } } });
@@ -91,36 +89,6 @@ describe("deleteProject", () => {
     const days = await storage.list(COLLECTIONS.conversations);
     expect(days).toHaveLength(1);
     expect(days[0].summary["entries"]).toBe(1);
-  });
-
-  it("walks a started proposal back to open so it can be run again", async () => {
-    // Nothing else ever writes this status back. Left alone the proposal would be invisible
-    // forever: only `open` ones are ever offered.
-    const { flow, storage } = setup();
-    await seedProposal(storage, "prop-a");
-    const started = await flow.startProject({ project: PROJECT, topic: "REST", scale: "small", stack: "FastAPI" });
-    await flow.markProposalStarted("prop-a", started.projectId);
-    expect(await flow.openProposals()).toHaveLength(0);
-
-    await flow.deleteProject(started.projectId);
-
-    const open = await flow.openProposals();
-    expect(open.map((p) => p.id)).toEqual(["prop-a"]);
-    const rec = await storage.get<{ started_project_id: string | null }>(COLLECTIONS.proposals, "prop-a");
-    expect(rec!.data.started_project_id).toBeNull();
-  });
-
-  it("leaves a proposal that was started on a different project alone", async () => {
-    const { flow, storage } = setup();
-    await seedProposal(storage, "prop-keep");
-    const other = await flow.startProject({ project: PROJECT, topic: "A", scale: "small", stack: "X" });
-    await flow.markProposalStarted("prop-keep", other.projectId);
-    const doomed = await flow.startProject({ project: PROJECT, topic: "B", scale: "small", stack: "Y" });
-
-    await flow.deleteProject(doomed.projectId);
-
-    const all = await flow.listProposals();
-    expect(all.find((p) => p.id === "prop-keep")!.status).toBe("started");
   });
 
   it("deletes nothing else when the project record itself cannot be removed", async () => {

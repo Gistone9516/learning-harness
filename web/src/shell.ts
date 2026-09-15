@@ -26,7 +26,7 @@ export interface AppConfig {
   part: PartId;
   data?: unknown;           // part-specific injected data (problem / project / {areas, conceptOutline, concepts?})
   ai?: AiClientConfig;      // optional: AI parts also run from pre-baked injected content with no ai_server
-  state?: StateConfig;      // optional: enables the propose/archive/history workspace
+  state?: StateConfig;      // optional: enables the archive/history workspace
 }
 
 /**
@@ -61,15 +61,19 @@ export function mountApp(container: HTMLElement, config: AppConfig): void {
   const data = (config.data ?? {}) as Record<string, unknown>;
 
   if (config.part === "codeproj") {
-    // With a state layer the part runs inside the workspace (proposals, archive, history);
-    // without one it is the plain single-project view.
+    // The server reads repositories, so loading one needs the same client the AI calls use.
+    const loadRepo = client ? client.repos : undefined;
+
+    // With a state layer the part runs inside the workspace (archive, history); without one it is
+    // the plain single-project view.
     if (config.state) {
       const flow = createStudyFlow({ storage: buildStorage(config.state) });
       const workspace = createWorkspace({
         container,
         flow,
-        // A fresh session per project: generation loads the codebase once, then follow-ups resume.
+        // A fresh session per project: loading puts the codebase in once, then follow-ups resume.
         newSession: () => (client ? new AiSession(client) : null),
+        loadRepo,
       });
       void workspace.showLauncher();
       return;
@@ -77,10 +81,10 @@ export function mountApp(container: HTMLElement, config: AppConfig): void {
 
     const project = data.project as never;
     if (!session && !project) {
-      container.textContent = "이 모듈은 AI 설정(ai_server) 또는 사전 생성 프로젝트가 필요합니다.";
+      container.textContent = "이 모듈은 AI 설정(ai_server) 또는 미리 준비된 프로젝트가 필요합니다.";
       return;
     }
-    mountCodeproj(container, { session, project });
+    mountCodeproj(container, { session, project, loadRepo });
   } else if (config.part === "conceptprob") {
     const concepts = data.concepts as Record<string, unknown> | undefined;
     const hasPrebaked = !!concepts && Object.keys(concepts).length > 0;

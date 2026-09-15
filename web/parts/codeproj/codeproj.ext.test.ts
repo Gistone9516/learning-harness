@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// Tests for the codeproj extensions: the generation quality clause, the concept lens shape, the
+// Tests for the codeproj extensions: the concept lens shape, the
 // free-form question path (including a line selection), and the three-pane layout wiring.
 import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
@@ -8,14 +8,13 @@ import { AiSession } from "../../src/ai/client";
 import {
   ask,
   explain,
-  generateProject,
   mountCodeproj,
   sliceLines,
-  QUALITY_CLAUSE,
   LENS_ORDER,
-  type GeneratedProject,
+  type CodeProject,
 } from "./codeproj";
-import { buildAskPrompt, buildExplainPrompt, buildGenerateSystem } from "./prompts";
+import { buildAskPrompt, buildExplainPrompt } from "./prompts";
+import { reseedSession } from "./session";
 
 function stubClient(reply: Partial<AiResponse> = {}) {
   const sent: any[] = [];
@@ -30,7 +29,7 @@ function stubClient(reply: Partial<AiResponse> = {}) {
   return { client, sent };
 }
 
-const PROJECT: GeneratedProject = {
+const PROJECT: CodeProject = {
   title: "T",
   summary: "S",
   files: [
@@ -38,44 +37,6 @@ const PROJECT: GeneratedProject = {
     { path: "README.md", content: "readme" },
   ],
 };
-
-describe("generation quality clause (C8)", () => {
-  it("ships the professional-code requirements in the system preamble", () => {
-    const system = buildGenerateSystem();
-    expect(system).toContain(QUALITY_CLAUSE);
-    expect(system).toMatch(/one record per file/i);
-    expect(system).toMatch(/never append/i);
-    expect(system).toMatch(/Separate layers/i);
-    expect(system).toMatch(/No toy/i);
-  });
-
-  it("sends the clause on a real generation call", async () => {
-    const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
-    const result = await generateProject(new AiSession(client), { topic: "메모 앱", scale: "small" });
-    expect(result.ok && result.project.title).toBe("T");
-    expect(sent[0].system).toContain("Code quality requirements");
-    expect(sent[0].session_id).toBeNull();      // generation mints the session
-  });
-
-  it("always generates into a fresh session, so a retry is not handed the failed attempt", async () => {
-    const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
-    const session = new AiSession(client);
-
-    await generateProject(session, { topic: "t", scale: "small" });
-    expect(session.sessionId).toBe("s1");          // first call minted a session
-    await generateProject(session, { topic: "t", scale: "small" });
-
-    // Without the reset the model would resume and answer "I already built this last turn"
-    // instead of returning a project (measured against the real CLI).
-    expect(sent.map((r) => r.session_id)).toEqual([null, null]);
-  });
-
-  it("carries the stack constraint through as the seed", async () => {
-    const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
-    await generateProject(new AiSession(client), { topic: "t", scale: "medium", seed: "FastAPI + SQLite" });
-    expect(sent[0].prompt).toContain("FastAPI + SQLite");
-  });
-});
 
 describe("concept lens (FR-13)", () => {
   it("is offered alongside the original four lenses", () => {
@@ -117,12 +78,12 @@ describe("free-form question (FR-4, FR-5)", () => {
   it("resumes the existing session instead of re-sending the project", async () => {
     const { client, sent } = stubClient({ text: JSON.stringify(PROJECT) });
     const session = new AiSession(client);
-    await generateProject(session, { topic: "t", scale: "small" });
+    await reseedSession(session, PROJECT);
     await ask(session, { target: { path: "src/app.ts" }, question: "질문", depth: "full"  });
 
     expect(sent).toHaveLength(2);
     expect(sent[1].session_id).toBe("s1");
-    expect(sent[1].prompt).not.toContain("Generate a project");
+    expect(sent[1].prompt).not.toContain("[코드베이스 적재]");
   });
 
   it("reports a failure as readable text rather than throwing", async () => {
@@ -258,17 +219,4 @@ describe("three-pane layout (NFR-8)", () => {
     expect(onExchange).toHaveBeenCalledWith(expect.objectContaining({ kind: "ask", path: "src/app.ts" }));
   });
 
-  it("does not generate anything without an explicit start (FR-14)", () => {
-    const { client, sent } = stubClient();
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    mountCodeproj(host, {
-      session: new AiSession(client),
-      initialInput: { topic: "미리 채워진 주제", scale: "small" },
-    });
-
-    // The proposal pre-fills the form, but nothing is sent until the learner starts it.
-    expect((host.querySelector(".lh-cp-topic-input") as HTMLInputElement).value).toBe("미리 채워진 주제");
-    expect(sent).toHaveLength(0);
-  });
 });

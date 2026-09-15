@@ -1,4 +1,4 @@
-// FR-20: building the annotation layer right after generation.
+// FR-20: building the annotation layer over a loaded repository.
 //
 // The cost shape is what these pin down. One call per file is forced by the server's follow-up
 // timeout, the pass runs before the learner can click anything, and one file failing must not
@@ -14,7 +14,7 @@ import {
   buildAskPrompt,
   buildExplainPrompt,
   buildScrapExplainPrompt,
-  QUALITY_CLAUSE,
+  requestClause,
 } from "./prompts";
 
 const PROJECT = {
@@ -101,10 +101,10 @@ describe("annotateProject", () => {
   it("resumes the same session instead of re-sending the codebase", async () => {
     const { client, sent } = scripted(() => ({ text: notes([1, 1]) }));
     const session = new AiSession(client);
-    session.adopt("sid-from-generation");
+    session.adopt("sid-from-load");
     await annotateProject(session, PROJECT);
-    expect(sent.every((r) => r.session_id === "sid-from-generation" || r.session_id === "s1")).toBe(true);
-    expect(sent[0].session_id).toBe("sid-from-generation");
+    expect(sent.every((r) => r.session_id === "sid-from-load" || r.session_id === "s1")).toBe(true);
+    expect(sent[0].session_id).toBe("sid-from-load");
   });
 
   it("keeps going when one file fails", async () => {
@@ -134,7 +134,7 @@ describe("annotateProject", () => {
     ]);
   });
 
-  it("asks at the medium tier, never the generation tier", async () => {
+  it("asks at the medium tier", async () => {
     const { client, sent } = scripted(() => ({ text: notes([1, 1]) }));
     await annotateProject(new AiSession(client), PROJECT);
     expect(sent.every((r) => r.effort === "medium")).toBe(true);
@@ -151,11 +151,44 @@ describe("the annotation prompt", () => {
     expect(p).toContain("003| gamma");
   });
 
-  it("does not carry the code-quality clause", () => {
-    // Nothing is being written here. Offering the clause invites the model to improve the
-    // project the learner is about to read.
-    expect(buildAnnotateSystem()).not.toContain(QUALITY_CLAUSE);
-    expect(buildAnnotateSystem()).toMatch(/Do not modify/);
+  it("forbids touching the code it annotates", () => {
+    // Nothing is being written here, and a model left to its defaults improves what it is shown:
+    // the learner would end up reading something other than the repository they gave.
+    expect(buildAnnotateSystem()).toMatch(/Do not modify, rewrite, improve/);
+  });
+
+  it("restates the learner's request on every file", () => {
+    // Annotation resumes across visits, possibly in another session, so the request cannot be
+    // left to whatever the session was told at load time.
+    const p = buildAnnotatePrompt("app/db.py", "x", { goal: "구조 익히기, 초급", focus: "저장 계층", scope: [] });
+    expect(p).toContain("학습 목적과 수준: 구조 익히기, 초급");
+    expect(p).toContain("집중할 곳: 저장 계층");
+  });
+
+  it("adds no request section when there is nothing in it", () => {
+    // An empty heading still reads as an instruction; the default reader level is the answer.
+    expect(buildAnnotatePrompt("app/db.py", "x")).not.toContain("[학습자 요청]");
+    expect(buildAnnotatePrompt("app/db.py", "x", { goal: " ", focus: "", scope: ["src"] })).not.toContain("[학습자 요청]");
+  });
+
+  it("carries only the request fields it was given", () => {
+    const p = requestClause({ goal: "", focus: "인증" });
+    expect(p).toContain("집중할 곳: 인증");
+    expect(p).not.toContain("학습 목적과 수준");
+  });
+});
+
+describe("annotateProject with a chosen first set", () => {
+  it("annotates only the named files, in the named order, with the request", async () => {
+    const { client, sent } = scripted(() => ({ text: notes([1, 1]) }));
+    const set = await annotateProject(new AiSession(client), PROJECT, undefined, {
+      paths: ["README.md", "app/db.py", "not/there.py"],
+      request: { goal: "g", focus: "f", scope: [] },
+    });
+    expect(Object.keys(set.files)).toEqual(["README.md", "app/db.py"]);
+    expect(sent).toHaveLength(2);
+    expect(sent[0].prompt).toContain("대상 파일: README.md");
+    expect(sent[0].prompt).toContain("학습 목적과 수준: g");
   });
 });
 
@@ -178,9 +211,9 @@ describe("who the explanation is written for", () => {
     }
   });
 
-  it("does not reach generation, which writes code rather than explaining it", () => {
-    expect(buildAnnotateSystem()).toContain(AUDIENCE_CLAUSE);
-    expect(QUALITY_CLAUSE).not.toContain(AUDIENCE_CLAUSE);
+  it("gives way to a level the learner stated", () => {
+    // The shared level is a default, not a floor: a request that names a level says who is reading.
+    expect(requestClause({ goal: "파이썬 초급", focus: "" })).toContain("[읽는 사람]보다 이 요청을 따른다");
   });
 
   it("asks for terms to be glossed where they appear", () => {

@@ -10,12 +10,12 @@ import { AiSession } from "../../src/ai/client";
 import { traceRun } from "./session";
 import { buildTraceLegPrompt, buildTraceSystem } from "./prompts";
 import { TRACE_MAX_LEGS, TRACE_STEP_CAP, type TraceRun } from "./trace";
-import type { GeneratedProject } from "./model";
+import type { CodeProject } from "./model";
 
 const lines = (n: number, tag: string) =>
   Array.from({ length: n }, (_, i) => `${tag}_line_${i + 1}()`).join("\n");
 
-const PROJECT: GeneratedProject = {
+const PROJECT: CodeProject = {
   title: "도서 대출",
   summary: "요약",
   files: [

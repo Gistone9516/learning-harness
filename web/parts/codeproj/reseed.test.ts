@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { AiClient, AiResponse } from "../../src/ai/client";
 import { AiSession } from "../../src/ai/client";
 import { explain, reseedSession } from "./session";
-import { buildReseedSystem, QUALITY_CLAUSE } from "./prompts";
+import { buildReseedSystem } from "./prompts";
 
 const PROJECT = {
   title: "도서 관리 API",
@@ -95,12 +95,11 @@ describe("reseed on a lost session", () => {
 
     expect(await reseedSession(session, PROJECT)).toBe(true);
     expect(sent[0].session_id).toBe(null);              // reset(), so the server gives it the
-    expect(sent[0].prompt).toContain("src/main.py");    // generation timeout, not the follow-up one
+    expect(sent[0].prompt).toContain("src/main.py");    // long timeout, not the follow-up one
     expect(sent[0].effort).toBe("medium");
 
-    // QUALITY_CLAUSE governs code the model writes; a reseed writes none. Handing it over would
-    // invite the model to "improve" the project the learner is in the middle of reading.
-    expect(buildReseedSystem()).not.toContain(QUALITY_CLAUSE);
-    expect(buildReseedSystem()).toMatch(/Do not generate/);
+    // The same call loads a repository the first time. An agent CLI handed a codebase with no
+    // instruction treats it as work, and the learner would read its rewrite instead of the repo.
+    expect(buildReseedSystem()).toMatch(/Do not generate, rewrite, improve/);
   });
 });
