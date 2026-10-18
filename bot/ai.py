@@ -35,6 +35,86 @@ TEXT_ONLY_SYSTEM = (
 )
 
 
+# Which settings files the CLI loads. The operator's user-level settings carry their own hooks, and a
+# SessionStart hook's "report this first" context was measured arriving at the head of a learner's
+# answer (2026-09-30: a config-check notice opened a vocabulary explanation). The kit calls the CLI
+# as a text service, so it loads project and local settings only. AI_CLI_SETTING_SOURCES overrides;
+# "all" restores the CLI default. The operator's global CLAUDE.md still loads: only --bare skips it,
+# and --bare does not accept subscription (OAuth) sign-in.
+DEFAULT_SETTING_SOURCES = "project,local"
+
+
+def _setting_sources() -> str | None:
+    value = os.environ.get("AI_CLI_SETTING_SOURCES", DEFAULT_SETTING_SOURCES).strip()
+    return None if not value or value.lower() == "all" else value
+
+
+# The CLI's wording when asked to resume a session it never had (measured 2026-09-02, claude 2.1.247):
+# "No conversation found with session ID: <id>". Shared by invoke and the live path (ai-mode L-3).
+RESUME_LOST_MARK = "no conversation found"
+
+
+def build_cmd(*, session_id: str, is_new_session: bool, model: str | None, effort: str | None,
+              tools: str | None) -> list[str]:
+    """The claude CLI argument list, shared by invoke and live sessions (ai-mode §1, §4.1)."""
+    cmd_parts = ["claude", "-p",
+                 "--input-format", "stream-json",
+                 "--output-format", "stream-json",
+                 "--verbose"]
+
+    # `claude -p` is an agent, not a completion endpoint: with its default toolset a prompt like
+    # "generate a project" makes it WRITE THE FILES into the server's working directory and reply
+    # with a prose report, so the caller's structured output never arrives and the instance folder
+    # gets polluted (measured 2026-07-21). The kit only ever wants text back, so tools are off
+    # unless a caller explicitly asks for them.
+    if tools is not None:
+        cmd_parts += ["--tools", tools]
+        # Tools off is not enough on its own: the agent persona lives in the CLI's own system
+        # prompt, so it has to be replaced too. Only done when the caller wants the text-only mode.
+        cmd_parts += ["--system-prompt", TEXT_ONLY_SYSTEM]
+
+    sources = _setting_sources()
+    if sources:
+        cmd_parts += ["--setting-sources", sources]
+
+    if is_new_session:
+        cmd_parts += ["--session-id", session_id]
+    else:
+        cmd_parts += ["--resume", session_id]
+
+    if model:
+        cmd_parts += ["--model", model]
+
+    if effort:
+        cmd_parts += ["--effort", effort]
+    return cmd_parts
+
+
+def user_line(prompt: str, system: str | None) -> bytes:
+    """One stdin message. The preamble rides at the head of the user message rather than in a `system`
+    key: the CLI ignores that key entirely (measured 2026-07-21 — a sentinel instruction sent that way
+    never took effect, so every kit preamble, safety clause included, was silently dropped). This CLI
+    version offers only --system-prompt, with no file variant, and passing a multi-line preamble with
+    quotes as a Windows command-line argument is its own well-known breakage. stdin is JSON, so
+    newlines, quotes and non-ASCII survive intact."""
+    content = f"{system}\n\n---\n\n{prompt}" if system else prompt
+    payload: dict[str, Any] = {
+        "type": "user",
+        "message": {"role": "user", "content": content},
+    }
+    return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def result_text(obj: dict) -> str:
+    """The final text of a `{"type":"result"}` line."""
+    result_val = obj.get("result", "")
+    if isinstance(result_val, str):
+        return result_val
+    if isinstance(result_val, dict):
+        return result_val.get("content", "")
+    return ""
+
+
 @dataclass
 class AIResult:
     """Return value of invoke (SoT §5)."""
@@ -76,53 +156,14 @@ async def invoke(
     is_new_session = session_id is None
     effective_sid = session_id or str(uuid.uuid4())
 
-    # Build claude CLI arguments
-    cmd_parts = ["claude", "-p",
-                 "--input-format", "stream-json",
-                 "--output-format", "stream-json",
-                 "--verbose"]
-
-    # `claude -p` is an agent, not a completion endpoint: with its default toolset a prompt like
-    # "generate a project" makes it WRITE THE FILES into the server's working directory and reply
-    # with a prose report, so the caller's structured output never arrives and the instance folder
-    # gets polluted (measured 2026-07-21). The kit only ever wants text back, so tools are off
-    # unless a caller explicitly asks for them.
-    if tools is not None:
-        cmd_parts += ["--tools", tools]
-        # Tools off is not enough on its own: the agent persona lives in the CLI's own system
-        # prompt, so it has to be replaced too. Only done when the caller wants the text-only mode.
-        cmd_parts += ["--system-prompt", TEXT_ONLY_SYSTEM]
-
-    if is_new_session:
-        cmd_parts += ["--session-id", effective_sid]
-    else:
-        cmd_parts += ["--resume", effective_sid]
-
-    if model:
-        cmd_parts += ["--model", model]
-
-    if effort:
-        cmd_parts += ["--effort", effort]
+    cmd_parts = build_cmd(session_id=effective_sid, is_new_session=is_new_session, model=model,
+                          effort=effort, tools=tools)
     # This claude CLI has no output-token cap flag, so max_tokens is accepted for
     # signature compatibility but never forwarded. Passing --max-tokens used to make
     # the CLI exit with "unknown option" -> every AI call failed (ok=False).
     _ = max_tokens
 
-    # stdin payload.
-    #
-    # The preamble rides at the head of the user message rather than in a `system` key: the CLI
-    # ignores that key entirely (measured 2026-07-21 — a sentinel instruction sent that way never
-    # took effect, so every kit preamble, safety clause included, was silently dropped). This CLI
-    # version offers only --system-prompt, with no file variant, and passing a multi-line preamble
-    # with quotes as a Windows command-line argument is its own well-known breakage. stdin is JSON,
-    # so newlines, quotes and non-ASCII survive intact.
-    content = f"{system}\n\n---\n\n{prompt}" if system else prompt
-    payload: dict[str, Any] = {
-        "type": "user",
-        "message": {"role": "user", "content": content},
-    }
-
-    stdin_data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    stdin_data = user_line(prompt, system)
 
     # Windows: list2cmdline + create_subprocess_shell (ai-mode §1)
     import subprocess as _sp
@@ -164,7 +205,7 @@ async def invoke(
         # exit 1 with "No conversation found with session ID: <id>".
         # If a future CLI changes that wording the match simply stops firing, which degrades to
         # "never reseed" -- the safe direction, since the learner can still reload the page.
-        resume_lost = not is_new_session and "no conversation found" in err_msg.lower()
+        resume_lost = not is_new_session and RESUME_LOST_MARK in err_msg.lower()
         return AIResult(
             text="",
             ok=False,
@@ -204,12 +245,7 @@ async def invoke(
                     pass
 
         elif obj_type == "result":
-            # Final result
-            result_val = obj.get("result", "")
-            if isinstance(result_val, str):
-                final_text = result_val
-            elif isinstance(result_val, dict):
-                final_text = result_val.get("content", "")
+            final_text = result_text(obj)
 
     if not final_text:
         # No result event in the output: treat as failure so callers fall back

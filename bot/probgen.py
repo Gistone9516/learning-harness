@@ -243,7 +243,7 @@ _SCHEMA_RULES = r"""[출력 규칙 — 반드시 엄수]
 - 객관식(judge)은 front.options 4개, accepted 에 정답 보기 문자열 그대로.
 - 빈칸(cloze)은 front.text 에 {{0}}, {{1}} 표기와 blanks 를 맞춘다.
 - 가독성을 위해 front.prompt/front.text 안에서 학습 화면 컴포넌트 마크다운을 쓸 수 있다: 소제목 '## 제목', 목록 '- 항목', 표 '| a | b |', 강조 박스 ':::핵심' 또는 ':::주의' 로 열고 ':::' 로 닫기, 인라인 코드 `기호`, 문장 강조 ==중요==. 보기나 예시 데이터(표·목록)는 이 컴포넌트로 정리해 자기완결형으로 보여준다.
-- 한국어로 출제하고 개념 범위를 벗어나지 않는다."""
+- 개념 범위를 벗어나지 않는다."""
 
 
 _KICHUL_STYLE = r"""[출제 성격 — 정보처리기사 실기 기출 스타일]
@@ -251,15 +251,18 @@ _KICHUL_STYLE = r"""[출제 성격 — 정보처리기사 실기 기출 스타�
 - 유형 비중: 코드 출력값 추적(python/c/java)과 SQL 결과, 단답형 용어, 개념 약술(서술), 설명문 빈칸을 우선한다. 객관식(judge)은 최소화한다.
 - 코드 문제는 짧지만 함정이 있는 코드를 노린다: 연산자 우선순위, 형변환/자동 형변환, 포인터와 배열, 얕은 복사와 깊은 복사, switch fall-through, 슬라이싱, 비트 연산 등 외우지 않으면 틀리는 지점.
 - 발문은 실무 시나리오형이나 정의 요구형으로 간결하게 쓴다(예: "~하는 기술은 무엇인가", "~의 개념을 서술하시오", "출력값을 쓰시오").
-- 서술형은 type="proc", grade_mode="keyword"로 내고 required_keywords에 핵심어만 담아 관대하게 채점되도록 한다."""
+- 서술형은 type="proc", grade_mode="keyword"로 내고 required_keywords에 핵심어만 담아 관대하게 채점되도록 한다.
+- 한국어로 출제한다."""
 
 
-def _build_prompt(course_title: str, concept: dict[str, Any], existing: list[str], feedback: list[str], count: int) -> str:
+def _build_prompt(course_title: str, concept: dict[str, Any], existing: list[str], feedback: list[str], count: int, style: str | None = None) -> str:
+    # An instance may supply its own item-writing style (language, item types, difficulty). Without one
+    # the long-standing default stays in force, so instances that never pass a style see no change.
     parts = [
         f"너는 '{course_title}' 자격시험의 문제 출제기다. 아래 개념에 대한 연습문제 {count}개를 새로 만들어라.",
         f"\n[개념 제목] {concept.get('title', '')}",
         f"[개념 본문]\n{concept.get('body', '')}",
-        "\n" + _KICHUL_STYLE,
+        "\n" + (style.strip() if style and style.strip() else _KICHUL_STYLE),
     ]
     if existing:
         joined = "\n".join(f"- {e}" for e in existing[:40])
@@ -299,12 +302,13 @@ async def generate_and_verify(
     count: int,
     course_title: str,
     model: str | None,
+    style: str | None = None,
 ) -> dict[str, Any]:
     """Generate `count` verified problems for a concept. Over-generates to absorb drops.
     Returns {ok, problems, error, dropped}."""
     count = max(1, min(int(count or 5), 10))
     want = count + 3  # over-generate so failed-execution drops still leave enough
-    prompt = _build_prompt(course_title, concept, existing, feedback, want)
+    prompt = _build_prompt(course_title, concept, existing, feedback, want, style)
     try:
         res = await ai.invoke(prompt, model=model or "sonnet", effort="high")
     except Exception as e:  # noqa: BLE001

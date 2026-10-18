@@ -72,6 +72,22 @@ async def ai_capability(ctx, card_or_input) -> HandlerResult:   # HandlerResult 
 - Multi-turn via `session_id` with `--resume`. **Sliding window** (last 4 turns only as context) = caller's responsibility (token control).
 - [OPEN-C] resolved: **session_id is per thread; bot memory is volatile** (new session on bot restart). Unlike progress (store), conversation context is not persisted (v1). Long batch generation is resumed by `driver` using its own state (see below).
 
+### 4.1 Live sessions (opt-in, `bot/live.py`). Rules: L-1..L-6 (6)
+
+Every `invoke` call spawns a process, and on this machine that start costs most of a short call: a review
+grade took 4.7-5.9 s per answer that way, against 2.2-3.1 s for follow-ups written to one process that
+stays open (measured 2026-10-05, same three answers, sonnet, effort low). A caller that sends many short
+turns in a row may therefore ask for a **live** session; everything else keeps one process per call.
+
+| ID | Rule | Why | Test |
+|---|---|---|---|
+| L-1 | `live: true` on a `/ai` request routes it to `live.invoke_live`; without it nothing changes. The first turn spawns `claude -p` with the same flags as `invoke` (`--session-id` for a new session, `--resume` for a known id the server holds no process for) and keeps stdin open; later turns with that session id are one JSON line written to the same process, read until the `result` line. | Opt-in keeps every existing caller (bot capabilities, probgen, the other web parts) on the proven path. | `test_live_sessions.py` "reuses one process" / "resumes an id it holds no process for" |
+| L-2 | One turn at a time per live process (a per-session lock). A turn that times out or is cancelled discards the process, because a half-read stdout would corrupt the next turn; the next request falls back to a `--resume` spawn. | One stdin, one stdout: interleaved turns cannot be told apart. | "a timed-out turn discards the process" |
+| L-3 | A process that ends before its `result` line is dropped; when it was a `--resume` spawn and stderr says the conversation is unknown, the reply carries `error_kind: "resume_missing"`, exactly as `invoke` does. A `result` with `is_error: true` is `ok: false`. | Same contract for callers as the per-call path (`_interface-contract.md` §5). With no exit code per turn, `is_error` is the only failure signal. | "ended process is tagged resume_missing", "is_error result fails" |
+| L-4 | A live process idle for `LIVE_IDLE_SEC` (600) is closed; at most `LIVE_MAX` (4) live processes exist, and opening one more closes the least recently used idle one. | A review visit is short and the learner leaves the tab without telling the server; the cap bounds memory if tabs are reopened. | "idle processes are closed", "the cap closes the least recently used" |
+| L-5 | Closing = close stdin, wait up to 5 s, then kill the whole process tree (`taskkill /F /T` on Windows). Live processes are registered in `session_guard`, so `/sessions` lists them (`kind: "live"`) and server shutdown closes them. | Measured 2026-10-05: `proc.kill()` on a shell-spawned child ends only `cmd.exe`; `claude.exe` survived as an orphan holding the pipes, so even `wait()` hung. Closing stdin ended the whole tree in 2.6 s. | "close_all closes every process" |
+| L-6 | The preamble rides only on the first turn of a live process (§1.1); a `--resume` spawn sends the turn as given. | The session already holds the preamble; resending it costs input every turn. | "later turns carry no preamble" |
+
 ---
 
 ## 5. Batch / Resilience (driver + heartbeat)

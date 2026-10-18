@@ -73,6 +73,19 @@ def test_tools_can_be_re_enabled_explicitly(spawned):
     assert "--tools" not in spawned["cmd"]
 
 
+def test_user_level_settings_are_not_loaded_by_default(spawned, monkeypatch):
+    # The operator's user settings carry hooks whose context leaked into learner answers.
+    monkeypatch.delenv("AI_CLI_SETTING_SOURCES", raising=False)
+    run()
+    assert "--setting-sources project,local" in spawned["cmd"]
+
+
+def test_setting_sources_can_be_restored(spawned, monkeypatch):
+    monkeypatch.setenv("AI_CLI_SETTING_SOURCES", "all")
+    run()
+    assert "--setting-sources" not in spawned["cmd"]
+
+
 def test_system_preamble_is_delivered_in_the_message(spawned):
     run(system="SAFETY PREAMBLE")
     payload = json.loads(spawned["proc"].stdin_data.decode("utf-8"))

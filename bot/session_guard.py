@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -52,11 +54,33 @@ class Slot:
 _active: set[Slot] = set()
 
 
+async def kill_tree(proc: Any) -> None:
+    """End a real shell-spawned child together with everything under it.
+
+    Measured 2026-10-05 on Windows: `proc.kill()` on a create_subprocess_shell child ends only
+    cmd.exe; claude.exe survives as an orphan and keeps the pipes open, so even `wait()` hangs.
+    `taskkill /F /T` takes the whole tree. Only real asyncio processes qualify -- a test double's
+    pid must never reach taskkill, where it could name an unrelated live process.
+    """
+    if os.name != "nt" or not isinstance(proc, asyncio.subprocess.Process) or proc.returncode is not None:
+        return
+    try:
+        tk = await asyncio.create_subprocess_exec(
+            "taskkill", "/F", "/T", "/PID", str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        await asyncio.wait_for(tk.wait(), timeout=_REAP_TIMEOUT_SEC)
+    except Exception as e:  # noqa: BLE001 - cleanup must never raise
+        log.debug("taskkill failed for pid=%s: %s", getattr(proc, "pid", None), e)
+
+
 async def _terminate(slot: Slot) -> None:
-    """Kill the process if it is still running and always reap it, so no zombie is left."""
+    """Kill the process (and on Windows its whole tree) if still running, and always reap it."""
     proc = slot.proc
     if proc is None:
         return
+    if proc.returncode is None:
+        await kill_tree(proc)
     if proc.returncode is None:
         try:
             proc.kill()
@@ -102,6 +126,15 @@ async def shutdown_all() -> int:
     if slots:
         log.info("cleaned up %d in-flight session(s) on shutdown", len(slots))
     return len(slots)
+
+
+def register(slot: Slot) -> None:
+    """Track a process whose lifetime is not one `async with` block (live sessions, ai-mode L-5)."""
+    _active.add(slot)
+
+
+def unregister(slot: Slot) -> None:
+    _active.discard(slot)
 
 
 def snapshot() -> list[dict]:

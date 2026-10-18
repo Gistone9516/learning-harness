@@ -43,6 +43,7 @@ from env_load import load_instance_env
 import ai
 import probgen
 import repo_loader
+import live
 import session_guard
 from state_store import StateError, StateStore
 
@@ -290,6 +291,7 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                     count=payload.get("count", 5),
                     course_title=str(payload.get("course_title") or "학습 과정"),
                     model=payload.get("model"),
+                    style=payload.get("style") if isinstance(payload.get("style"), str) else None,
                 )
                 out = json.dumps(gen, ensure_ascii=False).encode("utf-8")
                 writer.write(_response("200 OK", out, origin))
@@ -304,14 +306,24 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
 
             # Resuming an existing session is a small follow-up; a fresh session may be loading a
             # whole artifact. The kind picks the matching timeout (ai.TIMEOUT_BY_KIND).
-            result = await ai.invoke(
-                prompt,
-                system=payload.get("system"),
-                model=payload.get("model"),
-                effort=payload.get("effort", "low"),
-                session_id=payload.get("session_id"),
-                kind="followup" if payload.get("session_id") else "generate",
-            )
+            # `live: true` (ai-mode §4.1) answers from a long-lived process; everything else spawns one.
+            if payload.get("live") is True:
+                result = await live.invoke_live(
+                    prompt,
+                    system=payload.get("system"),
+                    model=payload.get("model"),
+                    effort=payload.get("effort", "low"),
+                    session_id=payload.get("session_id"),
+                )
+            else:
+                result = await ai.invoke(
+                    prompt,
+                    system=payload.get("system"),
+                    model=payload.get("model"),
+                    effort=payload.get("effort", "low"),
+                    session_id=payload.get("session_id"),
+                    kind="followup" if payload.get("session_id") else "generate",
+                )
             out = json.dumps({
                 "ok": result.ok,
                 "text": result.text,
@@ -348,6 +360,7 @@ async def serve(host: str, port: int, token: str, origin: str, store: StateStore
             await server.serve_forever()
     finally:
         # Shutdown must not leave claude processes behind, whatever stopped the loop.
+        await live.close_all()
         cleaned = await session_guard.shutdown_all()
         if cleaned:
             log.info("terminated %d in-flight session(s)", cleaned)
