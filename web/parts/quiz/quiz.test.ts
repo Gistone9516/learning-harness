@@ -108,6 +108,18 @@ describe("quiz part", () => {
     expect(root.querySelector(".lh-qz-stem")!.textContent).toBe("블록 스토리지는?");   // the chosen language survives the repaint
   });
 
+  it("langToggle false hides the switch and ignores T (Q-4)", async () => {
+    const ai = scriptedAi(() => "{}");
+    mountQuiz(root, { storage, aiClient: ai, outline: { doc: "outline" }, subjectKey: "s", langToggle: false });
+    await settle();
+    click(root, ".lh-qz-start");
+    await settle();
+    expect(root.querySelector<HTMLElement>(".lh-qz-lang")!.hidden).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
+    await settle();
+    expect(ai.calls).toHaveLength(0);
+  });
+
   it("exam mode grades everything at the end and offers retry-wrong (Q-7, Q-12)", async () => {
     localStorage.setItem("lh:s:quiz:mode", "exam");
     mountQuiz(root, { storage, aiClient: null, outline: { doc: "outline" }, subjectKey: "s" });

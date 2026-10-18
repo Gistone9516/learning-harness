@@ -155,6 +155,7 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
   }
 
   async function toggleLang(): Promise<void> {
+    if (ctx.props.langToggle === false) return;
     if (lang === "secondary") { lang = "primary"; paintLang(); o.onLang?.(false); return; }
     if (!ko) {
       const set = await ctx.getSet(p.concept_id);
@@ -176,6 +177,7 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
     lang = "secondary"; paintLang(); o.onLang?.(true);
   }
   langBtn.addEventListener("click", () => void toggleLang());
+  langBtn.hidden = ctx.props.langToggle === false;
   if (!ko && !ctx.ai) langBtn.title = L.aiOff;
 
   function paintFlag(): void {

@@ -8,6 +8,7 @@ import "./styles/lang-toggle.css";
 import "./styles/notebook.css";
 import "./styles/compose.css";
 import "./styles/quiz.css";
+import "./styles/roadmap.css";
 import { mountApp, type AppConfig } from "./shell";
 
 async function resolveConfig(): Promise<AppConfig | null> {

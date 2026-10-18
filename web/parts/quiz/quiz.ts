@@ -12,13 +12,14 @@
 import type { AiClient, AiEffort } from "../../src/ai/client";
 import { makeRecord, type StoragePort } from "../../src/storage/port";
 import { buildTabbedLayout } from "../../src/ui/tabs";
-import { CONCEPT_COLLECTION, readGenerated, type GeneratedConcept } from "../conceptprob/conceptprob";
+import { readGenerated, type GeneratedConcept } from "../conceptprob/conceptprob";
 import {
   assembleBank, coerceQuizProblem, LOG_DOC, PROBLEMS,
   type ProblemSet, type QuizLog, type QuizProblem,
 } from "./model";
 import { mountPlay } from "./play";
 import { mountBank } from "./bank";
+import { loadBankParts, quizStateKey, type Outline } from "./bankload";
 
 export const DEFAULT_QUIZ_LABELS = {
   tabPlay: "풀기",
@@ -98,9 +99,8 @@ export interface QuizProps {
   fillTarget?: number;               // "fill unit" generates for concepts with fewer problems, default 5
   rewriteFront?: (s: string) => string;
   askElsewhere?: { label: string; onAsk: (text: string) => void };
+  langToggle?: boolean;              // false hides the per-problem language switch (Q-4); default true
 }
-
-type Outline = { areas: { key: string; label: string }[]; conceptOutline: Record<string, { concept_id: string; title: string }[]> };
 
 export interface QuizCtx {
   props: QuizProps;
@@ -131,7 +131,7 @@ export function mountQuiz(container: HTMLElement, props: QuizProps): void {
     modes: { ...DEFAULT_QUIZ_LABELS.modes, ...(props.labels?.modes ?? {}) },
   };
   const ns = props.subjectKey ?? "quiz";
-  const lsKey = (k: string) => `lh:${ns}:quiz:${k}`;
+  const lsKey = (k: string) => quizStateKey(ns, k);
   const storage = props.storage;
   const layout = buildTabbedLayout(container, "lh-nb lh-qz", [
     { id: "play", label: L.tabPlay },
@@ -187,17 +187,7 @@ export function mountQuiz(container: HTMLElement, props: QuizProps): void {
   }
 
   async function load(): Promise<void> {
-    outline = (await storage.getDoc<Outline>(props.outline.doc)) ?? { areas: [], conceptOutline: {} };
-    outline = { areas: outline.areas ?? [], conceptOutline: outline.conceptOutline ?? {} };
-    log = (await storage.getDoc<QuizLog>(LOG_DOC)) ?? { items: {} };
-    if (!log.items) log = { items: {} };
-    const conceptIds = new Set((await storage.list(CONCEPT_COLLECTION)).map((e) => e.id));
-    const setIds = new Set((await storage.list(PROBLEMS)).map((e) => e.id));
-    concepts = {}; sets = {};
-    for (const seed of Object.values(outline.conceptOutline).flat()) {
-      if (conceptIds.has(seed.concept_id)) concepts[seed.concept_id] = (await storage.get<GeneratedConcept>(CONCEPT_COLLECTION, seed.concept_id))?.data ?? null;
-      if (setIds.has(seed.concept_id)) sets[seed.concept_id] = (await storage.get<ProblemSet>(PROBLEMS, seed.concept_id))?.data ?? null;
-    }
+    ({ outline, log, concepts, sets } = await loadBankParts(storage, props.outline.doc));
     if (ctx.recall("migrated") !== "1") { await migrateBrowserProblems(); ctx.remember("migrated", "1"); }
     bank = assembleBank(outline, concepts, sets, log);
     index = new Map(bank.map((p) => [p.card_id, p]));

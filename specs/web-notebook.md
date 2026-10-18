@@ -113,9 +113,16 @@ notice opened a vocabulary explanation). `AI_CLI_SETTING_SOURCES=all` restores t
 ## 5. Host
 
 - `tools/serve_host.py --subject <dir> [--port N] [--kit <kit>]`: `/` and `/host.*` → `tools/webhost/`,
-  `/local.config.js` → `<dir>/host/local.config.js`, `/kit/` → `web/dist/`, `/content/` → `<dir>/content/`.
-  Binds 127.0.0.1; refuses paths that resolve outside a root.
+  `/local.config.js` → `<dir>/host/local.config.js`, `/kit/` → `web/dist/`, `/content/` → `<dir>/content/`
+  (plus `contentLinks`). Binds 127.0.0.1; refuses paths that resolve outside a root. What is served is decided
+  by `tools/hostfiles.py`, shared with the gateway (`web-gateway.md` §4).
+- The host page uses **relative URLs only** (`kit/assets/...`, `content/...`, `host.js`), so it works at `/` and
+  under a prefix such as `/study/<slug>/` (`web-gateway.md`). It must be opened at a URL ending in `/`.
+- `local.config.js` sets `window.LH_LOCAL = {token, serverUrl, model}`; behind the gateway it is
+  `{serverUrl, gated: true, model}` with no token, and the page accepts either.
 - `tools/start_web.ps1 -Subject <dir> [-SkipBuild]`: reads `AI_SERVER_PORT` and `HOST_PORT` from `<dir>/.env`,
   builds the bundle with `npm.cmd`, starts `bot/ai_server.py <dir>/state` with cwd `<dir>`, then the host server.
-- `content/app.json`: `{ title, namespace, views: [{ hash, label, part, data, files?: {key: file} }] }`.
-  The host fetches each `files` entry from `/content/` into `data[key]`, sets `LH_CONFIG`, then loads the bundle.
+- `content/app.json`: `{ title, namespace, model?, contentLinks?, views: [{ hash, label, part, data, files?: {key: file} }] }`.
+  `model` is the default AI model when `local.config.js` names none (always the case behind the gateway).
+  The host fetches each `files` entry from `content/` into `data[key]` (a `.md` or `.txt` file as text, anything
+  else as JSON), sets `LH_CONFIG`, then loads the bundle.

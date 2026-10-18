@@ -162,6 +162,22 @@ export function unitStats(bank: QuizProblem[], log: QuizLog): Map<string, UnitSt
   return m;
 }
 
+export interface UnitProgress { total: number; answered: number; lastCorrect: number }
+
+/** Per unit, by each problem's last verdict (web-roadmap RM-5); unitStats above counts every attempt instead. */
+export function unitProgress(bank: QuizProblem[], log: QuizLog): Map<string, UnitProgress> {
+  const m = new Map<string, UnitProgress>();
+  for (const p of bank) {
+    const s = m.get(p.area) ?? { total: 0, answered: 0, lastCorrect: 0 };
+    const v = lastVerdict(log, p.card_id);
+    s.total++;
+    if (v) s.answered++;
+    if (v === "c") s.lastCorrect++;
+    m.set(p.area, s);
+  }
+  return m;
+}
+
 export const TRANSLATE_CONTRACT = [
   "[Response contract] Translate the given exam item into the learner's language.",
   "Reply with exactly one JSON object holding the same keys as the input (scenario, prompt or text, and options if present),",

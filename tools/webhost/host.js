@@ -1,7 +1,8 @@
-// Generic host bootstrap (specs/web-notebook.md §5). Reads /content/app.json from the subject folder,
+// Generic host bootstrap (specs/web-notebook.md §5). Reads content/app.json from the subject folder,
 // picks the view named by the URL hash (or the last one used), loads that view's content files into
 // its data, sets globalThis.LH_CONFIG and only then loads the kit bundle, which reads the config once
-// at start. Switching views reloads the page so each part mounts from stored state.
+// at start. Switching views reloads the page so each part mounts from stored state. Every URL is
+// relative to the page, so the same file serves "/" locally and "/study/<slug>/" behind the gateway.
 (function () {
   var app = document.getElementById("app");
   var nav = document.getElementById("lh-host-nav");
@@ -23,13 +24,22 @@
       return r.json();
     });
   }
+  // A content file is JSON unless it is Markdown or plain text, which a part reads as a string.
+  function getContent(path) {
+    if (!/\.(md|txt)$/i.test(path)) return getJson(path);
+    return fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error(path + " HTTP " + r.status);
+      return r.text();
+    });
+  }
 
-  if (!local.token) {
+  // Behind the gateway the page holds no token at all (GW-3): the gateway adds it on the server side.
+  if (!local.token && !local.gated) {
     fail("host/local.config.js 가 없거나 token 이 비어 있습니다. local.config.example.js 를 복사해 .env 의 AI_SERVER_TOKEN 과 같은 값을 넣으세요.");
     return;
   }
 
-  getJson("/content/app.json")
+  getJson("content/app.json")
     .then(function (cfg) {
       var views = Array.isArray(cfg.views) ? cfg.views : [];
       if (!views.length) throw new Error("content/app.json 에 views 가 없습니다.");
@@ -170,7 +180,7 @@
       Object.keys(view.data || {}).forEach(function (k) { data[k] = view.data[k]; });
       var files = view.files || {};
       var keys = Object.keys(files);
-      return Promise.all(keys.map(function (k) { return getJson("/content/" + files[k]); })).then(function (loaded) {
+      return Promise.all(keys.map(function (k) { return getContent("content/" + files[k]); })).then(function (loaded) {
         keys.forEach(function (k, i) {
           if (k === "*" && loaded[i] && typeof loaded[i] === "object") {
             Object.keys(loaded[i]).forEach(function (f) { data[f] = loaded[i][f]; });
@@ -179,15 +189,17 @@
           }
         });
         var base = local.serverUrl || "http://127.0.0.1:8765";
+        var token = local.token || "";
         window.LH_CONFIG = {
           part: view.part,
           data: data,
-          ai: { baseUrl: base, token: local.token, model: local.model || undefined },
-          state: { baseUrl: base, token: local.token, namespace: ns },
+          // The default model: the local config's, else app.json's (the gateway's config names none).
+          ai: { baseUrl: base, token: token, model: local.model || cfg.model || undefined },
+          state: { baseUrl: base, token: token, namespace: ns },
         };
         var s = document.createElement("script");
         s.type = "module";
-        s.src = "/kit/assets/index.js";
+        s.src = "kit/assets/index.js";
         document.body.appendChild(s);
       });
     })

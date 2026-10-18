@@ -6,8 +6,9 @@
     <title>learning-harness</title>
     <!--
       Generic host page (specs/web-notebook.md §5). Serves every subject: the views, labels and data
-      come from the subject's content/app.json, the token from its host/local.config.js. Nothing in
-      this file names a subject.
+      come from the subject's content/app.json, the runtime config from local.config.js. Nothing in
+      this file names a subject. Every URL is relative, so the page also works under a prefix such as
+      /study/<slug>/ behind the gateway (specs/web-gateway.md); it must be opened at a URL ending in /.
 
       The saved theme is applied before the stylesheets so a light choice never flashes dark. The key
       is the kit's own lh:theme, which conceptprob also writes, so the two never disagree.
@@ -22,14 +23,14 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="/kit/assets/index.css" />
-    <link rel="stylesheet" href="/host.css" />
+    <link rel="stylesheet" href="kit/assets/index.css" />
+    <link rel="stylesheet" href="host.css" />
   </head>
   <body>
     <nav class="lh-host-nav" id="lh-host-nav" aria-label="views" hidden></nav>
     <div id="app"></div>
-    <!-- Runtime secrets, never bundled: the subject folder's host/local.config.js. -->
-    <script src="/local.config.js"></script>
-    <script src="/host.js"></script>
+    <!-- Runtime config, never bundled: the subject's host/local.config.js locally, generated without a token by the gateway. -->
+    <script src="local.config.js"></script>
+    <script src="host.js"></script>
   </body>
 </html>

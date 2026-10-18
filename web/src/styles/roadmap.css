@@ -1,0 +1,60 @@
+/* Roadmap part (specs/web-roadmap.md). Built on the .lh-nb-* primitives in notebook.css; only what they do not
+   cover lives here. Rules carry the #app prefix for the same reason as notebook.css: app.css styles
+   "#app button", and an ID selector outranks a bare class. Colours come from tokens only. */
+
+/* The root is the #app element itself (as for .lh-nb): a fixed-height column that scrolls inside. */
+#app.lh-rm { overflow-y: auto; }
+#app .lh-rm-col { max-width: 760px; margin: 0 auto; padding: 48px 0 64px; display: flex; flex-direction: column; gap: var(--lh-s3); }
+#app .lh-rm-head { margin-bottom: var(--lh-s1); }
+#app .lh-rm-title { margin: 0 0 6px; font: 700 22px/1.3 var(--lh-font-display, var(--lh-font-ui)); color: var(--lh-ink); }
+#app .lh-rm-intro { margin: 0; color: var(--lh-ink-mid); font-size: 14px; line-height: 1.6; }
+
+#app .lh-rm-sum { background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); box-shadow: var(--lh-shadow-sm); padding: var(--lh-s4); display: flex; flex-direction: column; gap: var(--lh-s2); }
+#app .lh-rm-sum-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+#app .lh-rm-sum-label { font-size: 12px; font-weight: 700; color: var(--lh-ink-faint); }
+#app .lh-rm-sum-step { font-size: 15px; color: var(--lh-ink); }
+
+#app .lh-rm-bar { height: 6px; background: var(--lh-surface-sunk); border-radius: var(--lh-r-pill); overflow: hidden; }
+#app .lh-rm-bar-fill { display: block; height: 100%; background: var(--lh-primary); border-radius: inherit; }
+
+#app .lh-rm-cycle { background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); overflow: hidden; }
+#app .lh-rm-cycle-sum { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 var(--lh-s4); cursor: pointer; font-weight: 700; color: var(--lh-ink); list-style: none; }
+#app .lh-rm-cycle-sum::-webkit-details-marker, #app .lh-rm-step-sum::-webkit-details-marker { display: none; }
+#app .lh-rm-cycle-sum::before, #app .lh-rm-step-sum::before { content: "▸"; color: var(--lh-ink-faint); font-size: 12px; transition: transform 0.15s; }
+#app .lh-rm-cycle[open] > .lh-rm-cycle-sum::before, #app .lh-rm-step[open] > .lh-rm-step-sum::before { transform: rotate(90deg); }
+#app .lh-rm-cycle-label { flex: 1; min-width: 0; }
+#app .lh-rm-cycle-count { font: 600 12px var(--lh-font-mono); color: var(--lh-ink-faint); }
+
+#app .lh-rm-step { border-top: 1px solid var(--lh-line-soft, var(--lh-line)); }
+#app .lh-rm-step--current { box-shadow: inset 2px 0 0 var(--lh-primary); }
+#app .lh-rm-step-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 48px; padding: 10px var(--lh-s4); cursor: pointer; list-style: none; }
+#app .lh-rm-key { font: 600 12px var(--lh-font-mono); color: var(--lh-ink-mid); min-width: 34px; }
+#app .lh-rm-step-title { flex: 1 1 260px; min-width: 0; font-size: 14px; color: var(--lh-ink); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#app .lh-rm-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+#app .lh-rm-flag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--lh-r-pill); background: var(--lh-amber-soft); color: var(--lh-amber-ink); border: 1px solid var(--lh-amber-line); white-space: nowrap; }
+
+#app .lh-rm-detail { padding: 4px var(--lh-s4) var(--lh-s4) calc(var(--lh-s4) + 22px); }
+#app .lh-rm-detail .lh-nb-sec { margin-bottom: var(--lh-s3); }
+#app .lh-rm-text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--lh-ink-soft); }
+#app .lh-rm-prog { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--lh-s3); }
+#app .lh-rm-prog-line { margin: 0; font-size: 13px; color: var(--lh-ink-mid); }
+#app .lh-rm-actions { margin-bottom: var(--lh-s3); }
+
+#app .lh-rm-hints { border-top: 1px dashed var(--lh-line); padding-top: var(--lh-s3); display: flex; flex-direction: column; gap: 8px; }
+#app .lh-rm-hints .lh-nb-sec-h, #app .lh-rm-hints > .lh-nb-hint { margin: 0; }
+#app .lh-rm-note-label { font-size: 12px; font-weight: 700; color: var(--lh-ink-faint); }
+#app .lh-rm-ladder { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: lh-rm-level; }
+#app .lh-rm-level { counter-increment: lh-rm-level; display: flex; flex-direction: column; gap: 6px; }
+#app .lh-rm-level-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+#app .lh-rm-level-label { flex: 1; font-weight: 600; font-size: 14px; color: var(--lh-ink); }
+#app .lh-rm-level-label::before { content: counter(lh-rm-level) ". "; color: var(--lh-ink-faint); }
+#app .lh-rm-level-body > summary { cursor: pointer; }
+#app .lh-rm-level-body .lh-nb-msg { margin: 6px 0; }
+
+@media (max-width: 860px) {
+  #app .lh-rm-col { padding-top: 8px; }
+  #app .lh-rm-title { font-size: 19px; }
+  #app .lh-rm-step-sum, #app .lh-rm-cycle-sum { padding-left: var(--lh-s3); padding-right: var(--lh-s3); }
+  #app .lh-rm-detail { padding-left: var(--lh-s3); padding-right: var(--lh-s3); }
+  #app .lh-rm-detail .lh-nb-btn { min-height: 44px; flex: 1 1 100%; }
+}

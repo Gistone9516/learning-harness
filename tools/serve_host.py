@@ -7,7 +7,9 @@ One port, one origin, four roots:
     /kit/...                -> <kit>/web/dist/                 (the built bundle)
     /content/...            -> <subject>/content/              (app.json and content files)
 
-Local only: binds 127.0.0.1 and answers 404 for anything that resolves outside those roots.
+Local only: binds 127.0.0.1 and answers 404 for anything that resolves outside those roots. What is served
+is decided by tools/hostfiles.py, which the gateway (specs/web-gateway.md) shares. This host hands the token
+to the page, so it is for localhost; a page for remote browsers goes through the gateway.
 """
 from __future__ import annotations
 
@@ -19,8 +21,10 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-KIT = Path(__file__).resolve().parent.parent
-WEBHOST = KIT / "tools" / "webhost"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hostfiles  # noqa: E402
+
+KIT = hostfiles.KIT
 
 
 class HostHandler(http.server.SimpleHTTPRequestHandler):
@@ -28,22 +32,10 @@ class HostHandler(http.server.SimpleHTTPRequestHandler):
     kit_dist: Path
 
     def _resolve(self, url_path: str) -> Path | None:
-        clean = url_path.split("?", 1)[0].split("#", 1)[0]
-        if clean in ("", "/", "/index.html"):
-            return WEBHOST / "index.html"
-        if clean in ("/host.js", "/host.css"):
-            return WEBHOST / clean.lstrip("/")
+        clean = unquote(url_path.split("?", 1)[0].split("#", 1)[0])
         if clean == "/local.config.js":
             return self.subject / "host" / "local.config.js"
-        for prefix, base in (("/kit/", self.kit_dist), ("/content/", self.subject / "content")):
-            if clean.startswith(prefix):
-                target = (base / unquote(clean[len(prefix):])).resolve()
-                try:
-                    target.relative_to(base.resolve())
-                except ValueError:
-                    return None
-                return target
-        return None
+        return hostfiles.resolve(self.subject, self.kit_dist, clean)
 
     def translate_path(self, path: str) -> str:
         target = self._resolve(path)

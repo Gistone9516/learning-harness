@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Guardrail: the kit code (bot/ + engine/) must contain NO subject literal.
+"""Guardrail: the kit code (bot/ + engine/ + tools/) must contain NO subject literal.
 
 All subject flavor (a concrete subject name, its area labels, exam names) is injected
 through config -> SubjectProfile. If a subject-specific string leaks back into shared kit
@@ -18,7 +18,8 @@ _ROOT = os.path.dirname(_BOT_ROOT)
 # reliable subject-leak signal in this codebase is the Korean subject vocabulary.)
 _DENY = ["영어", "영작", "토익", "토플", "단어", "문법", "숙어"]
 
-_SCAN_DIRS = ["bot", "engine"]
+# tools/ holds the host and the gateway (specs/web-gateway.md GW-14), which serve every subject.
+_SCAN_DIRS = ["bot", "engine", "tools"]
 
 
 def _kit_py_files():

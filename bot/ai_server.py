@@ -200,6 +200,40 @@ async def handle_state(method: str, path: str, payload, store: StateStore | None
         return e.status, {"ok": False, "error": e.message}
 
 
+class _CallerGone(Exception):
+    """The caller closed its connection while a call ran; there is no one to answer."""
+
+
+async def _unless_dropped(reader, coro):
+    """Run `coro`, cancelling it if the caller hangs up first (web-contract §2, session lifetime).
+
+    asyncio never cancels a handler because its peer left, so without this a closed tab keeps a claude
+    child generating until it finishes. The body is already read, so the next read returns b"" only when
+    the caller closed (or reset) its side; any bytes it does send are ignored.
+    """
+    work = asyncio.ensure_future(coro)
+    while True:
+        watch = asyncio.ensure_future(reader.read(1))
+        try:
+            done, _ = await asyncio.wait({work, watch}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if not watch.done():
+                watch.cancel()
+        if work in done:
+            return work.result()
+        try:
+            gone = watch.result() == b""
+        except (ConnectionError, OSError):
+            gone = True
+        if gone:
+            work.cancel()
+            try:
+                await work
+            except BaseException:
+                pass
+            raise _CallerGone()
+
+
 def _make_handler(token: str, origin: str, store: StateStore | None = None):
     async def handle(reader, writer):
         try:
@@ -284,7 +318,7 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                     writer.write(_response("400 Bad Request", b'{"ok":false,"error":"missing concept"}', origin))
                     await writer.drain()
                     return
-                gen = await probgen.generate_and_verify(
+                gen = await _unless_dropped(reader, probgen.generate_and_verify(
                     concept=concept,
                     existing=[str(x) for x in (payload.get("existing") or []) if isinstance(x, (str, int, float))],
                     feedback=[str(x) for x in (payload.get("feedback") or []) if isinstance(x, (str, int, float))],
@@ -292,7 +326,7 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                     course_title=str(payload.get("course_title") or "학습 과정"),
                     model=payload.get("model"),
                     style=payload.get("style") if isinstance(payload.get("style"), str) else None,
-                )
+                ))
                 out = json.dumps(gen, ensure_ascii=False).encode("utf-8")
                 writer.write(_response("200 OK", out, origin))
                 await writer.drain()
@@ -316,14 +350,14 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
                     session_id=payload.get("session_id"),
                 )
             else:
-                result = await ai.invoke(
+                result = await _unless_dropped(reader, ai.invoke(
                     prompt,
                     system=payload.get("system"),
                     model=payload.get("model"),
                     effort=payload.get("effort", "low"),
                     session_id=payload.get("session_id"),
                     kind="followup" if payload.get("session_id") else "generate",
-                )
+                ))
             out = json.dumps({
                 "ok": result.ok,
                 "text": result.text,
@@ -335,6 +369,8 @@ def _make_handler(token: str, origin: str, store: StateStore | None = None):
             }, ensure_ascii=False).encode("utf-8")
             writer.write(_response("200 OK", out, origin))
             await writer.drain()
+        except _CallerGone:
+            log.info("caller left; call cancelled")
         except Exception as e:
             log.warning("request handling error: %s", e)
             try:

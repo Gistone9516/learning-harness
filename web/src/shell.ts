@@ -11,6 +11,8 @@ import { TERMS as NOTEBOOK_TERMS } from "../parts/notebook/store";
 import type { TermData } from "../parts/notebook/model";
 import { mountDashboard } from "../parts/dashboard/dashboard";
 import { mountNotebook, notebookPrefillKey, type NotebookProps } from "../parts/notebook/notebook";
+import { mountRoadmap, type RoadmapProps } from "../parts/roadmap/roadmap";
+import { quizPreselect } from "../parts/quiz/bankload";
 import { createAiClient, AiSession, type AiClient, type AiClientConfig } from "./ai/client";
 import { createApiStorage } from "./storage/api";
 import { createLocalStorage } from "./storage/local";
@@ -19,7 +21,7 @@ import { makeRecord, type StoragePort } from "./storage/port";
 import { createStudyFlow } from "./flow/study";
 import { createWorkspace } from "./flow/workspace";
 
-export type PartId = "sheet" | "codeproj" | "conceptprob" | "dashboard" | "notebook" | "compose" | "quiz";
+export type PartId = "sheet" | "codeproj" | "conceptprob" | "dashboard" | "notebook" | "compose" | "quiz" | "roadmap";
 
 const CONCEPTS = CONCEPT_COLLECTION;
 
@@ -128,6 +130,12 @@ export function mountApp(container: HTMLElement, config: AppConfig): void {
       return;
     }
     void mountQuizWithState(container, data, client, buildStorage(config.state));
+  } else if (config.part === "roadmap") {
+    if (!config.state) {
+      container.textContent = "이 모듈은 상태 설정(state)이 필요합니다.";
+      return;
+    }
+    void mountRoadmapWithState(container, data, client, buildStorage(config.state));
   } else {
     container.textContent = "unknown part";
   }
@@ -203,6 +211,35 @@ async function mountQuizWithState(container: HTMLElement, data: Record<string, u
     outline: { doc: outlineDoc },
     askElsewhere: handoffTo(data.askElsewhere, data.subjectKey),
     rewriteFront: data.collapseAbbreviations ? await abbreviationCollapser(data, storage) : undefined,
+  });
+}
+
+/**
+ * roadmap (specs/web-roadmap.md): the outline doc is seeded exactly as for quiz, and the links in
+ * `data.links` become the two handoffs (RM-8) -- the quiz opened on the step's unit, the notebook prefilled.
+ */
+async function mountRoadmapWithState(container: HTMLElement, data: Record<string, unknown>, client: AiClient | null, storage: StoragePort): Promise<void> {
+  const outlineDoc = (data.outline as { doc?: string } | undefined)?.doc ?? "outline";
+  await syncOutline({ ...data, outlineDoc }, storage);
+  const subjectKey = typeof data.subjectKey === "string" ? data.subjectKey : "roadmap";
+  const links = (data.links ?? {}) as { quiz?: { hash?: unknown; label?: unknown }; notebook?: { hash?: unknown; label?: unknown } };
+  const quiz = links.quiz && typeof links.quiz.hash === "string" ? links.quiz : null;
+  mountRoadmap(container, {
+    ...(data as unknown as Omit<RoadmapProps, "storage" | "aiClient" | "solve" | "ask">),
+    storage,
+    aiClient: client,
+    subjectKey,
+    outline: { doc: outlineDoc },
+    solve: quiz
+      ? {
+          label: typeof quiz.label === "string" ? quiz.label : "문제 풀기",
+          run: (unit, hasProblems) => {
+            quizPreselect(subjectKey, [unit], hasProblems ? "play" : "bank");
+            window.location.hash = quiz.hash as string;
+          },
+        }
+      : undefined,
+    ask: handoffTo(links.notebook ? { label: links.notebook.label ?? "질문하기", hash: links.notebook.hash } : undefined, subjectKey),
   });
 }
 
