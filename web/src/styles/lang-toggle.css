@@ -1,0 +1,8 @@
+/* Language toggle shared by the quiz problem card (Q-4) and the notebook review example (N-18). The class
+   names keep the quiz prefix because the quiz introduced them. Two fixed segments; the filled one is the
+   language on screen (state, not target). */
+#app .lh-qz-lang { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--lh-line-strong); background: var(--lh-surface-sunk); border-radius: 10px; cursor: pointer; }
+#app .lh-qz-lang:hover { background: var(--lh-surface-sunk); border-color: var(--lh-primary-line); }
+#app .lh-qz-lang:disabled { opacity: 0.7; cursor: progress; }
+#app .lh-qz-seg { padding: 5px 10px; border-radius: 7px; font: 700 12px/1 var(--lh-font-ui); color: var(--lh-ink-faint); min-width: 30px; text-align: center; }
+#app .lh-qz-seg--on { background: var(--lh-surface); color: var(--lh-ink); box-shadow: 0 1px 3px rgba(20, 30, 50, 0.12); }

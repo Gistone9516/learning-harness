@@ -1,0 +1,85 @@
+/*
+ * compose part (web/parts/compose). Reuses the notebook primitives (.lh-nb-btn, -input, -badge, -chip,
+ * -filter, tabs) so the two parts read as one product; this file only lays out the compose screens.
+ * Every rule is prefixed "#app " for the reason given at the top of notebook.css.
+ */
+#app .lh-nb-pane--practice { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: var(--lh-s4); height: 100%; }
+#app .lh-nb-pane--revise, #app .lh-nb-pane--history { overflow-y: auto; }
+
+#app .lh-cm-side {
+  min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--lh-s3); padding: var(--lh-s4);
+  background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); box-shadow: var(--lh-shadow-sm);
+}
+#app .lh-cm-selects { display: flex; gap: var(--lh-s2); }
+#app .lh-cm-selects .lh-nb-select { flex: 1; min-width: 0; }
+#app .lh-cm-words { display: flex; flex-direction: column; gap: 6px; }
+#app .lh-cm-words-head { display: flex; align-items: center; justify-content: space-between; }
+#app .lh-cm-words-head .lh-nb-sec-h { margin: 0; }
+#app .lh-cm-gen { width: 100%; }
+#app .lh-cm-batch { flex: 1; min-height: 120px; }
+
+#app .lh-cm-main { min-height: 0; overflow-y: auto; }
+#app .lh-cm-card {
+  max-width: 900px; display: flex; flex-direction: column; gap: var(--lh-s4); padding: 28px 32px;
+  background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); box-shadow: var(--lh-shadow-sm);
+}
+#app .lh-cm-card-top { display: flex; align-items: center; gap: var(--lh-s2); }
+#app .lh-cm-card-top .lh-nb-btn--quiet { margin-left: auto; }
+#app .lh-cm-prompt { margin: 0; font-size: 20px; line-height: 1.6; font-weight: 700; color: var(--lh-ink); }
+#app .lh-cm-hints { display: flex; flex-wrap: wrap; gap: var(--lh-s2); }
+#app .lh-cm-hint-out { display: flex; flex-direction: column; gap: 6px; }
+#app .lh-cm-hint-out:empty { display: none; }
+#app .lh-cm-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#app .lh-cm-line-k { flex: 0 0 auto; min-width: 84px; font-size: 12px; font-weight: 700; color: var(--lh-ink-faint); }
+#app .lh-cm-line-v { flex: 1 1 320px; font-size: 15px; line-height: 1.6; color: var(--lh-ink); }
+#app .lh-cm-speak { white-space: nowrap; }
+#app .lh-cm-attempts { display: flex; flex-direction: column; gap: var(--lh-s3); }
+#app .lh-cm-attempts:empty { display: none; }
+#app .lh-cm-attempt {
+  display: flex; flex-direction: column; gap: var(--lh-s2); padding: 14px 16px;
+  background: var(--lh-surface-soft); border: 1px solid var(--lh-line); border-radius: var(--lh-r-sm);
+}
+#app .lh-cm-attempt-head { display: flex; align-items: center; gap: var(--lh-s2); }
+#app .lh-cm-diff { margin: 0; font-size: 16px; line-height: 1.8; }
+#app .lh-cm-del { color: var(--lh-bad); background: var(--lh-bad-soft); text-decoration: line-through; border-radius: 4px; padding: 0 3px; }
+#app .lh-cm-ins { color: var(--lh-ok-strong); background: var(--lh-ok-soft); text-decoration: none; border-radius: 4px; padding: 0 3px; }
+#app .lh-cm-reason { margin: 0; font-size: 14px; line-height: 1.6; color: var(--lh-ink-soft); }
+#app .lh-cm-errors { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.6; }
+#app .lh-cm-errors li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+#app .lh-cm-fix { font-family: var(--lh-font-mono); font-size: 13px; }
+#app .lh-cm-explain { color: var(--lh-ink-mid); }
+#app .lh-cm-self { border-top: 1px dashed var(--lh-line-strong); padding-top: 10px; display: flex; flex-direction: column; gap: var(--lh-s2); }
+#app .lh-cm-input { min-height: 96px; }
+#app .lh-cm-actions { align-items: center; }
+#app .lh-cm-badge--bad { background: var(--lh-bad-soft); color: var(--lh-bad); border-color: var(--lh-bad-line); }
+
+#app .lh-cm-lists { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--lh-s3); }
+#app .lh-cm-tools { display: flex; align-items: center; gap: var(--lh-s3); flex-wrap: wrap; }
+#app .lh-cm-tools .lh-nb-search { max-width: 320px; }
+#app .lh-cm-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--lh-s4); align-items: start; }
+#app .lh-cm-list { flex: none; }
+#app .lh-cm-list--later { opacity: 0.75; }
+#app .lh-cm-stats {
+  display: flex; flex-direction: column; gap: var(--lh-s2); padding: var(--lh-s4);
+  background: var(--lh-surface); border: 1px solid var(--lh-line); border-radius: var(--lh-r); box-shadow: var(--lh-shadow-sm);
+}
+#app .lh-cm-stats .lh-nb-sec-h { margin: 0; }
+#app .lh-cm-sec-gap { margin-top: var(--lh-s3) !important; }
+#app .lh-cm-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#app .lh-cm-bars li { display: grid; grid-template-columns: 96px 1fr 28px; align-items: center; gap: var(--lh-s2); font-size: 13px; }
+#app .lh-cm-bar { height: 8px; background: var(--lh-primary); border-radius: var(--lh-r-pill); }
+#app .lh-cm-bar-n { text-align: right; color: var(--lh-ink-mid); }
+#app .lh-cm-sentences { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.6; }
+
+@media (max-width: 860px) {
+  #app .lh-nb-pane--practice, #app .lh-cm-cols { grid-template-columns: 1fr; height: auto; }
+  #app .lh-cm-side { max-height: none; }
+}
+#app .lh-cm-keyhint { margin-left: auto; }
+#app .lh-cm-diff .lh-cm-speak { margin-left: 8px; font-size: 13px; }
+#app .lh-cm-badge--partial { background: var(--lh-amber-soft); color: var(--lh-amber-ink); border-color: var(--lh-amber-line); }
+/* W-13 examples under an error: full row width, a rule and indent instead of a box; must follow .lh-cm-errors li. */
+#app .lh-cm-examples { flex: 1 1 100%; margin: 2px 0 0; padding: 0 0 0 10px; list-style: none; border-left: 2px solid var(--lh-line-strong); display: flex; flex-direction: column; gap: 6px; }
+#app .lh-cm-examples li { display: block; }
+#app .lh-cm-ex-en { display: block; font-size: 14px; line-height: 1.5; color: var(--lh-ink); }
+#app .lh-cm-ex-ko { display: block; font-size: 13px; line-height: 1.5; color: var(--lh-ink-mid); }

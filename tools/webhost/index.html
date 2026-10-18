@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>learning-harness</title>
+    <!--
+      Generic host page (specs/web-notebook.md §5). Serves every subject: the views, labels and data
+      come from the subject's content/app.json, the token from its host/local.config.js. Nothing in
+      this file names a subject.
+
+      The saved theme is applied before the stylesheets so a light choice never flashes dark. The key
+      is the kit's own lh:theme, which conceptprob also writes, so the two never disagree.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("lh:theme");
+          if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          /* private mode: the OS preference stands */
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/kit/assets/index.css" />
+    <link rel="stylesheet" href="/host.css" />
+  </head>
+  <body>
+    <nav class="lh-host-nav" id="lh-host-nav" aria-label="views" hidden></nav>
+    <div id="app"></div>
+    <!-- Runtime secrets, never bundled: the subject folder's host/local.config.js. -->
+    <script src="/local.config.js"></script>
+    <script src="/host.js"></script>
+  </body>
+</html>

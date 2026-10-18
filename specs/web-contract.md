@@ -16,6 +16,11 @@ Inherits the core SoT §7 invariants. Restated for the web layer (machine-checka
 3. **Secrets and gating (§7.12)** — no secret in the web bundle. AI only via `ai_server` with a token the bundle never embeds. Personal use.
 4. **Deterministic = token 0 (§8)** — sheet formula evaluation, code-structure navigation, and answer grading run client-side with zero AI calls. AI (generation, explanation, open-ended) is opt-in and goes through `ai_server`.
 5. **Binary grading (§7.5)** — graded answers reduce to `correct | incorrect` via the engine grader; no partial credit.
+   Open-ended answers that no `AnswerSpec` can check — compose writing, notebook review meanings (N-20) — are
+   graded by AI through `ai_server` as an opt-in AI feature, not as deterministic grading; the review stays binary.
+   **One scoped exception:** the compose part's AI-graded free writing also records `partial` (meaning conveyed,
+   only minor slips), which schedules exactly like `correct` (`web-compose.md` W-2, W-8). User decision 2026-10-04:
+   "어차피 익숙해질 때까지 뺑뺑이 돌릴거라, 간단한 오답은 그냥 '세모' 처리 해줘". Engine-graded answers stay binary.
 6. **Reuse core types** — `CardDef`, `AnswerSpec`, `ScoreMode`, `Verdict` are reused verbatim (core SoT §1). The web does not invent a parallel problem schema.
 
 ---
@@ -87,7 +92,7 @@ type AiResponse = {
 
 **Config (server env / `.env`)** — `AI_SERVER_TOKEN` (required; server refuses to start without it), `AI_SERVER_HOST` (default `127.0.0.1`), `AI_SERVER_PORT` (default `8765`), `AI_SERVER_ORIGIN` (CORS, default `*`; token gates regardless), `STATE_ROOT` (state folder to mount, §2.2; also accepted as the first CLI argument). Remote access is via a tunnel in front of the local bind only.
 
-**Session lifetime (no orphan processes)** — every `/ai` call runs a `claude -p` child. The server owns that child for its whole lifetime and terminates *and reaps* it on every exit path: normal return, timeout, error, task cancellation (a browser dropping the connection) and server shutdown. Implementation: `bot/session_guard.py` (registry + `track()` context manager + `shutdown_all()`), used by `ai.invoke`. Timeouts are split by call kind — a fresh session loading an artifact (`generate`) gets the long bound, a resumed follow-up (`followup`) a short one (`ai.TIMEOUT_BY_KIND`). `GET /sessions` (token-gated) reports in-flight calls, which is also how tests assert that nothing leaked.
+**Session lifetime (no orphan processes)** — every `/ai` call runs a `claude -p` child, except a `live: true` request, which may reuse a long-lived one (`ai-mode.md` §4.1, L-1..L-6). The server owns that child for its whole lifetime and terminates *and reaps* it on every exit path: normal return, timeout, error, task cancellation (a browser dropping the connection) and server shutdown. Implementation: `bot/session_guard.py` (registry + `track()` context manager + `shutdown_all()`), used by `ai.invoke`. Timeouts are split by call kind — a fresh session loading an artifact (`generate`) gets the long bound, a resumed follow-up (`followup`) a short one (`ai.TIMEOUT_BY_KIND`). `GET /sessions` (token-gated) reports in-flight calls and open live processes (`kind: "live"`), which is also how tests assert that nothing leaked. Termination kills the whole process tree on Windows (`taskkill /F /T`): measured 2026-10-05, `proc.kill()` on a shell-spawned child ends only `cmd.exe` and leaves `claude.exe` running.
 
 ### 2.2 State store endpoints (records + derived index)
 

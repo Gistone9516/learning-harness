@@ -4,6 +4,10 @@
 // never part of the kit contract (excluded from the subject-agnostic guard).
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/lang-toggle.css";
+import "./styles/notebook.css";
+import "./styles/compose.css";
+import "./styles/quiz.css";
 import { mountApp, type AppConfig } from "./shell";
 
 async function resolveConfig(): Promise<AppConfig | null> {

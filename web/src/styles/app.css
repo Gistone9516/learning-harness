@@ -431,6 +431,10 @@ body {
 #app .lh-cp-askbtn { position: fixed; z-index: 60; padding: 7px 13px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 20px rgba(20,30,50,0.20); }
 #app .lh-cp-askbtn:hover { background: var(--lh-primary-strong); }
 #app .lh-cp-askbtn::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--lh-primary); }
+/* Second selection target (props.askElsewhere): outlined so it never reads as the same action. */
+#app .lh-cp-askbtn--else { background: var(--lh-surface); color: var(--lh-primary-strong); border: 1px solid var(--lh-primary-line); }
+#app .lh-cp-askbtn--else:hover { background: var(--lh-primary-soft); }
+#app .lh-cp-askbtn--else::after { display: none; }
 /* "Sub 질문" button — green to distinguish it from the blue "AI 질문". */
 #app .lh-cp-subaskbtn { background: var(--lh-ok); }
 #app .lh-cp-subaskbtn:hover { background: var(--lh-ok-strong); }

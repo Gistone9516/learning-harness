@@ -40,3 +40,8 @@ The machine-readable list is `index.json`. Current parts:
 - `codeproj` — a learner-given git repository, read-only comprehension with request-shaped annotations and click-to-explain (session resume).
 - `dashboard` — study history: sessions, reading progress, topic/stack history from index summaries (token 0).
 - `conceptprob` — area→concept→problem: AI concept reading + deterministically graded problems.
+- `notebook` — ask anything, resumable threads, auto-captured dictionary, Leitner review (example sentence in its original language with a translation toggle, key E), outline editor (`specs/web-notebook.md`).
+- `compose` — writing practice with AI grading (pass / minor-slip pass / retry) and grammar examples, local diff, revise queue, error stats (`specs/web-compose.md`).
+- `quiz` — problem drilling: sets, practice / timed exam, per-problem language toggle, results (`specs/web-quiz.md`).
+
+`notebook`, `compose` and `quiz` share the tab layout in `src/ui/tabs.ts` and the `.lh-nb-*` style primitives; the language toggle style shared by quiz and notebook lives in `src/styles/lang-toggle.css`.

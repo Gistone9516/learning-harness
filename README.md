@@ -121,6 +121,9 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ bot-contract.md          bot (discord.py) contract
 │   ├ learning-types.md        four-layer capability registry
 │   ├ ai-mode.md               _invoke adapter and token control
+│   ├ web-notebook.md          notebook part, generic web host, conceptprob instance hooks (N-1..N-17)
+│   ├ web-compose.md           compose part: writing practice with AI grading incl. a minor-slip pass (W-1..W-14)
+│   ├ web-quiz.md              quiz part: problem drilling, language toggle, exam mode (Q-1..Q-12)
 │   └ launch-skill.md          global skill and install
 ├ engine/                      pure Python core (zero discord, zero file I/O): scoring, leitner, selection, dashboard, migrate
 ├ bot/                         discord.py shell: boot, session, dispatch, handlers, persist, ai, commands
@@ -135,11 +138,13 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ caps_ai/ai_explain.py    one-off per-card concept explanation thread (explain model, discarded after use)
 │   ├ ai_server.py             gated local HTTP server bridging a web client to claude (web AI, Discord-independent) + the /state record API
 │   ├ state_store.py           record-per-file store with derived indexes (_verify drift check, _rebuild full rescan)
-│   ├ session_guard.py         claude session lifetime tracking and shutdown (no orphan processes)
+│   ├ session_guard.py         claude session lifetime tracking and shutdown (no orphan processes; tree kill on Windows)
+│   ├ live.py                  opt-in long-lived claude process per session for short repeated turns (ai-mode §4.1)
 │   └ harness/                 Discord harness catalog (copied, 59 files)
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
-├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob), src/grade (engine grader port), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
+├ tools/                       setup.py; serve_host.py + start_web.ps1 + webhost/ (generic host page: one page per web subject, views from its content/app.json)
+├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob, notebook, compose, quiz), src/ui (shared tab layout), src/grade (engine grader port), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
@@ -258,6 +263,32 @@ to start without one and rejects every other header name.
   the first 8 files built before the learner arrives and the rest behind them), concept documents (`concepts.ts`, background after entry), and
   debug runs (`trace.ts`, one leg per file, started by the learner from a chosen line). All three are
   read back with zero AI calls when an archived project is reopened.
+- Web subjects run from one page (2026-09-30, `specs/web-notebook.md`). `tools/start_web.ps1 -Subject <folder>`
+  builds the bundle and starts `ai_server` (state under `<folder>/state`) plus `tools/serve_host.py`, which serves
+  the generic host page `tools/webhost/` with the subject's `content/` and `host/local.config.js`. The new
+  `notebook` part asks the AI anything, keeps every thread (resumable), captures terms into a dictionary,
+  reviews them with Leitner, and edits the curriculum outline that `conceptprob` reads from a state doc.
+  `conceptprob` gained optional instance hooks (labels, an author prompt with a kit-owned response contract,
+  persisted live concepts, per-problem explanations, a problem style for `/problems`, a hand-off of selected
+  text to the notebook); with none passed it behaves as before. `bot/ai.py` now starts the CLI with
+  `--setting-sources project,local` so the operator's user hooks stay out of learner answers. Verified live
+  with a real subject (ask, follow-up resume, concept generation and persistence, grading, review):
+  Problem fronts can be forced to bare abbreviations (`collapseAbbreviations`, N-17).
+  515 web tests and 614 python tests green (bot 455 + engine 159; measured 2026-09-30).
+- Live AI sessions (2026-10-05, `bot/live.py`, ai-mode §4.1 L-1..L-6): a `/ai` request with `live: true` is answered
+  from one long-lived `claude -p` process per session (review grading: 2.1-2.6 s per follow-up against 4.9-5.7 s
+  per spawned call, measured end to end). `session_guard` now ends the whole process tree on Windows; `proc.kill()`
+  alone was measured to leave `claude.exe` running. 622 python tests green (bot 463 + engine 159); 545 web tests green.
+- Two more state-backed parts (2026-10-01). `compose` (`specs/web-compose.md`): writing tasks generated by mode,
+  AI grading (correct / partial = minor slips only, counted as a pass / incorrect; unreadable = ungraded, never a
+  fail), grammar examples under each error, a local word diff,
+  revise-and-resubmit in one session, a Leitner revise queue, error stats, and corrected expressions captured
+  into the notebook dictionary without counting as lookups. `quiz` (`specs/web-quiz.md`): drilling over concept
+  and generated problems, sets by unit/source/count, practice or timed exam, a per-problem language toggle whose
+  translation is fetched once and stored, flags, deletion reasons fed back to generation, and results with
+  retry-wrong. Both reuse the notebook's tab layout (`src/ui/tabs.ts`) and style primitives; JSON replies are
+  read by one helper (`src/ai/json.ts`). Verified live (generation, grading, translation, resume).
+  544 web tests green (measured 2026-10-05).
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), the
   conversation compaction and long-term memory that the stored per-day records exist to feed, and a
   delete tombstone in `web/src/storage/buffered.ts` — with the server unreachable a removed record is

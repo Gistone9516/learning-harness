@@ -12,6 +12,7 @@ export interface AiRequest {
   model?: string;
   effort?: AiEffort;
   session_id?: string | null;
+  live?: boolean;   // ai-mode §4.1: answer from a long-lived process (short repeated turns)
 }
 
 export interface AiResponse {
@@ -42,6 +43,7 @@ export interface GenProblemsRequest {
   count?: number;
   course_title?: string;
   model?: string;
+  style?: string;        // instance-supplied item-writing style; replaces the server default when present
 }
 export interface GenProblemsResponse {
   ok: boolean;

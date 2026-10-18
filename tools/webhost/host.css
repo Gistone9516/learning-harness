@@ -1,0 +1,96 @@
+/* Host nav: a small floating pill in the top-right corner (a burger popup at 860px and below, N-21), clear of conceptprob's centred tab bar and
+   left index, and of the notebook tab bar (which reserves room on its right). Kit tokens only. */
+body { margin: 0; background: var(--lh-bg); }
+.lh-host-nav {
+  position: fixed; top: 16px; right: 16px; z-index: 60;
+  display: flex; align-items: center; gap: 2px; padding: 4px;
+  background: var(--lh-surface); border: 1px solid var(--lh-line-strong); border-radius: 12px;
+  box-shadow: var(--lh-shadow-sm); font-family: var(--lh-font-ui);
+}
+.lh-host-nav[hidden] { display: none; }
+.lh-host-brand { font-size: 13px; font-weight: 800; color: var(--lh-ink); padding: 0 10px 0 8px; letter-spacing: 0.02em; }
+.lh-host-link {
+  font-size: 13px; font-weight: 600; color: var(--lh-ink-mid); text-decoration: none;
+  padding: 7px 11px; border-radius: 9px;
+}
+.lh-host-link:hover { color: var(--lh-ink); background: var(--lh-surface-sunk); }
+.lh-host-link[aria-current="page"] { background: var(--lh-primary); color: var(--lh-on-primary); }
+.lh-host-link:focus-visible, .lh-host-theme:focus-visible { outline: 2px solid var(--lh-primary); outline-offset: 2px; }
+.lh-host-theme {
+  border: 0; background: transparent; color: var(--lh-ink-mid); font-size: 15px; width: 32px; height: 30px;
+  border-radius: 9px; cursor: pointer;
+}
+.lh-host-theme:hover { background: var(--lh-surface-sunk); color: var(--lh-ink); }
+.lh-host-msg { padding: 80px 24px; max-width: 640px; margin: 0 auto; color: var(--lh-ink); font: 15px/1.6 var(--lh-font-ui); }
+/* N-21: wide screens keep the pill (the panel lays out as if it were not there); 860px and below show one
+   burger button and the panel as a popup under it. */
+.lh-host-burger, .lh-host-theme-label, .lh-host-tabs { display: none; }
+.lh-host-panel { display: contents; }
+@media (max-width: 860px) {
+  .lh-host-nav {
+    left: auto; top: 12px; right: max(12px, env(safe-area-inset-right));
+    display: block; padding: 0; background: none; border: 0; box-shadow: none;
+  }
+  .lh-host-burger {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; cursor: pointer;
+    background: var(--lh-surface); color: var(--lh-ink); font: 20px/1 var(--lh-font-ui);
+    border: 1px solid var(--lh-line-strong); border-radius: var(--lh-r-sm); box-shadow: var(--lh-shadow-sm);
+  }
+  .lh-host-burger:hover { background: var(--lh-surface-sunk); }
+  .lh-host-burger:focus-visible { outline: 2px solid var(--lh-primary); outline-offset: 2px; }
+  .lh-host-burger[aria-expanded="true"] { background: var(--lh-primary-soft); border-color: var(--lh-primary-line); color: var(--lh-primary-strong); }
+  .lh-host-panel {
+    display: none; position: absolute; top: calc(100% + 8px); right: 0;
+    width: min(240px, calc(100vw - 24px)); flex-direction: column; gap: 2px; padding: 8px;
+    background: var(--lh-surface); border: 1px solid var(--lh-line-strong);
+    border-radius: var(--lh-r-sm); box-shadow: var(--lh-shadow);
+  }
+  .lh-host-panel.is-open { display: flex; }
+  .lh-host-brand { padding: 6px 12px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--lh-line); }
+  .lh-host-link { display: flex; align-items: center; min-height: 44px; padding: 0 12px; font-size: 15px; }
+  .lh-host-theme {
+    display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0 12px;
+    margin-top: 4px; border-top: 1px solid var(--lh-line); border-radius: 0 0 9px 9px; text-align: left; font-size: 15px;
+  }
+  .lh-host-theme-label { display: inline; font-size: 14px; font-weight: 600; }
+  /* Transparent catcher: an outside tap closes the popup instead of also pressing what is underneath. */
+  .lh-host-scrim { position: fixed; inset: 0; z-index: -1; }
+
+  /* The part's tabs move into the popup (N-21); the in-page bar keeps only its offline banner. */
+  .lh-host-tabs-menu #app .lh-nb-tabs { display: none; }
+  .lh-host-tabs { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--lh-line); }
+  .lh-host-tabs[hidden] { display: none; }
+  .lh-host-tab {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 0 12px;
+    border: 0; border-radius: 9px; background: transparent; color: var(--lh-ink-mid); cursor: pointer;
+    font: 600 15px/1 var(--lh-font-ui); text-align: left;
+  }
+  .lh-host-tab:hover { color: var(--lh-ink); background: var(--lh-surface-sunk); }
+  .lh-host-tab[aria-current="page"] { background: var(--lh-primary-soft); color: var(--lh-primary-strong); }
+  .lh-host-tab:focus-visible { outline: 2px solid var(--lh-primary); outline-offset: 2px; }
+  .lh-host-tab-count { font-size: 12px; font-weight: 700; min-width: 20px; padding: 3px 7px; border-radius: 999px; background: var(--lh-surface-sunk); color: var(--lh-ink-mid); text-align: center; }
+  .lh-host-tab-count--due { background: var(--lh-primary); color: var(--lh-on-primary); }
+  /* Where am I: the view and tab, top-left, level with the burger; it scrolls away with the page. */
+  .lh-host-where {
+    position: absolute; z-index: 50; top: 12px; left: 16px; right: 72px; height: 44px; display: flex; align-items: center; pointer-events: none;
+    font: 700 15px/1.2 var(--lh-font-ui); color: var(--lh-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .lh-host-where:empty { display: none; }
+  /* A due tab (e.g. reviews waiting) puts a dot on the burger, since the count is now inside the popup. */
+  .lh-host-burger { position: relative; }
+  .lh-host-burger--due::after {
+    content: ""; position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--lh-primary); box-shadow: 0 0 0 2px var(--lh-surface);
+  }
+}
+.lh-host-where { display: none; }
+@media (max-width: 860px) { .lh-host-where { display: flex; } .lh-host-where:empty { display: none; } }
+
+/* One theme control per page: the host nav owns it, so conceptprob's own toggle is hidden here only
+   (standalone conceptprob instances keep theirs). Both write the same lh:theme key. */
+#app .lh-cp-theme { display: none; }
+@media (max-width: 860px) {
+  /* The full-width host nav sits where conceptprob's centred view tabs are; move those below it. */
+  #app .lh-cp-vtabs { top: 72px; }
+}

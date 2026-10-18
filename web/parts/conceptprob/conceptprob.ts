@@ -7,7 +7,7 @@
 // CONSTRAINTS: subject-agnostic, secrets-gated, token0-grading, binary.
 // DEMO: mountConceptprob(el, {session:null, areas, conceptOutline, concepts, courseTitle}) renders fully offline.
 
-import { AiSession, type AiClient, type AiResponse } from "../../src/ai/client";
+import { AiSession, type AiClient, type AiEffort, type AiResponse } from "../../src/ai/client";
 import { score, type AnswerSpec, type ScoreInput } from "../../src/grade/grade";
 import { highlightCode } from "./highlight";
 import {
@@ -32,6 +32,7 @@ export interface ProblemDef {
   round?: string;    // e.g. "2025년 3회"
   needs_exec?: boolean;
   exec?: string;     // verification status for code/SQL 기출 (confirmed/exec_corrected/unverified/…)
+  explain?: string;  // Markdown explanation shown under the answer (why it is right, why the others are not)
 }
 // "반드시 외워야 할 것" — a must-memorize card shown at the TOP of a concept (added, not
 // replacing the body). Inspired by the user's cheat-sheet study materials: a mnemonic,
@@ -148,6 +149,7 @@ export function parseConcept(text: string): GeneratedConcept | null {
         front: (pd["front"] ?? {}) as Record<string, unknown>,
         answer_spec: (pd["answer_spec"] ?? { normalize: [] }) as AnswerSpec,
         links: pd["links"] as ProblemDef["links"] | undefined,
+        ...(typeof pd["explain"] === "string" && pd["explain"] ? { explain: pd["explain"] as string } : {}),
       };
     });
     const memorize = coerceMemorize(o["memorize"]);
@@ -156,6 +158,34 @@ export function parseConcept(text: string): GeneratedConcept | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Collapse spelled-out abbreviations back to the bare abbreviation, for instances whose question text must
+ * never expand one. "Elastic Block Store (EBS)" and "Elastic Block Store" both become "EBS"; a leading
+ * "Amazon " / "AWS " is optional. Longer expansions are tried first so a shorter one never splits them.
+ */
+export function makeAbbrCollapser(pairs: { abbr: string; expansion: string }[]): (s: string) => string {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rules = pairs
+    .filter((p) => p.abbr && p.expansion)
+    .flatMap((p) => {
+      const bare = p.expansion.replace(/^(amazon|aws)\s+/i, "");
+      return Array.from(new Set([p.expansion, bare])).map((v) => ({ v, abbr: p.abbr }));
+    })
+    .sort((a, b) => b.v.length - a.v.length)
+    .map(({ v, abbr }) => ({ re: new RegExp(`(?:(?:amazon|aws)\\s+)?${esc(v)}(?:\\s*\\(${esc(abbr)}\\))?`, "gi"), abbr }));
+  return (s: string) => rules.reduce((acc, r) => acc.replace(r.re, r.abbr), s);
+}
+
+/** Apply a front rewrite to a problem. Judge options and their accepted answer move together so grading holds. */
+export function rewriteProblem(p: ProblemDef, f: (s: string) => string): ProblemDef {
+  const front: Record<string, unknown> = { ...p.front };
+  for (const k of ["scenario", "prompt", "text"]) if (typeof front[k] === "string") front[k] = f(front[k] as string);
+  const isJudge = p.type === "judge" && Array.isArray(front["options"]);
+  if (isJudge) front["options"] = (front["options"] as unknown[]).map((o) => (typeof o === "string" ? f(o) : o));
+  const answer_spec = isJudge && p.answer_spec.accepted ? { ...p.answer_spec, accepted: p.answer_spec.accepted.map(f) } : p.answer_spec;
+  return { ...p, front, answer_spec };
 }
 
 export function buildIndex(areas: AreaDef[], conceptOutline: Record<string, ConceptSeed[]>): IndexNode[] {
@@ -174,8 +204,30 @@ export function gradeProblem(problem: ProblemDef, userAnswer: string | string[])
 
 
 // ── AI (optional) ────────────────────────────────────────────────────────────
-export async function generateConcept(session: AiSession, params: { area: string; concept_id: string; title: string; scope?: string }): Promise<{ concept: GeneratedConcept | null; response: AiResponse }> {
-  const res = await session.send({ prompt: JSON.stringify(params), effort: "medium" });
+export interface ConceptAuthor { system: string; model?: string; effort?: AiEffort }
+/**
+ * The shape half of a live-generation prompt. The instance's `author.system` says who writes and in
+ * what voice; this fixes what comes back, so parseConcept and the reading renderer (DOC_DIALECT) are
+ * the only definitions of the format and an instance cannot drift from them.
+ */
+export const CONCEPT_CONTRACT = [
+  "[Response contract] Reply with exactly one JSON object and nothing else (no prose, no code fence):",
+  '{"area":"<given>","concept_id":"<given>","title":"<given>","body":"<markdown>",',
+  ' "memorize":{"items":[{"term":"...","def":"...","tag":"..."}],"traps":["..."]},',
+  ' "problems":[ ... 4 to 6 items ... ]}',
+  "- body: the reading, written in the markdown dialect above. Each '## heading' becomes one numbered step.",
+  "- memorize: the few facts that must be memorised (optional).",
+  "- problem shapes (every item also carries explain: markdown on why the answer is right and the others are not):",
+  '  judge: {"card_id":"...","type":"judge","grade_mode":"exact","front":{"scenario":"...","options":["4 options"]},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"accepted":["<exact text of the correct option>"]},"explain":"..."}',
+  '  cloze: {"card_id":"...","type":"cloze","grade_mode":"cloze","front":{"text":"... {{0}} ..."},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"blanks":[["accepted","variants"]]},"explain":"..."}',
+  '  short answer: {"card_id":"...","type":"func","grade_mode":"exact","front":{"prompt":"..."},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"accepted":["variants"]},"explain":"..."}',
+  "- card_id: lowercase letters, digits and hyphens, starting with the concept_id.",
+].join("\n");
+
+export async function generateConcept(session: AiSession, params: { area: string; concept_id: string; title: string; scope?: string }, author?: ConceptAuthor): Promise<{ concept: GeneratedConcept | null; response: AiResponse }> {
+  const res = author
+    ? await session.send({ prompt: JSON.stringify(params), system: `${author.system}\n\n${DOC_DIALECT}\n\n${CONCEPT_CONTRACT}`, model: author.model, effort: author.effort ?? "medium" })
+    : await session.send({ prompt: JSON.stringify(params), effort: "medium" });
   if (!res.ok) return { concept: null, response: res };
   return { concept: parseConcept(res.text), response: res };
 }
@@ -273,6 +325,7 @@ export function coerceProblem(raw: unknown): ProblemDef | null {
     front: (p["front"] ?? {}) as Record<string, unknown>,
     answer_spec: (p["answer_spec"] ?? { normalize: [] }) as AnswerSpec,
     links: p["links"] as ProblemDef["links"] | undefined,
+    ...(typeof p["explain"] === "string" && p["explain"] ? { explain: p["explain"] as string } : {}),
   };
 }
 /** The question text of a problem (prompt / text / scenario), for dedup context + labels. */
@@ -288,11 +341,11 @@ function shuffle<T>(arr: T[]): T[] {
 
 
 /** The "반드시 외워야 할 것" card: mnemonic + compact key-facts + traps. Shown atop a concept. */
-function renderMemorize(m: Memorize): HTMLElement {
+function renderMemorize(m: Memorize, title: string): HTMLElement {
   const card = el("div", "lh-cp-must");
   const head = el("div", "lh-cp-must-head");
   head.appendChild(el("span", "lh-cp-must-ico", "★"));
-  head.appendChild(el("span", "lh-cp-must-title", "반드시 외워야 할 것"));
+  head.appendChild(el("span", "lh-cp-must-title", title));
   card.appendChild(head);
   if (m.mnemonic && (m.mnemonic.code || m.mnemonic.expand)) {
     const mn = el("div", "lh-cp-must-mn");
@@ -351,12 +404,41 @@ export interface ConceptprobProps {
   courseTitle?: string;
   aiClient?: AiClient | null;   // raw AI client for the side-panel chat (null => offline, chat disabled)
   onProgress?: (record: ProgressRecord) => void;
+  // Optional instance hooks (specs/web-notebook.md N-12, N-13). Absent = the behaviour before they existed.
+  labels?: Partial<ConceptprobLabels>;
+  author?: ConceptAuthor;                 // system prompt for live concept generation (fresh session per concept)
+  conceptStore?: ConceptStore;            // persists live-generated concepts so a reload does not regenerate
+  problemStyle?: string;                  // forwarded to /problems as `style` (replaces the server default)
+  askElsewhere?: { label: string; onAsk: (text: string) => void };   // second button on a text selection
+  rewriteFront?: (s: string) => string;   // applied to every problem front before render (e.g. makeAbbrCollapser)
 }
+
+/** State collection holding live-generated concepts (N-12). One definition: the shell and quiz import it. */
+export const CONCEPT_COLLECTION = "concepts";
+
+/** Where live-generated concepts are kept between visits. */
+export interface ConceptStore {
+  load(conceptId: string): Promise<GeneratedConcept | null>;
+  save(concept: GeneratedConcept): Promise<void>;
+}
+
+export const DEFAULT_CONCEPTPROB_LABELS = {
+  pageTitle: "필기 핵심 이론",
+  pastTab: "기출",               // "" hides the past-exam tab
+  memorizeTitle: "반드시 외워야 할 것",
+  regenerate: "개념 다시 생성",
+  explain: "해설",
+  aiSetupHint: "AI 서버가 연결되지 않았습니다. ai_server를 실행하고 이 폴더에 ai.local.json(baseUrl·token)을 두면 활성화됩니다.",
+  authHint: "인증 실패입니다. ai.local.json의 token이 ai_server의 AI_SERVER_TOKEN과 일치하는지 확인하세요.",
+};
+export type ConceptprobLabels = typeof DEFAULT_CONCEPTPROB_LABELS;
 
 export function mountConceptprob(container: HTMLElement, props: ConceptprobProps): void {
   const { areas, conceptOutline, concepts: prebaked = {}, subjectKey = "demo", courseTitle = "학습 과정", onProgress } = props;
   const session: AiSession | null = props.session == null ? null : props.session instanceof AiSession ? props.session : new AiSession(props.session as AiClient);
   const aiClient: AiClient | null = props.aiClient ?? null;
+  const CL: ConceptprobLabels = { ...DEFAULT_CONCEPTPROB_LABELS, ...(props.labels ?? {}) };
+  const { author, conceptStore, problemStyle } = props;
   let currentConcept: GeneratedConcept | null = null;
 
   container.innerHTML = "";
@@ -373,7 +455,9 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   function conceptProblems(conceptId: string): ProblemDef[] {
     const baked = conceptRecord(conceptId)?.problems ?? [];
     const deleted = readDeleted(subjectKey);
-    return baked.concat(readGenerated(subjectKey, conceptId)).filter((p) => !deleted.has(p.card_id));
+    const all = baked.concat(readGenerated(subjectKey, conceptId)).filter((p) => !deleted.has(p.card_id));
+    const rw = props.rewriteFront;
+    return rw ? all.map((p) => rewriteProblem(p, rw)) : all;
   }
   // Generate `count` new problems for a concept via the server (which execution-verifies them).
   async function generateProblems(conceptId: string, count: number): Promise<{ ok: boolean; added: number; dropped: number; error?: string }> {
@@ -385,7 +469,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     const feedback = readFeedback(subjectKey, conceptId);
     const res = await aiClient.problems({
       concept: { area: rec?.area, concept_id: conceptId, title, body: rec?.body ?? "" },
-      existing, feedback, count, course_title: courseTitle,
+      existing, feedback, count, course_title: courseTitle, ...(problemStyle ? { style: problemStyle } : {}),
     });
     if (!res.ok) return { ok: false, added: 0, dropped: res.dropped ?? 0, error: res.error ?? "생성 실패" };
     const coerced = res.problems.map(coerceProblem).filter((p): p is ProblemDef => p !== null);
@@ -452,7 +536,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   // ── Main ──
   const main = el("main", "lh-cp-main");
   main.appendChild(el("div", "lh-cp-crumb", `${courseTitle} · 핵심 이론`));
-  main.appendChild(el("h1", "lh-cp-h1", "필기 핵심 이론"));
+  main.appendChild(el("h1", "lh-cp-h1", CL.pageTitle));
   main.appendChild(el("p", "lh-cp-sub", "개념을 단계적으로 익히고, 문제로 바로 확인하세요."));
   const stage = el("div", "lh-cp-stage");
   main.appendChild(stage);
@@ -472,7 +556,8 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   const vtabs = el("div", "lh-cp-vtabs");
   const navConcept = el("button", "lh-cp-vtab lh-cp-vtab--on", "개념 학습");
   const navProblems = el("button", "lh-cp-vtab", "문제 풀이");
-  const navKichul = el("button", "lh-cp-vtab", "기출");
+  const navKichul = el("button", "lh-cp-vtab", CL.pastTab);
+  if (!CL.pastTab) navKichul.style.display = "none";
   vtabs.append(navConcept, navProblems, navKichul);
   container.appendChild(vtabs);
 
@@ -562,7 +647,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
         secEl.appendChild(el("div", "lh-cp-exam-meta", `랜덤 ${chosen.length}문제`));
         if (!chosen.length) secEl.appendChild(el("div", "lh-cp-status", "이 과목에는 아직 문제가 없습니다."));
         chosen.forEach((x, i) => secEl.appendChild(renderProblem(x.p, i + 1, subjectKey, {
-          onProgress,
+          onProgress, explainLabel: CL.explain,
           // 문제풀이 화면에선 그 개념 학습 페이지를 새 창으로 연다(?c= 딥링크 -> mount가 초기 선택).
           onReview: () => { try { window.open(`${window.location.pathname}?c=${encodeURIComponent(x.seed.concept_id)}`, "_blank", "noopener"); } catch { /* popup blocked */ } },
         })));
@@ -605,7 +690,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
       sec.appendChild(el("h2", "lh-cp-exam-h", r));
       sec.appendChild(el("div", "lh-cp-exam-meta", `${items.length}문제`));
       items.forEach((x, i) => sec.appendChild(renderProblem(x.p, i + 1, subjectKey, {
-        onProgress,
+        onProgress, explainLabel: CL.explain,
         onReview: () => { try { window.open(`${window.location.pathname}?c=${encodeURIComponent(x.cid)}`, "_blank", "noopener"); } catch { /* popup blocked */ } },
       })));
       out.appendChild(sec);
@@ -669,7 +754,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   const aiMsgs = el("div", "lh-cp-ai-msgs");
   const aiHint = el("div", "lh-cp-ai-empty", aiClient
     ? "현재 개념에 대해 물어보세요. 본문을 드래그하면 그 문장이 자동으로 입력됩니다 — 질문에는 이 개념 전체가 함께 전달됩니다."
-    : "AI 서버가 연결되지 않았습니다. ai_server를 실행하고 이 폴더에 ai.local.json(baseUrl·token)을 두면 활성화됩니다.");
+    : CL.aiSetupHint);
   aiMsgs.appendChild(aiHint);
   ai.appendChild(aiMsgs);
   const aiInputRow = el("div", "lh-cp-ai-inputrow");
@@ -744,7 +829,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   }
   function friendlyError(err: string | null): string {
     const e = err ?? "알 수 없는 오류";
-    if (/401|403/.test(e)) return "인증 실패입니다. ai.local.json의 token이 ai_server의 AI_SERVER_TOKEN과 일치하는지 확인하세요.";
+    if (/401|403/.test(e)) return CL.authHint;
     if (/fetch|network|failed|refused|ECONN|Load failed/i.test(e)) return "AI 서버에 연결할 수 없습니다. ai_server(bot/ai_server.py)가 실행 중인지 확인하세요.";
     if (/50\d/.test(e)) return "AI 서버 내부 오류입니다. ai_server 로그와 claude CLI 로그인 상태를 확인하세요.";
     return "오류: " + e;
@@ -764,7 +849,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     const id = concept?.concept_id ?? "__none__";
     const entry = getChat(id);
     if (!aiClient) {
-      entry.msgs.push({ role: "assistant", text: "AI가 연결되지 않았습니다. ai_server를 실행하고 이 폴더에 ai.local.json(baseUrl·token)을 두면 활성화됩니다.", error: true });
+      entry.msgs.push({ role: "assistant", text: CL.aiSetupHint, error: true });
       persistChat(id);
       if (panelConceptId === id) renderChat(id);
       return;
@@ -981,25 +1066,51 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   const askBtn = el("button", "lh-cp-askbtn", "AI 질문");
   askBtn.style.display = "none";
   container.appendChild(askBtn);
+  // Optional second target for a selection (props.askElsewhere): hands the text to another part,
+  // e.g. a notebook that keeps the question. Offered on the concept page and the problem page.
+  const elseBtn = props.askElsewhere ? el("button", "lh-cp-askbtn lh-cp-askbtn--else", props.askElsewhere.label) : null;
+  if (elseBtn) { elseBtn.style.display = "none"; container.appendChild(elseBtn); }
   let pendingSel = "";
-  function hideAsk(): void { askBtn.style.display = "none"; pendingSel = ""; }
-  main.addEventListener("mouseup", () => {
+  function hideAsk(): void { askBtn.style.display = "none"; if (elseBtn) elseBtn.style.display = "none"; pendingSel = ""; }
+  function selectionRect(): { text: string; rect: DOMRect } | null {
     const sel = typeof window.getSelection === "function" ? window.getSelection() : null;
     const t = sel ? sel.toString().trim() : "";
-    if (!sel || sel.rangeCount === 0 || t.length < 2) { hideAsk(); return; }
+    if (!sel || sel.rangeCount === 0 || t.length < 2) return null;
     const rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (!rect || (!rect.width && !rect.height)) { hideAsk(); return; }
-    pendingSel = t;
-    askBtn.style.display = "";
-    const bw = askBtn.offsetWidth || 88;
-    const bh = askBtn.offsetHeight || 34;
-    let left = rect.left + rect.width / 2 - bw / 2;
+    if (!rect || (!rect.width && !rect.height)) return null;
+    return { text: t, rect };
+  }
+  function place(btn: HTMLElement, rect: DOMRect, dx: number): number {
+    btn.style.display = "";
+    const bw = btn.offsetWidth || 88;
+    const bh = btn.offsetHeight || 34;
+    let left = rect.left + rect.width / 2 - bw / 2 + dx;
     left = Math.max(8, Math.min(left, window.innerWidth - bw - 8));
     let top = rect.top - bh - 8;
     if (top < 8) top = rect.bottom + 8;
-    askBtn.style.left = left + "px";
-    askBtn.style.top = top + "px";
+    btn.style.left = left + "px";
+    btn.style.top = top + "px";
+    return bw;
+  }
+  main.addEventListener("mouseup", () => {
+    const s = selectionRect();
+    if (!s) { hideAsk(); return; }
+    pendingSel = s.text;
+    const shift = elseBtn ? -((elseBtn.offsetWidth || 110) + 6) / 2 : 0;
+    const bw = place(askBtn, s.rect, shift);
+    if (elseBtn) place(elseBtn, s.rect, shift + bw + 6);
   });
+  probMain.addEventListener("mouseup", () => {
+    if (!elseBtn) return;
+    const s = selectionRect();
+    if (!s) { hideAsk(); return; }
+    pendingSel = s.text;
+    place(elseBtn, s.rect, 0);
+  });
+  if (elseBtn) {
+    elseBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    elseBtn.addEventListener("click", () => { const t = pendingSel; hideAsk(); if (t) props.askElsewhere!.onAsk(t); });
+  }
   askBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the text selection
   askBtn.addEventListener("click", () => {
     if (!pendingSel) return;
@@ -1008,7 +1119,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     hideAsk();
     if (aiClient) aiInput.focus();
   });
-  document.addEventListener("mousedown", (e) => { if (e.target !== askBtn) hideAsk(); if (e.target !== subAskBtn) hideSubAsk(); });
+  document.addEventListener("mousedown", (e) => { if (e.target !== askBtn && e.target !== elseBtn) hideAsk(); if (e.target !== subAskBtn) hideSubAsk(); });
   window.addEventListener("scroll", () => { hideAsk(); hideSubAsk(); }, true);
 
   function refreshProgress(): void {
@@ -1097,14 +1208,30 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   refreshProgress();
 
   // ── Select + render a concept ──
-  async function loadConcept(area: AreaDef, seed: ConceptSeed): Promise<GeneratedConcept | null> {
-    if (cache.has(seed.concept_id)) return cache.get(seed.concept_id)!;
-    if (prebaked[seed.concept_id]) { cache.set(seed.concept_id, prebaked[seed.concept_id]); return prebaked[seed.concept_id]; }
-    if (!session) return null;
+  // With an author prompt each concept gets its own session, so one concept's reading never rides in
+  // the context of the next; without one, the shared session keeps its original behaviour (N-13).
+  const genSession = (): AiSession | null => (author && aiClient ? new AiSession(aiClient) : session);
+  async function loadConcept(area: AreaDef, seed: ConceptSeed, regenerate = false): Promise<GeneratedConcept | null> {
+    if (!regenerate) {
+      if (cache.has(seed.concept_id)) return cache.get(seed.concept_id)!;
+      if (prebaked[seed.concept_id]) { cache.set(seed.concept_id, prebaked[seed.concept_id]); return prebaked[seed.concept_id]; }
+      if (conceptStore) {
+        const stored = await conceptStore.load(seed.concept_id).catch(() => null);
+        if (stored) { cache.set(seed.concept_id, stored); return stored; }
+      }
+    }
+    const gen = genSession();
+    if (!gen) return null;
     stage.innerHTML = "";
     stage.appendChild(el("div", "lh-cp-status", "개념 불러오는 중…"));
-    const { concept } = await generateConcept(session, { area: area.key, concept_id: seed.concept_id, title: seed.title });
-    if (concept) cache.set(seed.concept_id, concept);
+    const { concept } = await generateConcept(gen, { area: area.key, concept_id: seed.concept_id, title: seed.title }, author);
+    if (concept) {
+      // The outline owns the ids; a model that renames the concept must not orphan its record.
+      concept.concept_id = seed.concept_id;
+      concept.area = area.key;
+      cache.set(seed.concept_id, concept);
+      if (conceptStore) await conceptStore.save(concept).catch(() => undefined);
+    }
     return concept;
   }
 
@@ -1152,6 +1279,20 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     bm.addEventListener("click", () => { writeDone(subjectKey, bmKey, !readDone(subjectKey, bmKey)); setBm(); });
     const memoBtn = el("button", "lh-cp-act", "메모");
     actions.append(bm, memoBtn);
+    // Regenerate: only for a live concept (a pre-baked one is reviewed content, not a draft).
+    if (!prebaked[concept.concept_id] && genSession()) {
+      const regen = el("button", "lh-cp-act", CL.regenerate);
+      regen.addEventListener("click", async () => {
+        const hseed2 = allSeeds.find((s) => s.concept_id === concept.concept_id);
+        if (!hseed2) return;
+        regen.disabled = true;
+        const fresh = await loadConcept(area, hseed2, true);
+        stage.innerHTML = "";
+        if (fresh) renderConcept(area, fresh);
+        else stage.appendChild(el("div", "lh-cp-status", "이 개념은 아직 준비되지 않았습니다."));
+      });
+      actions.appendChild(regen);
+    }
     titleRow.appendChild(actions);
     sec.appendChild(titleRow);
 
@@ -1159,7 +1300,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     if (summary) sec.appendChild(el("p", "lh-cp-summary", summary));
 
     // 반드시 외워야 할 것 (top card — added above the concept explanation, not replacing it)
-    if (concept.memorize) sec.appendChild(renderMemorize(concept.memorize));
+    if (concept.memorize) sec.appendChild(renderMemorize(concept.memorize, CL.memorizeTitle));
 
     // memo (toggled)
     const memoBox = el("div", "lh-cp-memo");
@@ -1231,7 +1372,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
       const probs = conceptProblems(concept.concept_id);
       if (!probs.length) { list.appendChild(el("div", "lh-cp-status", "아직 문제가 없습니다. 아래 버튼으로 생성해 보세요.")); return; }
       probs.forEach((p, i) => list.appendChild(renderProblem(p, i + 1, subjectKey, {
-        onProgress,
+        onProgress, explainLabel: CL.explain,
         onDelete: (reason) => { markDeleted(subjectKey, p.card_id); addFeedback(subjectKey, concept.concept_id, reason); renderList(); },
         onReview: (card) => reviewConcept(reviewAnchor, card),
       })));
@@ -1288,6 +1429,7 @@ interface ProblemCtx {
   onProgress?: (r: ProgressRecord) => void;
   onDelete?: (reason: string) => void;   // when provided, the card shows a 삭제 control
   onReview?: (card: HTMLElement) => void; // "개념 다시 보기" — jump to the concept; card is passed so a "문제로 돌아가기" affordance can return to it
+  explainLabel?: string;
 }
 function renderProblem(problem: ProblemDef, num: number, subjectKey: string, ctx?: ProblemCtx): HTMLElement {
   const onProgress = ctx?.onProgress;
@@ -1428,6 +1570,12 @@ function renderProblem(problem: ProblemDef, num: number, subjectKey: string, ctx
   revealBody.style.display = "none";
   revealBody.appendChild(el("div", "lh-cp-reveal-k", "정답"));
   revealBody.appendChild(el("div", "lh-cp-reveal-ans", answerText(problem)));
+  if (problem.explain) {
+    revealBody.appendChild(el("div", "lh-cp-reveal-k", ctx?.explainLabel ?? DEFAULT_CONCEPTPROB_LABELS.explain));
+    const ex = el("div", "lh-cp-reveal-explain");
+    ex.appendChild(renderAiBody(problem.explain));
+    revealBody.appendChild(ex);
+  }
   if (ctx?.onReview) {
     const b = el("button", "lh-cp-reveal-link", "개념 다시 보기");
     b.addEventListener("click", () => ctx.onReview!(card));

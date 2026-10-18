@@ -36,6 +36,33 @@
       "deps": ["src/doc"],
       "ai": true,
       "constraints": ["subject-agnostic", "secrets-gated", "token0-grading", "binary"]
+    },
+    {
+      "id": "notebook",
+      "dir": "parts/notebook",
+      "entry": "parts/notebook/notebook.ts",
+      "what": "Ask anything, keep every thread, collect terms into a dictionary, Leitner review, and edit the curriculum outline conceptprob reads.",
+      "deps": ["src/doc", "src/storage"],
+      "ai": true,
+      "constraints": ["subject-agnostic", "secrets-gated", "state-backed", "session-resume"]
+    },
+    {
+      "id": "compose",
+      "dir": "parts/compose",
+      "entry": "parts/compose/compose.ts",
+      "what": "Writing practice: generated tasks by mode, binary AI grading with corrections and a local word diff, revise-and-resubmit in one session, a revise queue, history with error stats; expressions go to the notebook dictionary.",
+      "deps": ["src/doc", "src/storage", "src/ui", "parts/notebook"],
+      "ai": true,
+      "constraints": ["subject-agnostic", "secrets-gated", "state-backed", "binary", "session-resume"]
+    },
+    {
+      "id": "quiz",
+      "dir": "parts/quiz",
+      "entry": "parts/quiz/quiz.ts",
+      "what": "Problem drilling over concept + generated problems: sets by unit/source/count, practice and timed exam, per-problem language toggle (translated once, stored), flags, deletion feedback, results, generation via /problems.",
+      "deps": ["src/doc", "src/storage", "src/ui", "parts/conceptprob"],
+      "ai": true,
+      "constraints": ["subject-agnostic", "secrets-gated", "state-backed", "token0-grading", "binary"]
     }
   ]
 }
