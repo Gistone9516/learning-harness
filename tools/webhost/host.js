@@ -39,6 +39,18 @@
     return;
   }
 
+  // A loading line beside #app until the part puts anything into it: a remote page may read state for
+  // seconds before its first paint. Kept outside #app so no part has to know to clear it.
+  var loading = document.createElement("div");
+  loading.className = "lh-host-msg lh-host-loading";
+  loading.textContent = "불러오는 중…";
+  app.parentNode.insertBefore(loading, app);
+  function doneLoading() { if (loading.parentNode) loading.parentNode.removeChild(loading); }
+  if (window.MutationObserver) {
+    new MutationObserver(function (_, obs) { if (app.childNodes.length) { doneLoading(); obs.disconnect(); } })
+      .observe(app, { childList: true });
+  }
+
   getJson("content/app.json")
     .then(function (cfg) {
       var views = Array.isArray(cfg.views) ? cfg.views : [];

@@ -173,6 +173,10 @@ type ProgressRecord = {
 };
 ```
 - Writes are idempotent per `item_id`; aggregates (per area/concept mastery) are derived, not stored redundantly.
+- **Independent record reads are issued together, never one after another.** Over a tunnel each read is one round
+  trip (about 0.4 s measured 2026-10-18), so a mount that awaited 29 acronym records and then each concept and
+  problem set in turn left the page blank for 15 to 30 s, long enough to read as broken. Read the index, then fetch
+  the needed records concurrently (`Promise.all`).
 
 ### 5.1 Shell flows and the history dashboard
 

@@ -18,18 +18,21 @@ export interface BankParts {
 }
 
 export async function loadBankParts(storage: StoragePort, outlineDoc: string): Promise<BankParts> {
-  const doc = (await storage.getDoc<Outline>(outlineDoc)) ?? { areas: [], conceptOutline: {} };
-  const outline: Outline = { areas: doc.areas ?? [], conceptOutline: doc.conceptOutline ?? {} };
-  let log = (await storage.getDoc<QuizLog>(LOG_DOC)) ?? { items: {} };
-  if (!log.items) log = { items: {} };
-  const conceptIds = new Set((await storage.list(CONCEPT_COLLECTION)).map((e) => e.id));
-  const setIds = new Set((await storage.list(PROBLEMS)).map((e) => e.id));
+  const [doc, rawLog, conceptIndex, setIndex] = await Promise.all([
+    storage.getDoc<Outline>(outlineDoc), storage.getDoc<QuizLog>(LOG_DOC), storage.list(CONCEPT_COLLECTION), storage.list(PROBLEMS),
+  ]);
+  const outline: Outline = { areas: doc?.areas ?? [], conceptOutline: doc?.conceptOutline ?? {} };
+  const log: QuizLog = rawLog && rawLog.items ? rawLog : { items: {} };
+  const conceptIds = new Set(conceptIndex.map((e) => e.id));
+  const setIds = new Set(setIndex.map((e) => e.id));
   const concepts: BankParts["concepts"] = {};
   const sets: BankParts["sets"] = {};
-  for (const seed of Object.values(outline.conceptOutline).flat()) {
-    if (conceptIds.has(seed.concept_id)) concepts[seed.concept_id] = (await storage.get<GeneratedConcept>(CONCEPT_COLLECTION, seed.concept_id))?.data ?? null;
-    if (setIds.has(seed.concept_id)) sets[seed.concept_id] = (await storage.get<ProblemSet>(PROBLEMS, seed.concept_id))?.data ?? null;
-  }
+  // Every record at once (web-contract §5): one round trip each over a tunnel, so a sequential loop is the page's load time.
+  const ids = Object.values(outline.conceptOutline).flat().map((s) => s.concept_id);
+  await Promise.all(ids.flatMap((id) => [
+    conceptIds.has(id) ? storage.get<GeneratedConcept>(CONCEPT_COLLECTION, id).then((r) => { concepts[id] = r?.data ?? null; }) : null,
+    setIds.has(id) ? storage.get<ProblemSet>(PROBLEMS, id).then((r) => { sets[id] = r?.data ?? null; }) : null,
+  ]));
   return { outline, log, concepts, sets };
 }
 

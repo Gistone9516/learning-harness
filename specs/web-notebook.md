@@ -125,4 +125,5 @@ notice opened a vocabulary explanation). `AI_CLI_SETTING_SOURCES=all` restores t
 - `content/app.json`: `{ title, namespace, model?, contentLinks?, views: [{ hash, label, part, data, files?: {key: file} }] }`.
   `model` is the default AI model when `local.config.js` names none (always the case behind the gateway).
   The host fetches each `files` entry from `content/` into `data[key]` (a `.md` or `.txt` file as text, anything
-  else as JSON), sets `LH_CONFIG`, then loads the bundle.
+  else as JSON), sets `LH_CONFIG`, then loads the bundle. Until a part replaces it, `#app` shows a loading line:
+  a remote page can spend seconds reading state before its first paint, and a blank page reads as broken.

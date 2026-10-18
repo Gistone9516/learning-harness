@@ -24,6 +24,8 @@
       })();
     </script>
     <link rel="stylesheet" href="kit/assets/index.css" />
+    <!-- host.js loads the bundle only after content/app.json; fetching it now overlaps the two round trips. -->
+    <link rel="modulepreload" href="kit/assets/index.js" />
     <link rel="stylesheet" href="host.css" />
   </head>
   <body>

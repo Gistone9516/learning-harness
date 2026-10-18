@@ -22,6 +22,7 @@ body { margin: 0; background: var(--lh-bg); }
 }
 .lh-host-theme:hover { background: var(--lh-surface-sunk); color: var(--lh-ink); }
 .lh-host-msg { padding: 80px 24px; max-width: 640px; margin: 0 auto; color: var(--lh-ink); font: 15px/1.6 var(--lh-font-ui); }
+.lh-host-loading { color: var(--lh-ink-faint); }
 /* N-21: wide screens keep the pill (the panel lays out as if it were not there); 860px and below show one
    burger button and the panel as a popup under it. */
 .lh-host-burger, .lh-host-theme-label, .lh-host-tabs { display: none; }

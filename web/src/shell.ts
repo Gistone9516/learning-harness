@@ -269,8 +269,10 @@ async function abbreviationCollapser(data: Record<string, unknown>, storage: Sto
   for (const t of seedTerms) if (t.type === "acronym" && t.headword && t.expansion) pairs.push({ abbr: t.headword, expansion: t.expansion });
   if (storage) {
     const acronyms = (await storage.list(NOTEBOOK_TERMS)).filter((e) => e.summary["type"] === "acronym");
-    for (const e of acronyms) {
-      const d = (await storage.get<TermData>(NOTEBOOK_TERMS, e.id))?.data;
+    // Together, not one by one: over a tunnel each read is a round trip (web-contract §5).
+    const records = await Promise.all(acronyms.map((e) => storage.get<TermData>(NOTEBOOK_TERMS, e.id)));
+    for (const r of records) {
+      const d = r?.data;
       if (d?.expansion) pairs.push({ abbr: d.headword, expansion: d.expansion });
     }
   }
