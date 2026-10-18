@@ -7,6 +7,9 @@
   var app = document.getElementById("app");
   var nav = document.getElementById("lh-host-nav");
   var local = window.LH_LOCAL || {};
+  // Behind the gateway the page arrives with app.json, its content files and a state snapshot inlined
+  // (specs/web-gateway.md GW-18); without it (the local host) everything is fetched as before.
+  var boot = window.LH_BOOT || null;
 
   function fail(msg) {
     app.className = "lh-host-msg";
@@ -26,6 +29,8 @@
   }
   // A content file is JSON unless it is Markdown or plain text, which a part reads as a string.
   function getContent(path) {
+    var name = path.replace(/^content\//, "");
+    if (boot && boot.files && Object.prototype.hasOwnProperty.call(boot.files, name)) return Promise.resolve(boot.files[name]);
     if (!/\.(md|txt)$/i.test(path)) return getJson(path);
     return fetch(path, { cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error(path + " HTTP " + r.status);
@@ -51,7 +56,7 @@
       .observe(app, { childList: true });
   }
 
-  getJson("content/app.json")
+  (boot && boot.app ? Promise.resolve(boot.app) : getJson("content/app.json"))
     .then(function (cfg) {
       var views = Array.isArray(cfg.views) ? cfg.views : [];
       if (!views.length) throw new Error("content/app.json 에 views 가 없습니다.");
@@ -207,11 +212,11 @@
           data: data,
           // The default model: the local config's, else app.json's (the gateway's config names none).
           ai: { baseUrl: base, token: token, model: local.model || cfg.model || undefined },
-          state: { baseUrl: base, token: token, namespace: ns },
+          state: { baseUrl: base, token: token, namespace: ns, snapshot: (boot && boot.state) || null },
         };
         var s = document.createElement("script");
         s.type = "module";
-        s.src = "kit/assets/index.js";
+        s.src = (boot && boot.bundle) || "kit/assets/index.js";
         document.body.appendChild(s);
       });
     })

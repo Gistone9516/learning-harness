@@ -14,7 +14,7 @@ import { mountNotebook, notebookPrefillKey, type NotebookProps } from "../parts/
 import { mountRoadmap, type RoadmapProps } from "../parts/roadmap/roadmap";
 import { quizPreselect } from "../parts/quiz/bankload";
 import { createAiClient, AiSession, type AiClient, type AiClientConfig } from "./ai/client";
-import { createApiStorage } from "./storage/api";
+import { createApiStorage, type StateSnapshot } from "./storage/api";
 import { createLocalStorage } from "./storage/local";
 import { createBufferedStorage } from "./storage/buffered";
 import { makeRecord, type StoragePort } from "./storage/port";
@@ -30,6 +30,7 @@ export interface StateConfig {
   baseUrl: string;          // state API origin (same server as ai_server)
   token: string;            // AI_SERVER_TOKEN, obtained out-of-band; never bundled
   namespace: string;        // localStorage namespace for the offline buffer
+  snapshot?: StateSnapshot | null;   // docs and indexes taken when the page was served (web-contract §5)
 }
 
 export interface AppConfig {
@@ -44,7 +45,7 @@ export interface AppConfig {
  * state config an instance keeps working browser-only.
  */
 function buildStorage(state: StateConfig): StoragePort {
-  const primary = createApiStorage({ baseUrl: state.baseUrl, token: state.token });
+  const primary = createApiStorage({ baseUrl: state.baseUrl, token: state.token, snapshot: state.snapshot });
   const buffer = createLocalStorage({ namespace: state.namespace });
   return createBufferedStorage({ primary, buffer });
 }

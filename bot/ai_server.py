@@ -128,6 +128,26 @@ def _json_bytes(payload) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
+BATCH_MAX = 200
+
+
+def _batch_read(store: StateStore, read) -> dict | None:
+    """One read of a `/state/_batch` body; anything absent or invalid is None, never an error for the whole batch."""
+    try:
+        if not isinstance(read, dict):
+            return None
+        if isinstance(read.get("doc"), str):
+            return store.read_doc(read["doc"])
+        if isinstance(read.get("list"), str):
+            return store.read_index(read["list"])
+        target = read.get("get")
+        if isinstance(target, list) and len(target) == 2 and all(isinstance(x, str) for x in target):
+            return store.read_record(target[0], target[1])
+    except StateError:
+        return None
+    return None
+
+
 async def handle_state(method: str, path: str, payload, store: StateStore | None):
     """Route a /state/... request. Returns (status, body_object).
 
@@ -150,6 +170,19 @@ async def handle_state(method: str, path: str, payload, store: StateStore | None
         return 404, {"ok": False, "error": "not found"}
 
     try:
+        # Whole-state reads that save round trips (web-contract §2.2). Collection names cannot start with "_".
+        if rest[0] == "_snapshot" and len(rest) == 1:
+            if method != "GET":
+                return 405, {"ok": False, "error": "method not allowed"}
+            return 200, {"ok": True, **store.snapshot()}
+        if rest[0] == "_batch" and len(rest) == 1:
+            if method != "POST":
+                return 405, {"ok": False, "error": "method not allowed"}
+            reads = payload.get("reads") if isinstance(payload, dict) else None
+            if not isinstance(reads, list) or len(reads) > BATCH_MAX:
+                return 400, {"ok": False, "error": f"reads must be a list of at most {BATCH_MAX}"}
+            return 200, {"ok": True, "results": [_batch_read(store, r) for r in reads]}
+
         if rest[0] == "doc":
             if len(rest) != 2:
                 return 404, {"ok": False, "error": "not found"}

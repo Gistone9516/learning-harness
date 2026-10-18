@@ -53,6 +53,14 @@ class Upstream(http.server.BaseHTTPRequestHandler):
         self.wfile.write(out)
 
     def _route(self):
+        if self.path == "/state/_snapshot":
+            out = json.dumps({"ok": True, "docs": {"outline": {"x": "</script><b>" + chr(0x2028)}}, "indexes": {}}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
         if self.path.startswith("/ai?slow"):
             return self._slow()
         return self._echo()
@@ -80,8 +88,10 @@ DROPPED = threading.Event()
 def _subject(root: Path, slug: str, ai_port: int, title: str) -> Path:
     d = root / slug
     (d / "content").mkdir(parents=True)
-    (d / "content" / "app.json").write_text(json.dumps({"title": title, "views": [],
-                                                        "contentLinks": {"plan.md": "../PLAN.md"}}), encoding="utf-8")
+    (d / "content" / "app.json").write_text(json.dumps({"title": title, "contentLinks": {"plan.md": "../PLAN.md"},
+                                                        "views": [{"hash": "v", "part": "quiz",
+                                                                   "files": {"*": "data.json", "plan": "plan.md"}}]}),
+                                            encoding="utf-8")
     (d / "content" / "data.json").write_text('{"x": 1}', encoding="utf-8")
     (d / "PLAN.md").write_text("# plan", encoding="utf-8")
     (d / "secret.txt").write_text("nope", encoding="utf-8")
@@ -101,7 +111,8 @@ def gw(tmp_path):
     s2 = _subject(tmp_path, "beta", dead_port, "Beta")
     dist = tmp_path / "dist" / "assets"
     dist.mkdir(parents=True)
-    (dist / "index.js").write_text("// bundle", encoding="utf-8")
+    (dist / "index.js").write_text("// bundle" + chr(10) + "x" * 5000, encoding="utf-8")
+    (dist / "index.css").write_text("body{}", encoding="utf-8")
     raw = {"basePath": "/study", "port": 1, "title": "T",
            "subjects": [{"slug": "alpha", "dir": str(s1)}, {"slug": "beta", "dir": str(s2)}],
            "auth": {"user": "me", "passwordHash": auth.hash_password(PASSWORD), "secret": auth.new_secret(),
@@ -258,7 +269,7 @@ def test_upstream_down_502(gw):
 def test_prefix_serves_host_tree(gw):
     h = signed(gw)
     res, out = req(gw, "GET", "/study/alpha/", headers=h)
-    assert res.status == 200 and b'src="host.js"' in out
+    assert res.status == 200 and b'src="host.js?v=' in out
     res, out = req(gw, "GET", "/study/alpha/content/data.json", headers=h)
     assert res.status == 200 and json.loads(out) == {"x": 1}
     res, out = req(gw, "GET", "/study/alpha/kit/assets/index.js", headers=h)
@@ -334,7 +345,7 @@ def test_config_validation(tmp_path):
 # GW-1
 def test_gateway_binds_loopback_only():
     src = (TOOLS / "gateway" / "gateway.py").read_text(encoding="utf-8")
-    assert 'ThreadingHTTPServer(("127.0.0.1", cfg.port)' in src
+    assert 'ExclusiveServer(("127.0.0.1", cfg.port)' in src
 
 
 # hostfiles shared with serve_host (§4)
@@ -448,4 +459,98 @@ def test_reserved_slugs_refused(tmp_path):
     d = _subject(tmp_path, "login", 9300, "L")
     with pytest.raises(config.ConfigError):
         config.parse({"basePath": "/study", "port": 8430, "subjects": [{"slug": "login", "dir": str(d)}]}, tmp_path / "c.json")
+
+
+# GW-18
+def _boot(html: str) -> dict:
+    line = [x for x in html.splitlines() if x.startswith("window.LH_BOOT = ")][0]
+    return json.loads(line[len("window.LH_BOOT = "):].rstrip(";"))
+
+
+def test_boot_inline(gw):
+    res, out = req(gw, "GET", "/study/alpha/", headers=signed(gw))
+    html = out.decode("utf-8")
+    assert res.status == 200 and TOKEN not in html and '<script src="local.config.js">' not in html
+    assert 'window.LH_LOCAL = {"serverUrl": "/study/alpha/api", "gated": true};' in html
+    b = _boot(html)
+    assert b["app"]["title"] == "Alpha"
+    assert b["files"] == {"data.json": {"x": 1}, "plan.md": "# plan"}
+    assert b["bundle"].startswith("kit/assets/index.js?v=") and f'href="{b["bundle"]}"' in html
+
+
+def test_boot_escapes_script_close(gw):
+    res, out = req(gw, "GET", "/study/alpha/", headers=signed(gw))
+    html = out.decode("utf-8")
+    block = html.split("window.LH_BOOT = ", 1)[1].split("</script>", 1)[0]
+    assert "<b>" not in block and chr(0x2028) not in block
+    assert _boot(html)["state"]["docs"]["outline"]["x"] == "</script><b>" + chr(0x2028)
+
+
+def test_boot_without_snapshot(gw):
+    res, out = req(gw, "GET", "/study/beta/", headers=signed(gw))   # beta's ai_server is down
+    b = _boot(out.decode("utf-8"))
+    assert res.status == 200 and "state" not in b and b["app"]["title"] == "Beta"
+
+
+# GW-17
+def test_versioned_assets_cached_and_stale_not(gw):
+    h = signed(gw)
+    res, out = req(gw, "GET", "/study/alpha/", headers=h)
+    v = out.decode("utf-8").split('src="host.js?v=', 1)[1].split('"', 1)[0]
+    res, _ = req(gw, "GET", f"/study/alpha/host.js?v={v}", headers=h)
+    assert res.status == 200 and res.getheader("Cache-Control") == "private, max-age=31536000, immutable"
+    for q in ("?v=000000000000", ""):
+        res, _ = req(gw, "GET", f"/study/alpha/host.js{q}", headers=h)
+        assert res.getheader("Cache-Control") == "no-store"
+
+
+def test_gzip_when_accepted(gw):
+    import gzip as _gzip
+    h = signed(gw)
+    res, out = req(gw, "GET", "/study/alpha/kit/assets/index.js", headers={**h, "Accept-Encoding": "gzip, br"})
+    assert res.getheader("Content-Encoding") == "gzip" and _gzip.decompress(out).startswith(b"// bundle")
+    assert res.getheader("Vary") == "Accept-Encoding"
+    res, out = req(gw, "GET", "/study/alpha/kit/assets/index.js", headers=h)
+    assert res.getheader("Content-Encoding") is None and out.startswith(b"// bundle")
+    res, out = req(gw, "GET", "/study/alpha/kit/assets/index.css", headers={**h, "Accept-Encoding": "gzip"})
+    assert res.getheader("Content-Encoding") is None   # under 1 KB stays plain
+
+
+# GW-1: a second gateway cannot share the port
+def test_second_bind_refused():
+    import gateway as gw_main
+    port = _free_port()
+    first = gw_main.ExclusiveServer(("127.0.0.1", port), http.server.BaseHTTPRequestHandler)
+    try:
+        with pytest.raises(OSError):
+            gw_main.ExclusiveServer(("127.0.0.1", port), http.server.BaseHTTPRequestHandler)
+    finally:
+        first.server_close()
+
+
+# GW-6: closing the job ends what is in it, however the gateway goes
+@pytest.mark.skipif(os.name != "nt", reason="job objects are Windows only")
+def test_job_close_kills_children():
+    import subprocess
+    from children import KillOnCloseJob
+    job = KillOnCloseJob()
+    assert job.handle
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert job.add(proc.pid)
+        assert proc.poll() is None
+        job.close()
+        proc.wait(timeout=10)
+        assert proc.returncode is not None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+
+def test_extra_path_validated(tmp_path):
+    a = _subject(tmp_path, "a", 9400, "A")
+    ok = {"basePath": "/study", "port": 8430, "subjects": [{"slug": "a", "dir": str(a)}], "extraPath": ["C:/x"]}
+    assert config.parse(ok, tmp_path / "c.json").extra_path == ("C:/x",)
+    with pytest.raises(config.ConfigError):
+        config.parse({**ok, "extraPath": "C:/x"}, tmp_path / "c.json")
 

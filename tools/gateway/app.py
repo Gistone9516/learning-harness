@@ -5,6 +5,7 @@ Nothing here names a subject: slugs, folders, base path and title come from the 
 """
 from __future__ import annotations
 
+import gzip
 import http.client
 import http.server
 import json
@@ -18,6 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import auth
+import bootpage as boot
 import pages
 from config import Config, Subject
 
@@ -118,11 +120,24 @@ def make_handler(cfg: Config, kit_dist: Path, throttle: auth.Throttle):
             forwarded = self.headers.get("CF-Connecting-IP")
             return forwarded.strip() if peer in _LOOPBACK and forwarded else peer
 
-        def _send(self, status: int, body: bytes, ctype: str, headers: dict[str, str] | None = None) -> None:
+        def _accepts_gzip(self) -> bool:
+            return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
+        def _send(self, status: int, body: bytes, ctype: str, headers: dict[str, str] | None = None,
+                  cache: str = "no-store", gzipped: bytes | None = None) -> None:
+            # GW-17: text over 1 KB goes compressed when the browser (or the tunnel in front of us) accepts it.
+            encoded = False
+            if self._accepts_gzip() and len(body) > boot.GZIP_MIN and boot.compressible(ctype):
+                body = gzipped if gzipped is not None else gzip.compress(body, 6)
+                encoded = True
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache)
+            if encoded:
+                self.send_header("Content-Encoding", "gzip")
+            if boot.compressible(ctype):
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("X-Content-Type-Options", "nosniff")
             for k, v in (headers or {}).items():
                 self.send_header(k, v)
@@ -223,10 +238,17 @@ def make_handler(cfg: Config, kit_dist: Path, throttle: auth.Throttle):
                 return self._send(200, runtime_config(cfg, subject).encode("utf-8"), "text/javascript; charset=utf-8")
             if self.command not in ("GET", "HEAD"):
                 return self._json(405, {"ok": False, "error": "method not allowed"})
+            if sub in ("", "index.html"):   # GW-18: the page with its boot block
+                return self._send(200, boot.page(cfg, subject, kit_dist).encode("utf-8"), "text/html; charset=utf-8")
             target = hostfiles.resolve(subject.dir, kit_dist, sub)
             if target is None or not target.is_file():
                 return self._json(404, {"ok": False, "error": "not found"})
-            return self._send(200, target.read_bytes(), content_type(target))
+            # GW-17: a request naming the file's current version may be kept by the browser, never by a shared cache.
+            wanted = (parse_qs(parts.query).get("v") or [""])[0]
+            cache = "private, max-age=31536000, immutable" if wanted and wanted == boot.version(target) else "no-store"
+            ctype = content_type(target)
+            gz = boot.gzip_file(target) if self._accepts_gzip() and boot.compressible(ctype) and target.stat().st_size > boot.GZIP_MIN else None
+            return self._send(200, target.read_bytes(), ctype, cache=cache, gzipped=gz)
 
         def _login(self, query: str) -> None:
             nxt = safe_next(base, (parse_qs(query).get("next") or [None])[0])

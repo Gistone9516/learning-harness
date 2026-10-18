@@ -275,6 +275,19 @@ class StateStore:
                 issues.append({"issue": "stale_entry", "id": rid})
         return issues
 
+    def docs(self) -> list[str]:
+        """Names of the docs under the root (one `<name>.json` file each)."""
+        if not self.root.is_dir():
+            return []
+        return sorted(p.stem for p in self.root.glob("*.json") if NAME_RE.match(p.stem))
+
+    def snapshot(self) -> dict:
+        """Every doc and every collection index, no record bodies (web-contract §2.2 `/state/_snapshot`)."""
+        return {
+            "docs": {name: self.read_doc(name) for name in self.docs()},
+            "indexes": {coll: self.read_index(coll) for coll in self.collections()},
+        }
+
     def collections(self) -> list[str]:
         if not self.root.is_dir():
             return []

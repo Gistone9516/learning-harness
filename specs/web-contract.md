@@ -121,8 +121,10 @@ type IndexEntry = Omit<StateRecord, "data" | "schema_version">;
 | GET / PUT / DELETE | `/state/<coll>/<id>` | `{ok, record}` / `{ok, entry}` / `{ok, deleted}` |
 | GET | `/state/<coll>/_verify` | `{ok, issues}` — index/record mismatches, no mutation |
 | POST | `/state/<coll>/_rebuild` | `{ok, count}` — regenerate the index from the files |
+| GET | `/state/_snapshot` | `{ok, docs: {<name>: doc}, indexes: {<coll>: index}}` — every doc and every collection index, no record bodies |
+| POST | `/state/_batch` | body `{reads: [{doc: name} or {list: coll} or {get: [coll, id]}]}` (at most 200) → `{ok, results: [...]}`, one result per read in order: the doc, the index, the record, or `null` when absent or invalid |
 
-- **Names** match `^[a-z0-9][a-z0-9-]{0,63}$`. The pattern excludes dots, slashes and underscores, which rules out path traversal and keeps `_verify`/`_rebuild` from ever shadowing a record id. Violations are `400` at the boundary.
+- **Names** match `^[a-z0-9][a-z0-9-]{0,63}$`. The pattern excludes dots, slashes and underscores, which rules out path traversal and keeps `_verify`/`_rebuild` from ever shadowing a record id, and `_snapshot`/`_batch` from shadowing a collection. Violations are `400` at the boundary.
 - **Durability** — records and the index are written to a temp file and `os.replace`d, so a crash never leaves a truncated file as the source of truth. The record is written before its index entry; `_rebuild` recovers the entry if the process dies between the two.
 - **Concurrency** — one lock per collection serialises a record write with its index update.
 - Subject-agnostic: collection names, record kinds and summary fields are chosen by the consuming instance. Reference implementation `bot/state_store.py` (pure file logic) + `ai_server.handle_state` (routing and locking).
@@ -177,6 +179,14 @@ type ProgressRecord = {
   trip (about 0.4 s measured 2026-10-18), so a mount that awaited 29 acronym records and then each concept and
   problem set in turn left the page blank for 15 to 30 s, long enough to read as broken. Read the index, then fetch
   the needed records concurrently (`Promise.all`).
+- **The state API adapter coalesces reads.** Reads issued within one task (a `setTimeout(0)` window) go out as one
+  `POST /state/_batch`; a lone read stays a plain request. Writes are never batched. A concurrent `Promise.all` of
+  records is then one round trip, not one per record.
+- **A boot snapshot answers the first reads.** A page may hand the adapter a `/state/_snapshot` taken when the page
+  was served (`LH_CONFIG.state.snapshot`, `web-gateway.md` GW-18). Reads of a doc or a collection index come from it,
+  and a name absent from it means absent, until a write to that doc or collection drops the entry, after which reads
+  go to the server. Record bodies are never in it. This removes the reads every mount starts with (outline, log,
+  indexes), which otherwise each cost a round trip before anything can be fetched.
 
 ### 5.1 Shell flows and the history dashboard
 

@@ -125,7 +125,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 │   ├ web-compose.md           compose part: writing practice with AI grading incl. a minor-slip pass (W-1..W-14)
 │   ├ web-quiz.md              quiz part: problem drilling, language toggle, exam mode (Q-1..Q-12)
 │   ├ web-roadmap.md           roadmap part: curriculum from a planning document, derived study status, build hints (RM-1..RM-12)
-│   ├ web-gateway.md           gateway: many web subjects under one prefix, login, token kept server-side (GW-1..GW-16)
+│   ├ web-gateway.md           gateway: many web subjects under one prefix, login, token kept server-side (GW-1..GW-18)
 │   └ launch-skill.md          global skill and install
 ├ engine/                      pure Python core (zero discord, zero file I/O): scoring, leitner, selection, dashboard, migrate
 ├ bot/                         discord.py shell: boot, session, dispatch, handlers, persist, ai, commands
@@ -146,7 +146,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 ├ skills/                      launch skill source plus install.py
 ├ examples/                    mock content for development and verification (not a real subject)
 ├ tools/                       setup.py; serve_host.py + start_web.ps1 + webhost/ (generic host page: one page per web subject, views from its content/app.json, relative URLs);
-│                              hostfiles.py (what a host serves, shared); gateway/ (remote access: login, /<base>/<slug>/ prefix, API proxy, one ai_server per subject); tests/
+│                              hostfiles.py (what a host serves, shared); gateway/ (remote access: login, /<base>/<slug>/ prefix, boot page, API proxy, one ai_server per subject); tests/
 ├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob, notebook, compose, quiz, roadmap), src/ui (shared tab layout), src/grade (engine grader port), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
@@ -304,6 +304,13 @@ to start without one and rejects every other header name.
   are replaced unless marked `text`. 568 web tests and 655 python tests green (measured 2026-10-18).
   Run: `python tools/gateway/gateway.py --config <file> --set-password`, then `python tools/gateway/gateway.py --config <file>`
   as the user logged in to the `claude` CLI.
+- Remote load time (2026-10-18). Over the tunnel each request took 1.1 to 1.9 s (routed through Cloudflare LAX), so the
+  first paint was bounded by sequential round trips. Independent reads now go together (`Promise.all`), the state
+  adapter coalesces reads issued in one task into `POST /state/_batch`, the gateway inlines app.json, content files,
+  runtime config and a `/state/_snapshot` into the page (GW-18), and versioned static files are browser-cached and
+  gzip-compressed (GW-17). The gateway binds its port exclusively and holds its `ai_server`s in a kill-on-close job
+  object, so neither a second instance nor a killed gateway leaves processes behind (measured: both happened).
+  571 web tests and 666 python tests green.
 - Pending: live Discord verification (needs the user prerequisites: bot app, token, server), the
   conversation compaction and long-term memory that the stored per-day records exist to feed, and a
   delete tombstone in `web/src/storage/buffered.ts` — with the server unreachable a removed record is

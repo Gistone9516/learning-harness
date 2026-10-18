@@ -51,6 +51,7 @@ class Config:
     title: str
     subjects: tuple[Subject, ...]
     auth: Auth
+    extra_path: tuple[str, ...] = ()      # GW-6: put in front of PATH (the claude CLI's folder)
     raw: dict = field(repr=False, default_factory=dict)
 
     def subject(self, slug: str) -> Subject | None:
@@ -135,8 +136,11 @@ def parse(raw: dict, path: Path) -> Config:
     if not subjects:
         raise ConfigError("no subjects configured")
 
+    extra = raw.get("extraPath") or []
+    if not isinstance(extra, list) or not all(isinstance(x, str) for x in extra):
+        raise ConfigError("extraPath must be a list of folders")
     return Config(path=path, base_path=base, port=port, title=str(raw.get("title") or "Study"),
-                  subjects=tuple(subjects), auth=auth, raw=raw)
+                  subjects=tuple(subjects), auth=auth, extra_path=tuple(extra), raw=raw)
 
 
 def load(path: Path) -> Config:

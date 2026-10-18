@@ -12,7 +12,9 @@ import argparse
 import getpass
 import http.server
 import logging
+import os
 import signal
+import socket
 import sys
 import threading
 from pathlib import Path
@@ -27,6 +29,18 @@ import config  # noqa: E402
 from children import Supervisor  # noqa: E402
 
 KIT = HERE.parents[1]
+
+
+class ExclusiveServer(http.server.ThreadingHTTPServer):
+    """GW-1: the port is ours alone. socketserver marks it reusable, and on Windows that lets a second
+    gateway bind the same port beside the first, each then answering part of the traffic."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def set_password(path: Path) -> int:
@@ -70,12 +84,17 @@ def main() -> int:
         logging.error("kit bundle not built: %s (run npm run build in %s)", kit_dist, KIT / "web")
         return 2
 
+    if cfg.extra_path:
+        os.environ["PATH"] = os.pathsep.join([*cfg.extra_path, os.environ.get("PATH", "")])
+    handler = app.make_handler(cfg, kit_dist, auth.Throttle())
+    try:
+        httpd = ExclusiveServer(("127.0.0.1", cfg.port), handler)
+    except OSError as e:
+        logging.error("port %d is taken (%s); is another gateway running?", cfg.port, e)
+        return 3
     supervisor = Supervisor(cfg.subjects, log_dir)
     if not args.no_children:
         supervisor.start()
-    handler = app.make_handler(cfg, kit_dist, auth.Throttle())
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", cfg.port), handler)
-    httpd.daemon_threads = True
     logging.info("gateway on http://127.0.0.1:%d%s/  (%d subjects)", cfg.port, cfg.base_path, len(cfg.subjects))
 
     def shutdown(*_):

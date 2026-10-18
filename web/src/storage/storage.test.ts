@@ -47,6 +47,17 @@ function fakeServer() {
       json: async () => payload,
     }) as Response;
 
+    if (path === "_batch") {
+      const results = [];
+      for (const r of body.reads) {
+        const sub = r.doc !== undefined ? `doc/${r.doc}` : r.list !== undefined ? r.list : `${r.get[0]}/${r.get[1]}`;
+        const res = await f(`${String(url).split("/state/")[0]}/state/${sub}`, { method: "GET" });
+        calls.pop();
+        const out = await res.json();
+        results.push(res.ok ? (out.doc ?? out.index ?? out.record ?? null) : null);
+      }
+      return json(200, { ok: true, results });
+    }
     if (path.startsWith("doc/")) {
       const name = path.slice(4);
       if (method === "GET") return json(200, { ok: true, doc: docs.get(name) ?? null });
@@ -233,3 +244,57 @@ describe("buffered decorator", () => {
     expect(onOnlineChange).toHaveBeenLastCalledWith(true);
   });
 });
+
+// ── read coalescing and the boot snapshot (web-contract §5) ─────────────────────
+
+describe("api adapter round trips", () => {
+  it("reads issued together go out as one _batch; a lone read stays plain", async () => {
+    const server = fakeServer();
+    const port = createApiStorage({ baseUrl: "http://x", token: "t", fetchImpl: server.fetchImpl });
+    await port.put("terms", rec("ebs"));
+    await port.put("terms", rec("efs"));
+    await port.putDoc("outline", { areas: [] });
+    server.calls.length = 0;
+    const [a, b, missing, doc] = await Promise.all([
+      port.get("terms", "ebs"), port.get("terms", "efs"), port.get("terms", "nope"), port.getDoc("outline"),
+    ]);
+    expect(server.calls).toEqual(["POST http://x/state/_batch"]);
+    expect([a?.id, b?.id, missing, doc]).toEqual(["ebs", "efs", null, { areas: [] }]);
+    server.calls.length = 0;
+    expect((await port.get("terms", "ebs"))?.id).toBe("ebs");
+    expect(server.calls).toEqual(["GET http://x/state/terms/ebs"]);
+  });
+
+  it("falls back to single reads when the server has no _batch", async () => {
+    const server = fakeServer();
+    const plain = (async (url: any, init?: any) => {
+      if (String(url).endsWith("/state/_batch")) return { ok: false, status: 404, json: async () => ({ ok: false }) } as Response;
+      return server.fetchImpl(url, init);
+    }) as unknown as typeof fetch;
+    const port = createApiStorage({ baseUrl: "http://x", token: "t", fetchImpl: plain });
+    await port.put("terms", rec("ebs"));
+    const [a, b] = await Promise.all([port.get("terms", "ebs"), port.get("terms", "nope")]);
+    expect([a?.id, b]).toEqual(["ebs", null]);
+  });
+
+  it("the snapshot answers docs and listings until a write drops them", async () => {
+    const server = fakeServer();
+    const snapshot = {
+      docs: { outline: { areas: ["snap"] } },
+      indexes: { terms: { entries: [{ id: "ebs", kind: "term", created_at: 1, updated_at: 1, summary: {} }] } },
+    };
+    const port = createApiStorage({ baseUrl: "http://x", token: "t", fetchImpl: server.fetchImpl, snapshot });
+    expect(await port.getDoc("outline")).toEqual({ areas: ["snap"] });
+    expect(await port.getDoc("notebook-meta")).toBeNull();
+    expect((await port.list("terms")).map((e) => e.id)).toEqual(["ebs"]);
+    expect(await port.list("threads")).toEqual([]);
+    expect(server.calls).toEqual([]);
+    await port.putDoc("outline", { areas: ["new"] });
+    await port.put("terms", rec("efs"));
+    server.calls.length = 0;
+    expect(await port.getDoc("outline")).toEqual({ areas: ["new"] });
+    expect((await port.list("terms")).map((e) => e.id)).toEqual(["efs"]);
+    expect(server.calls).toEqual(["GET http://x/state/doc/outline", "GET http://x/state/terms"]);
+  });
+});
+
