@@ -232,7 +232,7 @@ _SCHEMA_RULES = r"""[출력 규칙 — 반드시 엄수]
 - 각 원소는 아래 예시와 똑같은 형태여야 한다:
 [
   {"type":"func","grade_mode":"exact","front":{"prompt":"다음 코드의 출력은?","code":"s='abcd'\nprint(s[::-1])","lang":"python"},"answer_spec":{"normalize":["nfkc","trim","collapse_space"],"accepted":["dcba"]}},
-  {"type":"judge","grade_mode":"exact","front":{"scenario":"슬라이싱 s[::-1]의 의미로 옳은 것은?","options":["역순 복사","앞 절반","깊은 복사","정렬"]},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"accepted":["역순 복사"]}},
+  {"type":"judge","grade_mode":"exact","front":{"scenario":"슬라이싱 s[::-1]의 의미로 옳은 것은?","options":["앞 절반","깊은 복사","역순 복사","정렬"]},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"accepted":["역순 복사"]}},
   {"type":"cloze","grade_mode":"cloze","front":{"text":"리스트 얕은 복사는 a[{{0}}] 로 만든다"},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"blanks":[[":"]]}},
   {"type":"proc","grade_mode":"keyword","front":{"prompt":"얕은 복사와 깊은 복사의 차이를 설명하라"},"answer_spec":{"normalize":["nfkc","trim","collapse_space","lower"],"required_keywords":[["참조","주소"],["독립","별도"]]}}
 ]
@@ -240,7 +240,7 @@ _SCHEMA_RULES = r"""[출력 규칙 — 반드시 엄수]
 - 코드 문제의 정답은 프로그램 표준출력이다. accepted 에 예상 출력을 한 줄(공백 구분)로 적되, 서버가 실제 실행결과로 최종 확정한다.
 - SQL 은 front.lang="sql", front.code 가 마지막에 정확히 하나의 SELECT 로 끝난다.
 - Java 는 public class 하나에 main 을 둔다. C 는 stdio 로 결정적 출력.
-- 객관식(judge)은 front.options 4개, accepted 에 정답 보기 문자열 그대로.
+- 객관식(judge)은 front.options 4개, accepted 에 정답 보기 문자열 그대로. 정답 보기의 위치는 문항마다 달리한다.
 - 빈칸(cloze)은 front.text 에 {{0}}, {{1}} 표기와 blanks 를 맞춘다.
 - 가독성을 위해 front.prompt/front.text 안에서 학습 화면 컴포넌트 마크다운을 쓸 수 있다: 소제목 '## 제목', 목록 '- 항목', 표 '| a | b |', 강조 박스 ':::핵심' 또는 ':::주의' 로 열고 ':::' 로 닫기, 인라인 코드 `기호`, 문장 강조 ==중요==. 보기나 예시 데이터(표·목록)는 이 컴포넌트로 정리해 자기완결형으로 보여준다.
 - 개념 범위를 벗어나지 않는다."""

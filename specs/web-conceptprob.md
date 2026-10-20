@@ -2,6 +2,7 @@
 
 > buildflow ② per-folder contract. **Conforms to `web-contract.md` (Web SoT) and the core SoT; on conflict the Web SoT, then the core SoT, win.**
 > Scope: `web/parts/conceptprob/` — study a concept (long-form reading) then solve its linked problems. Concepts are AI-generated; problems are graded deterministically (token 0). Plan: `docs/기획_개념문제킷.md`. Subsumes the deferred long-form reading.
+> Rules: CP-1..CP-3 (3), in §10.
 
 ---
 
@@ -131,3 +132,13 @@ Add the matching `web/parts/index.json` row (`ai: true` — AI is supported but 
 - `pre_baked` (jsdom) — mount with injected `concepts` + `session:null`: the concept loads, its Markdown body renders (heading/table/code), the title anchors `concept_id`, deepen is hidden, each `grade_mode` grades, and the wrong-answer retrace resolves — all with **zero AI**. Locks the offline / token-0 invariant.
 - `subject_agnostic` — no subject literal in `parts/conceptprob/`.
 - Generation quality is live-smoke only (real model), not a unit gate.
+
+---
+
+## 10. Behaviour rules
+
+| ID | Rule | Source | Why | Test |
+|---|---|---|---|---|
+| CP-1 | A `$$ … $$` block and an inline `\( … \)` are typeset by KaTeX as MathML (`web/src/doc/math.ts`), loaded lazily on the first formula. Until it loads, or if it fails, the raw TeX stays visible. A single `$` is never math. | User report 2026-10-20: every formula showed raw TeX, because `DOC_DIALECT` asks authors for `$$` while the renderer only printed the text. | Single `$` stays literal because cost content writes prices as `$0.0116`. MathML needs no font or CSS files, so it survives offline use and the fixed `assets/index[extname]` names in `vite.config.ts`, which would collide for KaTeX's font files. Lazy, because remote first paint is bound by round trips and most pages hold no formula. | `math.test.ts` |
+| CP-2 | Judge options are shown in a stable order derived from `card_id` (`optionOrder`, `web/src/grade/order.ts`), never in stored order. Grading still compares option text. | Measured 2026-10-20: 16 of 16 stored cloudrobot judge items had the answer as the first option. | The generator's few-shot puts the answer first and models follow it; a display-side order fixes stored items without regenerating them. Derived from the id, so a reload or resumed set shows the same order. | `order.test.ts`; dom "judge options follow optionOrder" |
+| CP-3 | The buttons offered for one text selection live in one positioned group (`.lh-cp-askgroup`); only the group is positioned, never a button inside it. | User report 2026-10-20: "AI 질문" and the `askElsewhere` button overlapped. | Each button was centred and offset by a guessed width; the overlap held whenever the second label was wider than the first by 12px or more. One group makes overlap impossible instead of computed. | dom "selection buttons share one group" |

@@ -287,8 +287,10 @@ body {
 .lh-cp-spoiler-body { padding: 12px 14px; font-size: 14px; line-height: 1.65; color: var(--lh-ink-soft); }
 .lh-cp-spoiler-body > * + * { margin-top: 8px; }
 
-/* Formula card — centered monospace (cost estimation, subnetting, HRN, etc.). */
+/* Formula card — centered; raw TeX shows in monospace until KaTeX typesets it as MathML (CP-1). */
 .lh-cp-formula { margin: 4px 0; padding: 13px 14px; text-align: center; font-family: var(--lh-font-mono); font-size: 14px; color: var(--lh-code-ink); background: var(--lh-code-bg); border: 1px solid var(--lh-code-border); border-radius: 10px; overflow-x: auto; white-space: pre-wrap; }
+.lh-cp-formula.lh-math--done { font-family: inherit; font-size: 17px; white-space: normal; }
+.lh-math--done math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", math; }
 
 /* Inline highlight ==mark==. */
 .lh-cp-mark { background: var(--lh-amber-soft); color: var(--lh-ink); padding: 0 3px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
@@ -427,18 +429,22 @@ body {
 #app .lh-cp-ai-input { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px; border: 1.5px solid var(--lh-line-strong); border-radius: 10px; font-size: 14px; line-height: 1.5; background: var(--lh-surface); }
 #app .lh-cp-ai-send { flex-shrink: 0; padding: 10px 16px; border-radius: 10px; }
 
-/* Selection popup: "AI 질문" button above a drag-selection. */
-#app .lh-cp-askbtn { position: fixed; z-index: 60; padding: 7px 13px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 20px rgba(20,30,50,0.20); }
+/* Selection popup (CP-3): the buttons for one drag-selection sit in one group; only the group is
+   positioned, and the tail lives on the group so two buttons never carry two arrows. */
+#app .lh-cp-askgroup { position: fixed; z-index: 60; display: flex; gap: 6px; }
+#app .lh-cp-askgroup::after { content: ""; position: absolute; left: var(--lh-tail-x, 50%); bottom: -9px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--lh-primary); }
+#app .lh-cp-askgroup--below::after { bottom: auto; top: -9px; border-top-color: transparent; border-bottom-color: var(--lh-primary); }
+#app .lh-cp-askgroup--else-only::after { border-top-color: var(--lh-primary-line); }
+#app .lh-cp-askgroup--else-only.lh-cp-askgroup--below::after { border-top-color: transparent; border-bottom-color: var(--lh-primary-line); }
+#app .lh-cp-askbtn { padding: 7px 13px; background: var(--lh-primary); color: var(--lh-on-primary); border: none; border-radius: 9px; font-size: 12.5px; font-weight: 700; white-space: nowrap; cursor: pointer; box-shadow: 0 6px 20px rgba(20,30,50,0.20); }
 #app .lh-cp-askbtn:hover { background: var(--lh-primary-strong); }
-#app .lh-cp-askbtn::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--lh-primary); }
 /* Second selection target (props.askElsewhere): outlined so it never reads as the same action. */
 #app .lh-cp-askbtn--else { background: var(--lh-surface); color: var(--lh-primary-strong); border: 1px solid var(--lh-primary-line); }
 #app .lh-cp-askbtn--else:hover { background: var(--lh-primary-soft); }
-#app .lh-cp-askbtn--else::after { display: none; }
-/* "Sub 질문" button — green to distinguish it from the blue "AI 질문". */
-#app .lh-cp-subaskbtn { background: var(--lh-ok); }
+/* "Sub 질문" button — standalone in the AI panel, so it positions itself and keeps its own tail; green to tell it from "AI 질문". */
+#app .lh-cp-subaskbtn { position: fixed; z-index: 60; background: var(--lh-ok); }
 #app .lh-cp-subaskbtn:hover { background: var(--lh-ok-strong); }
-#app .lh-cp-subaskbtn::after { border-top-color: var(--lh-ok); }
+#app .lh-cp-subaskbtn::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--lh-ok); }
 
 /* Sub AI panel — floating over the body on the left; minimize collapses it to its header. */
 .lh-cp-subai { position: fixed; left: 20px; bottom: 20px; z-index: 45; width: 400px; max-width: calc(100vw - 40px); height: 66vh; max-height: 620px; display: none; flex-direction: column; background: var(--lh-surface); border: 1px solid var(--lh-line-strong); border-radius: 16px; box-shadow: var(--lh-shadow); overflow: hidden; }

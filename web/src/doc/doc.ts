@@ -9,6 +9,7 @@
 // all stayed behind in the part that owns them.
 
 import { highlightCode } from "../highlight/highlight";
+import { MATH_CLASS, typesetMath } from "./math";
 
 export interface Figure { caption?: string; svg: string; anchor?: string }  // anchor = the step title this figure follows ("" / "END" => after all steps)
 
@@ -53,9 +54,10 @@ export function stripFences(text: string): string {
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-/** Inline markdown: **bold**, `code`. Operates on already-escaped text. */
+/** Inline markdown: \( TeX \), **bold**, `code`, ==mark==. Operates on already-escaped text. A single $ stays literal (CP-1). */
 export function inlineMd(escaped: string): string {
   return escaped
+    .replace(/\\\((.+?)\\\)/g, `<span class="${MATH_CLASS}">$1</span>`)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/`([^`]+)`/g, '<code class="lh-cp-icode">$1</code>')
     .replace(/==([^=]+)==/g, '<mark class="lh-cp-mark">$1</mark>');
@@ -215,8 +217,13 @@ export function parseBody(body: string, defaultLang = ""): { summary: string; st
   return { summary: summaryParas.join(" "), steps: steps.filter((s) => s.title || s.blocks.length) };
 }
 
-/** Render one content block (paragraph / terms / table / points). */
+/** Render one content block (paragraph / terms / table / points). Formulas in it are typeset once KaTeX loads. */
 export function renderBlock(blk: Block): HTMLElement {
+  const node = renderBlockInner(blk);
+  if (node.classList.contains(MATH_CLASS) || node.querySelector("." + MATH_CLASS)) void typesetMath(node);
+  return node;
+}
+function renderBlockInner(blk: Block): HTMLElement {
   if (blk.kind === "p") { const d = el("div", "lh-cp-step-body"); d.innerHTML = blk.html; return d; }
   if (blk.kind === "head") { return el("div", "lh-cp-ai-h", blk.text); }
   if (blk.kind === "code") {
@@ -249,8 +256,9 @@ export function renderBlock(blk: Block): HTMLElement {
     return d;
   }
   if (blk.kind === "formula") {
-    const box = el("div", "lh-cp-formula");
-    box.textContent = blk.code;
+    const box = el("div", "lh-cp-formula " + MATH_CLASS);
+    box.dataset["display"] = "1";
+    box.textContent = blk.code;   // raw TeX until typesetMath replaces it
     return box;
   }
   if (blk.kind === "subsec") {
@@ -467,7 +475,7 @@ export const DOC_DIALECT: string = [
   "- 강조 박스: 새 줄에 ':::핵심' 또는 ':::주의' ':::팁' ':::예시' 로 열고, 다음 줄부터 내용을 쓰고, 마지막에 ':::' 한 줄로 닫는다",
   "- 인용이나 강조 문장: '> 문장'",
   "- 접어 두기: 새 줄에 ':::정답' 으로 열고 내용을 쓴 뒤 ':::' 로 닫으면 눌러서 펼치는 접이식이 된다",
-  "- 공식/수식: '$$' 한 줄로 열고 수식을 쓴 뒤 '$$' 한 줄로 닫는다(또는 '$$ 수식 $$' 한 줄)",
+  "- 공식/수식: LaTeX로 쓴다. 따로 세울 식은 '$$' 한 줄로 열고 수식을 쓴 뒤 '$$' 한 줄로 닫는다(또는 '$$ 수식 $$' 한 줄). 문장 안의 짧은 식은 '\\( 수식 \\)' 로 감싼다. '$' 하나는 가격 표기로 남으므로 수식에 쓰지 않는다",
   "- 코드: 삼중 백틱과 언어명으로 감싸면 구문 색상이 입혀진다",
   "- 문장 안 강조: '==중요==' (형광펜)",
   "원시 HTML 태그(<details>, <summary>, <br> 등)와 감싸는 중괄호는 쓰지 말고 위 표기만 사용한다.",

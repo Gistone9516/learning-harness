@@ -5,6 +5,7 @@
 
 import { el, renderAiBody } from "../../src/doc/doc";
 import { gradeProblem } from "../conceptprob/conceptprob";
+import { optionOrder } from "../../src/grade/order";
 import { markDeleted, parseTranslation, setFlag, stemOf, TRANSLATE_CONTRACT, validKo, type AnswerState, type FrontKo, type QuizProblem } from "./model";
 import type { QuizCtx } from "./quiz";
 
@@ -43,6 +44,8 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
   let lang: "primary" | "secondary" = "primary";
   let ko: FrontKo | null = validKo(p, p.front_ko) ? p.front_ko : null;
   const enOptions = Array.isArray(p.front["options"]) ? (p.front["options"] as unknown[]).map((x) => String(x)) : null;
+  // Q-13: button at shown position d holds stored option order[d]; `chosen` stays a stored index.
+  const order = enOptions ? optionOrder(p.card_id, enOptions.length) : [];
   let chosen = -1;
   if (o.answer && enOptions && typeof o.answer.value === "string") chosen = enOptions.indexOf(o.answer.value);
 
@@ -89,7 +92,7 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
     else if (hasMd(s)) stem.appendChild(renderAiBody(s));
     else stem.textContent = s;
     const opts = lang === "secondary" && ko?.options ? ko.options : enOptions;
-    optBtns.forEach((b, i) => { b.querySelector(".lh-qz-opt-text")!.textContent = rw(opts?.[i] ?? ""); });
+    optBtns.forEach((b, d) => { b.querySelector(".lh-qz-opt-text")!.textContent = rw(opts?.[order[d]] ?? ""); });
     segA.classList.toggle("lh-qz-seg--on", lang === "primary");
     segB.classList.toggle("lh-qz-seg--on", lang === "secondary");
     segB.textContent = L.langSecondary;
@@ -102,12 +105,12 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
   // ── answer area ──
   if (p.type === "judge" && enOptions) {
     const list = el("div", "lh-qz-options");
-    enOptions.forEach((_, i) => {
+    order.forEach((_, d) => {
       const b = el("button", "lh-qz-opt");
       b.type = "button";
-      b.appendChild(el("span", "lh-qz-opt-glyph", GLYPHS[i] ?? String(i + 1)));
+      b.appendChild(el("span", "lh-qz-opt-glyph", GLYPHS[d] ?? String(d + 1)));
       b.appendChild(el("span", "lh-qz-opt-text"));
-      b.addEventListener("click", () => choose(i));
+      b.addEventListener("click", () => choose(d));
       list.appendChild(b);
       optBtns.push(b);
     });
@@ -133,11 +136,12 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
   for (const inp of inputs) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
 
   function paintChoice(): void {
-    optBtns.forEach((b, i) => b.classList.toggle("lh-qz-opt--sel", i === chosen));
+    optBtns.forEach((b, d) => b.classList.toggle("lh-qz-opt--sel", order[d] === chosen));
   }
-  function choose(i: number): void {
-    if (o.locked || i < 0 || i >= optBtns.length) return;
-    chosen = i; paintChoice(); nudge.textContent = "";
+  /** `d` is a shown position (click, 1-9 key); it is stored as the option's stored index. */
+  function choose(d: number): void {
+    if (o.locked || d < 0 || d >= optBtns.length) return;
+    chosen = order[d]; paintChoice(); nudge.textContent = "";
   }
   function value(): string | string[] {
     if (optBtns.length) return chosen >= 0 && enOptions ? enOptions[chosen] : "";   // Q-3: always the primary option
@@ -198,10 +202,10 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
     result.appendChild(el("div", "lh-qz-verdict lh-qz-verdict--" + (ok ? "ok" : "bad"), ok ? L.verdictRight : L.verdictWrong));
     if (optBtns.length && enOptions) {
       const acc = (p.answer_spec.accepted ?? []).map((a) => a.trim().toLowerCase());
-      optBtns.forEach((b, i) => {
+      optBtns.forEach((b, d) => {
         b.classList.remove("lh-qz-opt--sel");
-        if (acc.includes(enOptions[i].trim().toLowerCase())) b.classList.add("lh-qz-opt--right");
-        else if (i === chosen) b.classList.add("lh-qz-opt--wrong");
+        if (acc.includes(enOptions[order[d]].trim().toLowerCase())) b.classList.add("lh-qz-opt--right");
+        else if (order[d] === chosen) b.classList.add("lh-qz-opt--wrong");
       });
     }
     const ans = el("div", "lh-qz-answer");
@@ -220,7 +224,7 @@ export function renderQuizCard(ctx: QuizCtx, p: QuizProblem, o: CardOpts): CardH
   const ask = ctx.props.askElsewhere;
   if (ask) {
     const b = el("button", "lh-nb-btn", L.ask); b.type = "button";
-    b.addEventListener("click", () => ask.onAsk(rw(stemOf(p.front as FrontKo)) + (enOptions ? "\n" + enOptions.map((x, i) => `${GLYPHS[i]}. ${rw(x)}`).join("\n") : "")));
+    b.addEventListener("click", () => ask.onAsk(rw(stemOf(p.front as FrontKo)) + (enOptions ? "\n" + order.map((i, d) => `${GLYPHS[d]}. ${rw(enOptions[i])}`).join("\n") : "")));
     actions.appendChild(b);
   }
   const del = el("button", "lh-nb-btn lh-nb-btn--quiet", L.deleteProblem); del.type = "button";

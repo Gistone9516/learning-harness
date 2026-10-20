@@ -147,7 +147,7 @@ learning-harness/              the general-purpose framework repo (no real subje
 ├ examples/                    mock content for development and verification (not a real subject)
 ├ tools/                       setup.py; serve_host.py + start_web.ps1 + webhost/ (generic host page: one page per web subject, views from its content/app.json, relative URLs);
 │                              hostfiles.py (what a host serves, shared); gateway/ (remote access: login, /<base>/<slug>/ prefix, boot page, API proxy, one ai_server per subject); tests/
-├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob, notebook, compose, quiz, roadmap), src/ui (shared tab layout), src/grade (engine grader port), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
+├ web/                         Vite + TS parts kit (subject-agnostic): parts/ (sheet, codeproj, dashboard, conceptprob, notebook, compose, quiz, roadmap), src/ui (shared tab layout), src/grade (engine grader port, judge option order), src/doc (concept-document dialect renderer, KaTeX formulas loaded on first use), src/ai (ai_server client), src/storage (record store port + offline buffer), src/highlight (dependency-free syntax highlighter), src/flow (study and workspace flows), src/styles (design tokens), USAGE.md (AI operating manual); web AI routes through bot/ai_server.py
 └ _archive_v4/                 the old static-HTML framework (porting and reference source)
 ```
 
@@ -251,7 +251,8 @@ to start without one and rejects every other header name.
   `bot/ai_server.py` (gated local HTTP, proven over a public tunnel) bridges the web client to `claude -p`
   with no Discord dependency. **AI is optional**: the AI parts also run from **pre-baked verified content**
   injected by the instance (`concepts` / `project`) — mounting with no `ai_server` and grading fully
-  offline (token 0); concept bodies render Markdown (headings, tables, code) via a hand-rolled renderer.
+  offline (token 0); concept bodies render Markdown (headings, tables, code) via a hand-rolled renderer, and
+  `$$` / `\( \)` formulas are typeset as MathML by a bundled KaTeX chunk that loads only on a page with a formula (CP-1).
 - Record store and study flows: `bot/state_store.py` plus the `/state` API on `ai_server` give the kit a
   record-per-file store with derived indexes (`_verify` drift check, `_rebuild` full rescan); `web/src/storage`
   is its browser port with an offline buffer (localStorage is a buffer, never the source of truth), and

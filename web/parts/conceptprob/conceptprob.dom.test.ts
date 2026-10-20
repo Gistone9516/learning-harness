@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mountConceptprob, parseBody, coerceMemorize, coerceFigures, type GeneratedConcept, type AreaDef, type ConceptSeed } from "./conceptprob";
 import type { AiClient } from "../../src/ai/client";
+import { optionOrder } from "../../src/grade/order";
 
 const CONCEPT: GeneratedConcept = {
   area: "fundamentals",
@@ -282,6 +283,48 @@ describe("conceptprob (canonical design) offline mount", () => {
     } finally {
       (window as unknown as { getSelection: typeof orig }).getSelection = orig;
     }
+  });
+
+  it("selection buttons share one group (CP-3)", async () => {
+    localStorage.clear();
+    const asked: string[] = [];
+    const el = document.createElement("div"); document.body.appendChild(el);
+    mountConceptprob(el, { session: null, areas: AREAS, conceptOutline: OUTLINE, concepts: { variables: CONCEPT }, courseTitle: "데모", askElsewhere: { label: "질문 노트에 묻기", onAsk: (t: string) => asked.push(t) } });
+    await new Promise((r) => setTimeout(r, 0));
+    const main = el.querySelector(".lh-cp-main:not(.lh-cp-probmain)") as HTMLElement;
+    const orig = window.getSelection;
+    (window as unknown as { getSelection: () => unknown }).getSelection = () => ({
+      rangeCount: 1, anchorNode: main, toString: () => "형 변환",
+      getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 200, top: 300, width: 60, height: 14, bottom: 314, right: 260 }) }),
+    });
+    try {
+      main.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      const group = el.querySelector(".lh-cp-askgroup") as HTMLElement;
+      expect(group.style.display).not.toBe("none");
+      const btns = Array.from(group.querySelectorAll<HTMLElement>(".lh-cp-askbtn"));
+      expect(btns.map((b) => b.textContent)).toEqual(["AI 질문", "질문 노트에 묻기"]);
+      for (const b of btns) { expect(b.style.left).toBe(""); expect(b.style.top).toBe(""); }   // only the group is placed
+      group.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));                       // the gap does not dismiss it
+      expect(group.style.display).not.toBe("none");
+      btns[1].click();
+      expect(asked).toEqual(["형 변환"]);
+      expect(group.style.display).toBe("none");
+    } finally {
+      (window as unknown as { getSelection: typeof orig }).getSelection = orig;
+    }
+  });
+
+  it("judge options follow optionOrder, and grading still goes by text (CP-2)", async () => {
+    localStorage.clear();
+    const el = document.createElement("div"); document.body.appendChild(el);
+    mountConceptprob(el, { session: null, areas: AREAS, conceptOutline: OUTLINE, concepts: { variables: CONCEPT }, courseTitle: "데모" });
+    await new Promise((r) => setTimeout(r, 0));
+    const card = el.querySelector<HTMLElement>('[data-card-id="v-judge"]')!;
+    const stored = CONCEPT.problems[1].front["options"] as string[];
+    const shown = Array.from(card.querySelectorAll(".lh-cp-choice-text")).map((x) => x.textContent);
+    expect(shown).toEqual(optionOrder("v-judge", 4).map((i) => stored[i]));
+    expect(gradeCard(el, "v-judge", { judge: "B. 42" })).toBe("correct");
+    expect(card.querySelector(".lh-cp-choice--correct .lh-cp-choice-text")?.textContent).toBe("B. 42");
   });
 
   it("restores the last concept after a refresh (fresh re-mount)", async () => {

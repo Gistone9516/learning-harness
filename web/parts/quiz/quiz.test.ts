@@ -7,6 +7,7 @@ import { mountQuiz } from "./quiz";
 import type { GeneratedConcept } from "../conceptprob/conceptprob";
 import type { AiClient, AiRequest, GenProblemsRequest } from "../../src/ai/client";
 import { memoryStorage } from "../../tests/memoryStorage";
+import { optionOrder } from "../../src/grade/order";
 
 const OUTLINE = { areas: [{ key: "p04", label: "04 Storage" }], conceptOutline: { p04: [{ concept_id: "p04-ebs", title: "EBS" }] } };
 const judge = (id: string, ok = "EBS") => ({
@@ -106,6 +107,21 @@ describe("quiz part", () => {
     await settle();
     expect(root.querySelector(".lh-qz-verdict")!.textContent).toBe("✓ 맞았습니다");
     expect(root.querySelector(".lh-qz-stem")!.textContent).toBe("블록 스토리지는?");   // the chosen language survives the repaint
+  });
+
+  it("options follow optionOrder in both languages (Q-13)", async () => {
+    const ai = scriptedAi(() => JSON.stringify({ scenario: "블록 스토리지는?", options: ["가", "나", "다", "라"] }));
+    mountQuiz(root, { storage, aiClient: ai, outline: { doc: "outline" }, subjectKey: "s", translate: { system: "TR" } });
+    await settle();
+    click(root, ".lh-qz-start");
+    await settle();
+    const card = root.querySelector<HTMLElement>(".lh-qz-card")!;
+    const order = optionOrder(card.dataset["cardId"]!, 4);
+    const shown = () => Array.from(card.querySelectorAll(".lh-qz-opt-text")).map((x) => x.textContent);
+    expect(shown()).toEqual(order.map((i) => ["EBS", "EFS", "S3", "Glacier"][i]));
+    click(root, ".lh-qz-lang");
+    await settle();
+    expect(shown()).toEqual(order.map((i) => ["가", "나", "다", "라"][i]));
   });
 
   it("langToggle false hides the switch and ignores T (Q-4)", async () => {

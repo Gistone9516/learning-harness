@@ -9,6 +9,7 @@
 
 import { AiSession, type AiClient, type AiEffort, type AiResponse } from "../../src/ai/client";
 import { score, type AnswerSpec, type ScoreInput } from "../../src/grade/grade";
+import { optionOrder } from "../../src/grade/order";
 import { highlightCode } from "./highlight";
 import {
   areaLang, blueLabel, el, escapeHtml, inlineMd, parseBody, parseDetails, parseFlatBlocks,
@@ -1063,15 +1064,18 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
   }
   backBtn.addEventListener("click", () => { backOrigin?.scrollIntoView?.({ behavior: "smooth", block: "center" }); });
 
+  // CP-3: every button offered for one selection sits in one group, and only the group is positioned.
+  const askGroup = el("div", "lh-cp-askgroup");
+  askGroup.style.display = "none";
+  container.appendChild(askGroup);
   const askBtn = el("button", "lh-cp-askbtn", "AI 질문");
-  askBtn.style.display = "none";
-  container.appendChild(askBtn);
+  askGroup.appendChild(askBtn);
   // Optional second target for a selection (props.askElsewhere): hands the text to another part,
   // e.g. a notebook that keeps the question. Offered on the concept page and the problem page.
   const elseBtn = props.askElsewhere ? el("button", "lh-cp-askbtn lh-cp-askbtn--else", props.askElsewhere.label) : null;
-  if (elseBtn) { elseBtn.style.display = "none"; container.appendChild(elseBtn); }
+  if (elseBtn) askGroup.appendChild(elseBtn);
   let pendingSel = "";
-  function hideAsk(): void { askBtn.style.display = "none"; if (elseBtn) elseBtn.style.display = "none"; pendingSel = ""; }
+  function hideAsk(): void { askGroup.style.display = "none"; pendingSel = ""; }
   function selectionRect(): { text: string; rect: DOMRect } | null {
     const sel = typeof window.getSelection === "function" ? window.getSelection() : null;
     const t = sel ? sel.toString().trim() : "";
@@ -1080,38 +1084,38 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     if (!rect || (!rect.width && !rect.height)) return null;
     return { text: t, rect };
   }
-  function place(btn: HTMLElement, rect: DOMRect, dx: number): number {
-    btn.style.display = "";
-    const bw = btn.offsetWidth || 88;
-    const bh = btn.offsetHeight || 34;
-    let left = rect.left + rect.width / 2 - bw / 2 + dx;
-    left = Math.max(8, Math.min(left, window.innerWidth - bw - 8));
-    let top = rect.top - bh - 8;
-    if (top < 8) top = rect.bottom + 8;
-    btn.style.left = left + "px";
-    btn.style.top = top + "px";
-    return bw;
+  /** Show the group with the given buttons and place it once: above the selection, or below it when there is no room. */
+  function showAsk(rect: DOMRect, withAsk: boolean): void {
+    askBtn.style.display = withAsk ? "" : "none";   // set every time: the problem page never offers "AI 질문"
+    askGroup.classList.toggle("lh-cp-askgroup--else-only", !withAsk);
+    askGroup.style.display = "";
+    const gw = askGroup.offsetWidth || 88;
+    const gh = askGroup.offsetHeight || 34;
+    const cx = rect.left + rect.width / 2;
+    const left = Math.max(8, Math.min(cx - gw / 2, window.innerWidth - gw - 8));
+    let top = rect.top - gh - 8;
+    const below = top < 8;
+    if (below) top = Math.min(rect.bottom + 8, window.innerHeight - gh - 8);
+    askGroup.classList.toggle("lh-cp-askgroup--below", below);
+    askGroup.style.left = left + "px";
+    askGroup.style.top = top + "px";
+    askGroup.style.setProperty("--lh-tail-x", Math.max(12, Math.min(cx - left, gw - 12)) + "px");   // the tail points at the selection even when clamped
   }
   main.addEventListener("mouseup", () => {
     const s = selectionRect();
     if (!s) { hideAsk(); return; }
     pendingSel = s.text;
-    const shift = elseBtn ? -((elseBtn.offsetWidth || 110) + 6) / 2 : 0;
-    const bw = place(askBtn, s.rect, shift);
-    if (elseBtn) place(elseBtn, s.rect, shift + bw + 6);
+    showAsk(s.rect, true);
   });
   probMain.addEventListener("mouseup", () => {
     if (!elseBtn) return;
     const s = selectionRect();
     if (!s) { hideAsk(); return; }
     pendingSel = s.text;
-    place(elseBtn, s.rect, 0);
+    showAsk(s.rect, false);
   });
-  if (elseBtn) {
-    elseBtn.addEventListener("mousedown", (e) => e.preventDefault());
-    elseBtn.addEventListener("click", () => { const t = pendingSel; hideAsk(); if (t) props.askElsewhere!.onAsk(t); });
-  }
-  askBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the text selection
+  askGroup.addEventListener("mousedown", (e) => e.preventDefault()); // keep the text selection, gap included
+  if (elseBtn) elseBtn.addEventListener("click", () => { const t = pendingSel; hideAsk(); if (t) props.askElsewhere!.onAsk(t); });
   askBtn.addEventListener("click", () => {
     if (!pendingSel) return;
     if (aiClient) aiInput.value = aiInput.value ? aiInput.value + " " + pendingSel : pendingSel;
@@ -1119,7 +1123,7 @@ export function mountConceptprob(container: HTMLElement, props: ConceptprobProps
     hideAsk();
     if (aiClient) aiInput.focus();
   });
-  document.addEventListener("mousedown", (e) => { if (e.target !== askBtn && e.target !== elseBtn) hideAsk(); if (e.target !== subAskBtn) hideSubAsk(); });
+  document.addEventListener("mousedown", (e) => { if (!askGroup.contains(e.target as Node)) hideAsk(); if (e.target !== subAskBtn) hideSubAsk(); });
   window.addEventListener("scroll", () => { hideAsk(); hideSubAsk(); }, true);
 
   function refreshProgress(): void {
@@ -1511,7 +1515,8 @@ function renderProblem(problem: ProblemDef, num: number, subjectKey: string, ctx
   verdict.style.display = "none";
 
   if (isJudge) {
-    const opts = front["options"] as string[];
+    const stored = front["options"] as string[];
+    const opts = optionOrder(problem.card_id, stored.length).map((i) => stored[i]);   // CP-2: never stored order
     const wrap = el("div", "lh-cp-choices");
     const glyphs = ["A", "B", "C", "D", "E", "F"];
     let chosen = -1;
@@ -1600,7 +1605,8 @@ function renderProblem(problem: ProblemDef, num: number, subjectKey: string, ctx
     verdict.textContent = result.verdict === "correct" ? "정답입니다" : "오답입니다";
     // mark choice states for judge
     if (isJudge) {
-      const opts = front["options"] as string[];
+      const stored = front["options"] as string[];
+      const opts = optionOrder(problem.card_id, stored.length).map((i) => stored[i]);   // same order as the buttons
       const norm = (s: string) => s.normalize("NFKC").replace(/\s+/g, " ").trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
       const acc = (problem.answer_spec.accepted ?? []).map((a) => norm(a));
       const buttons = Array.from(card.querySelectorAll<HTMLButtonElement>(".lh-cp-choice"));

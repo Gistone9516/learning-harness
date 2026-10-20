@@ -1,7 +1,7 @@
 # Web Module — Quiz (`web-quiz`)
 
 > Conforms to `web-contract.md` (Web SoT). Reads conceptprob's concept records; grades with conceptprob's
-> `gradeProblem` (the engine grader port). Scope: `web/parts/quiz/`. Rules: Q-1..Q-12 (12).
+> `gradeProblem` (the engine grader port). Scope: `web/parts/quiz/`. Rules: Q-1..Q-13 (13).
 
 ---
 
@@ -21,6 +21,7 @@
 | Q-10 | Keyboard: 1-9 choose an option, Enter submits / goes next, T toggles the language — ignored while a text field has focus. | Speed for repeated drills. | dom |
 | Q-11 | `askElsewhere` hands the primary-language stem (or a text selection) to the notebook. | Same bridge as N-15. | code |
 | Q-12 | Results show score, per-unit accuracy and the wrong items; "retry wrong" builds a practice set from them. | Close the loop on mistakes. | dom |
+| Q-13 | Judge options are shown in conceptprob's `optionOrder(card_id)` (CP-2), and a translated view applies the same permutation, so Q-3's position grading and the 1-9 keys (Q-10) address the shown order. The chosen answer is kept as the primary option text. | Generated items put the answer first (16 of 16 measured 2026-10-20); one permutation for both languages keeps the translation a view. | dom "options follow optionOrder in both languages" |
 
 ## 2. Records
 
